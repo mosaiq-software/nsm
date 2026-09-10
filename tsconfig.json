@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "target": "es2021",
+        "module": "ESNext",
+        "outDir": "./dist",
+        "baseUrl": "./",
+        "paths": {
+            "@/*": ["src/*"],
+            "@mosaiq/nsm-common": ["common/src/index.ts"],
+            "@mosaiq/nsm-common/*": ["common/src/*"]
+        },
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "moduleResolution": "node",
+        "resolveJsonModule": true,
+        "sourceMap": true
+    },
+    "include": ["src/**/*.ts", "common/**/*.ts"],
+    "exclude": ["node_modules", "dist"]
+}

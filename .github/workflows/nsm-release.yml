@@ -1,0 +1,24 @@
+name: NSM Self-Update
+
+# On a new version tag, notify the running cluster of the desired NSM version.
+# The leader records desiredNsmVersion in replicated state and drives a rolling upgrade
+# (followers first, leader last), each node self-updating to this git tag via systemd restart.
+on:
+    push:
+        tags:
+            - 'v*'
+
+jobs:
+    notify-cluster:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Announce desired version to the cluster
+              env:
+                  NSM_API_URL: ${{ secrets.NSM_API_URL }}
+                  NSM_CLUSTER_SECRET: ${{ secrets.NSM_CLUSTER_SECRET }}
+              run: |
+                  VERSION="${GITHUB_REF_NAME}"
+                  curl -fsS -X POST "$NSM_API_URL/cluster/self-update" \
+                    -H 'content-type: application/json' \
+                    -H "x-nsm-cluster-secret: $NSM_CLUSTER_SECRET" \
+                    -d "{\"version\":\"${VERSION#v}\",\"artifactRef\":\"${VERSION}\"}"

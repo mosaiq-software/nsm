@@ -1,0 +1,19 @@
+[Unit]
+Description=NSM daemon (Node Server Manager - raft node)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/nsm
+EnvironmentFile=/etc/nsm/nsm.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=3
+# nsmd runs on the host (no container) so it can drive docker/nginx/certbot directly.
+User=root
+KillSignalRestart=SIGTERM
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

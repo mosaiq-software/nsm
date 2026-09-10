@@ -1,0 +1,44 @@
+{
+    "name": "@mosaiq/nsm",
+    "version": "1.0.0",
+    "description": "Node Server Manager - single self-managing daemon (Raft cluster)",
+    "main": "src/index.ts",
+    "type": "module",
+    "scripts": {
+        "start": "tsx src/index.ts",
+        "dev": "tsx watch src/index.ts",
+        "lint": "eslint .",
+        "types": "tsc --noemit",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:cov": "vitest run --coverage"
+    },
+    "author": "",
+    "dependencies": {
+        "async-mutex": "^0.5.0",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^4.21.1",
+        "node-cron": "^4.2.1",
+        "query-string": "^9.1.1",
+        "sequelize": "^6.37.5",
+        "sqlite3": "^5.1.7",
+        "yaml": "^2.8.1"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.21.0",
+        "@types/cors": "^2.8.17",
+        "@types/express": "^5.0.0",
+        "@types/node": "^22.10.2",
+        "@types/supertest": "^6.0.2",
+        "@vitest/coverage-v8": "^2.1.9",
+        "eslint": "^9.21.0",
+        "globals": "^16.0.0",
+        "supertest": "^7.0.0",
+        "tsx": "^4.19.2",
+        "typescript": "^5.6.3",
+        "typescript-eslint": "^8.24.1",
+        "vite-tsconfig-paths": "^5.1.4",
+        "vitest": "^2.1.9"
+    }
+}

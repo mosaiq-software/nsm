@@ -1,0 +1,24 @@
+vrrp_script chk_nsm {
+    script "/usr/bin/curl -fsS http://127.0.0.1:{{API_PORT}}/healthz || exit 1"
+    interval 2
+    weight 20
+    fall 2
+    rise 2
+}
+vrrp_instance nsm_vip {
+    state BACKUP
+    interface {{IFACE}}
+    virtual_router_id {{VRRP_ROUTER_ID}}
+    priority {{BASE_PRIORITY}}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{VRRP_PASS}}
+    }
+    virtual_ipaddress {
+        {{VIP}}/24 dev {{IFACE}}
+    }
+    track_script {
+        chk_nsm
+    }
+}
