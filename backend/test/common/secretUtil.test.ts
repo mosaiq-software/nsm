@@ -16,6 +16,30 @@ describe('parseDotenv', () => {
         const secrets = parseDotenv(`K=${long}`, 'p1');
         expect(secrets[0].secretPlaceholder).toBe(`${'x'.repeat(60)}... (from .env)`);
     });
+
+    it('captures the comment lines directly above a variable and the inline trailing comment', () => {
+        const env = ['# first line', '# second line', 'FOO=bar # inline note'].join('\n');
+        const secrets = parseDotenv(env, 'p1');
+        expect(secrets[0].comment).toBe('first line\nsecond line\ninline note');
+    });
+
+    it('stops the comment block at a blank line', () => {
+        const env = ['# unrelated header', '', 'FOO=bar'].join('\n');
+        const secrets = parseDotenv(env, 'p1');
+        expect(secrets[0].comment).toBeUndefined();
+    });
+
+    it('stops the comment block at the prior variable', () => {
+        const env = ['FOO=1', '# belongs to BAZ', 'BAZ=2'].join('\n');
+        const secrets = parseDotenv(env, 'p1');
+        expect(secrets.find((s) => s.secretName === 'FOO')?.comment).toBeUndefined();
+        expect(secrets.find((s) => s.secretName === 'BAZ')?.comment).toBe('belongs to BAZ');
+    });
+
+    it('captures a lone inline comment when there are no comment lines above', () => {
+        const secrets = parseDotenv('FOO=bar # just inline', 'p1');
+        expect(secrets[0].comment).toBe('just inline');
+    });
 });
 
 describe('assembleDotenv', () => {

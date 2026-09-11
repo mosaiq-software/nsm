@@ -41,6 +41,8 @@ export const applyRepoData = async (repoData: RepoData, projectId: string): Prom
                 secretValue: currentSecret.secretValue,
                 variable: currentSecret.variable,
                 secretPlaceholder: uSec.secretPlaceholder,
+                // Refresh the .env comment from the latest scrape while keeping the user's value.
+                comment: uSec.comment,
             };
         }
         return uSec;

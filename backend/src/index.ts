@@ -7,6 +7,7 @@ import { ensureSelfRegistered } from './cluster/registry';
 import { startReconciler } from './reconcile/reconciler';
 import { startStatusReporting } from './cluster/statusGossip';
 import { ensureObservabilityStack } from './reconcile/observabilityStack';
+import { ensureSecretSchema } from './persistence/secretPersistence';
 
 const start = async () => {
     applyGithubFingerprints();
@@ -14,6 +15,7 @@ const start = async () => {
 
     // Source-of-truth store must be ready before we register or reconcile.
     await sequelize.sync();
+    await ensureSecretSchema();
 
     // Register this node (and its current IP) into the leader-hosted registry.
     await ensureSelfRegistered();

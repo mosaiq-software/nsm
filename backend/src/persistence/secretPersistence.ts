@@ -20,9 +20,19 @@ SecretModel.init(
             type: DataTypes.STRING,
         },
         variable: DataTypes.BOOLEAN,
+        comment: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
     },
     { sequelize }
 );
+
+// Additively add any columns missing from an existing secrets table (e.g. `comment` on older DBs).
+// Scoped to this model so it can't alter unrelated tables.
+export const ensureSecretSchema = async (): Promise<void> => {
+    await SecretModel.sync({ alter: true });
+};
 
 export const getAllSecretsForProjectModel = async (projectId: string): Promise<Secret[]> => {
     return (await SecretModel.findAll({ where: { projectId } }))?.map((sec) => sec.toJSON()) as Secret[];
@@ -38,6 +48,7 @@ export const updateSecretModel = async (projectId: string, secret: Secret) => {
             secretValue: secret.secretValue,
             secretPlaceholder: secret.secretPlaceholder,
             variable: secret.variable,
+            comment: secret.comment ?? null,
         },
         { where: { projectId, secretName: secret.secretName } }
     );
@@ -50,7 +61,7 @@ export const deleteAllSecretsForProjectEnvModel = async (projectId: string) => {
 export const upsertSecretModel = async (sec: Secret) => {
     const existing = await SecretModel.findOne({ where: { projectId: sec.projectId, secretName: sec.secretName } });
     if (existing) {
-        await existing.update({ secretValue: sec.secretValue, secretPlaceholder: sec.secretPlaceholder, variable: sec.variable });
+        await existing.update({ secretValue: sec.secretValue, secretPlaceholder: sec.secretPlaceholder, variable: sec.variable, comment: sec.comment ?? null });
     } else {
         await SecretModel.create({ ...sec });
     }

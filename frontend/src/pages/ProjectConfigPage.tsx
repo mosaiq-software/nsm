@@ -469,6 +469,11 @@ const EnvVarRow = (props: EnvVarRowProps) => {
                 <Title order={6} ta="right">
                     {secret.secretName}
                 </Title>
+                {secret.comment && (
+                    <Text size="xs" c="dimmed" ta="right" style={{ whiteSpace: 'pre-wrap' }}>
+                        {secret.comment}
+                    </Text>
+                )}
             </Grid.Col>
             <Grid.Col span={9}>
                 <Group w="100%">

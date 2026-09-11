@@ -28,6 +28,9 @@ export interface Secret {
     secretValue: string;
     secretPlaceholder: string;
     variable: boolean;
+    // Comments scraped from the project's .env file: the `#` lines directly above the variable plus
+    // any inline trailing `#` comment. Shown as a subtitle in the UI. Only set for .env-sourced vars.
+    comment?: string;
 }
 
 export interface ProjectInstanceHeader {

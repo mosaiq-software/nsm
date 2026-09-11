@@ -4,25 +4,57 @@ export const assembleDotenv = (secrets: Secret[]): string => {
     return secrets.map((sec) => `${sec.secretName}=${sec.secretValue}`).join('\n');
 };
 
+// Strip a leading run of `#` and one optional space from a comment line: "## note" -> "note".
+const stripCommentMarker = (line: string): string => line.replace(/^#+\s?/, '').trim();
+
 export const parseDotenv = (dotenv: string, projectId: string): Secret[] => {
     const lines = dotenv.split('\n');
     const secrets: Secret[] = [];
+    // Comment lines directly above the current variable, reset on a blank line or after a variable.
+    let pendingComments: string[] = [];
 
     for (const _line of lines) {
-        const line = _line.split('#')[0].trim();
-        if (!line.length) continue;
-        const [key, ...rest] = line.split('=');
-        if (!key?.length) continue;
-        if (key?.trim().length) {
-            const value = rest.join('=');
-            secrets.push({
-                projectId: projectId,
-                secretName: key.trim(),
-                secretValue: '',
-                secretPlaceholder: (value?.trim() ?? '').slice(0, 60) + (value && value.length > 60 ? '...' : '') + ' (from .env)',
-                variable: false,
-            });
+        const trimmed = _line.trim();
+
+        // A blank line breaks the run of comments attached to the next variable.
+        if (!trimmed.length) {
+            pendingComments = [];
+            continue;
         }
+
+        // A full-line comment: accumulate it as description for the next variable.
+        if (trimmed.startsWith('#')) {
+            const text = stripCommentMarker(trimmed);
+            if (text.length) pendingComments.push(text);
+            continue;
+        }
+
+        // A variable line. Split off an inline trailing comment (everything after the first `#`).
+        const hashIndex = _line.indexOf('#');
+        const inlineComment = hashIndex >= 0 ? _line.slice(hashIndex + 1).trim() : '';
+        const assignment = (hashIndex >= 0 ? _line.slice(0, hashIndex) : _line).trim();
+        if (!assignment.length) {
+            pendingComments = [];
+            continue;
+        }
+        const [key, ...rest] = assignment.split('=');
+        if (!key?.trim().length) {
+            pendingComments = [];
+            continue;
+        }
+        const value = rest.join('=');
+        // Subtitle: the N comment lines above, then the inline trailing comment at the end.
+        const commentParts = [...pendingComments];
+        if (inlineComment.length) commentParts.push(inlineComment);
+        secrets.push({
+            projectId: projectId,
+            secretName: key.trim(),
+            secretValue: '',
+            secretPlaceholder: (value?.trim() ?? '').slice(0, 60) + (value && value.length > 60 ? '...' : '') + ' (from .env)',
+            variable: false,
+            comment: commentParts.length ? commentParts.join('\n') : undefined,
+        });
+        pendingComments = [];
     }
 
     return secrets;
