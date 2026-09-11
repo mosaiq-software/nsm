@@ -28,10 +28,23 @@ SecretModel.init(
     { sequelize }
 );
 
-// Additively add any columns missing from an existing secrets table (e.g. `comment` on older DBs).
-// Scoped to this model so it can't alter unrelated tables.
+// Additively add the `comment` column to an existing secrets table via a native ADD COLUMN.
+// We deliberately avoid Sequelize's `sync({ alter: true })`: on SQLite it rebuilds the table, which
+// mishandles this model's composite primary key (projectId + secretName) and fails with a spurious
+// UNIQUE violation. Never throws, so a schema hiccup can't crash-loop the daemon on startup.
 export const ensureSecretSchema = async (): Promise<void> => {
-    await SecretModel.sync({ alter: true });
+    try {
+        const qi = sequelize.getQueryInterface();
+        const tableName = SecretModel.getTableName() as string;
+        // Drop any leftover `*_backup` table from a previously failed Sequelize alter attempt.
+        await qi.dropTable(`${tableName}_backup`).catch(() => {});
+        const columns = await qi.describeTable(tableName);
+        if (!columns.comment) {
+            await qi.addColumn(tableName, 'comment', { type: DataTypes.STRING, allowNull: true });
+        }
+    } catch (e) {
+        console.error('ensureSecretSchema: could not ensure the secrets.comment column exists', e);
+    }
 };
 
 export const getAllSecretsForProjectModel = async (projectId: string): Promise<Secret[]> => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetDb } from '../helpers/db';
 import { ProjectModelType, createProjectModel, deleteProjectModel, getAllProjectsModel, getProjectByIdModel, updateProjectModelNoDirty, upsertProjectModel } from '@/persistence/projectPersistence';
-import { createSecretModel, deleteAllSecretsForProjectEnvModel, getAllSecretsForProjectModel, updateSecretModel, upsertSecretModel } from '@/persistence/secretPersistence';
+import { createSecretModel, deleteAllSecretsForProjectEnvModel, ensureSecretSchema, getAllSecretsForProjectModel, updateSecretModel, upsertSecretModel } from '@/persistence/secretPersistence';
 import { deleteNodeModel, getAllNodesModel, getNodeByIdModel, upsertNodeModel } from '@/persistence/nodePersistence';
 import { getAllCertsModel, getCertModel, upsertCertModel } from '@/persistence/certPersistence';
 import { touchNodeModel } from '@/persistence/nodePersistence';
@@ -62,6 +62,17 @@ describe('secretPersistence', () => {
         expect(await getAllSecretsForProjectModel('p1')).toHaveLength(2);
         await deleteAllSecretsForProjectEnvModel('p1');
         expect(await getAllSecretsForProjectModel('p1')).toHaveLength(0);
+    });
+
+    it('persists the scraped comment', async () => {
+        await upsertSecretModel({ ...sec('A', '1'), comment: 'line1\nline2' });
+        const all = await getAllSecretsForProjectModel('p1');
+        expect(all[0].comment).toBe('line1\nline2');
+    });
+
+    it('ensureSecretSchema is a no-op safe to run repeatedly', async () => {
+        await expect(ensureSecretSchema()).resolves.toBeUndefined();
+        await expect(ensureSecretSchema()).resolves.toBeUndefined();
     });
 });
 
