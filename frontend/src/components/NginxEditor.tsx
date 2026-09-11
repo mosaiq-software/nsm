@@ -258,14 +258,6 @@ const RenderLocation = (props: RenderLocationProps) => {
                     onChange={(e) => props.location.type === NginxConfigLocationType.PROXY && props.onChange({ ...props.location, path: e.currentTarget.value })}
                     error={props.duplicatePath ? 'Duplicate Path' : undefined}
                 />
-                <TextInput
-                    required
-                    value={props.location.proxyPass}
-                    label="Proxy Pass"
-                    placeholder="http://service:3000"
-                    description="The upstream target to proxy requests to."
-                    onChange={(e) => props.location.type === NginxConfigLocationType.PROXY && props.onChange({ ...props.location, proxyPass: e.currentTarget.value })}
-                />
                 <NumberInput
                     value={props.location.timeout}
                     label="Timeout (ms)"
