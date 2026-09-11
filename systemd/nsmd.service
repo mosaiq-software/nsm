@@ -1,11 +1,12 @@
 [Unit]
-Description=NSM daemon (Node Server Manager - raft node)
+Description=NSM daemon (Node Server Manager node)
 After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/nsm
+# The daemon is the `backend` workspace; deps are hoisted to /opt/nsm/node_modules.
+WorkingDirectory=/opt/nsm/backend
 EnvironmentFile=/etc/nsm/nsm.env
 ExecStart=/usr/bin/npm start
 Restart=always

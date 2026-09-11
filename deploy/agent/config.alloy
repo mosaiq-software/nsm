@@ -1,0 +1,70 @@
+// NSM per-node Alloy config: ship app container logs + nsmd's own logs to the leader's Loki,
+// tagged with deployment labels so the NSM API/UI can filter logs per deployment.
+
+logging {
+	level = "warn"
+}
+
+loki.write "leader" {
+	endpoint {
+		url = string.format("%s/loki/api/v1/push", sys.env("OBS_LOKI_PUSH_URL"))
+	}
+}
+
+// --- App container logs (docker service discovery) ---
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "nsm_containers" {
+	targets = discovery.docker.containers.targets
+
+	// Only NSM-managed containers.
+	rule {
+		source_labels = ["__meta_docker_container_label_dev_mosaiq_nsm_managed"]
+		regex         = "true"
+		action        = "keep"
+	}
+	rule {
+		source_labels = ["__meta_docker_container_label_dev_mosaiq_nsm_projectId"]
+		target_label  = "projectId"
+	}
+	rule {
+		source_labels = ["__meta_docker_container_label_dev_mosaiq_nsm_projectInstanceId"]
+		target_label  = "projectInstanceId"
+	}
+	rule {
+		source_labels = ["__meta_docker_container_label_dev_mosaiq_nsm_serviceInstanceId"]
+		target_label  = "serviceInstanceId"
+	}
+	rule {
+		source_labels = ["__meta_docker_container_label_dev_mosaiq_nsm_serviceName"]
+		target_label  = "serviceName"
+	}
+	rule {
+		target_label = "nodeId"
+		replacement  = sys.env("NODE_ID")
+	}
+	rule {
+		target_label = "source"
+		replacement  = "app"
+	}
+}
+
+loki.source.docker "containers" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.nsm_containers.output
+	labels     = {}
+	forward_to = [loki.write.leader.receiver]
+}
+
+// --- nsmd's own control-plane logs (systemd journal) ---
+loki.source.journal "nsmd" {
+	matches    = "_SYSTEMD_UNIT=nsmd.service"
+	labels     = {
+		nodeId = sys.env("NODE_ID"),
+		unit   = "nsmd",
+		source = "nsmd",
+	}
+	forward_to = [loki.write.leader.receiver]
+}

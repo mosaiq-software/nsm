@@ -1,7 +1,7 @@
 name: NSM Self-Update
 
 # On a new version tag, notify the running cluster of the desired NSM version.
-# The leader records desiredNsmVersion in replicated state and drives a rolling upgrade
+# The leader records desiredNsmVersion in its source-of-truth DB and drives a rolling upgrade
 # (followers first, leader last), each node self-updating to this git tag via systemd restart.
 on:
     push:

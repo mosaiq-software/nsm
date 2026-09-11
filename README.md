@@ -1,55 +1,29 @@
 # NSM — Node Server Manager
 
-NSM is a self-managing, distributed deployment system. You run a **single identical daemon (`nsmd`) on every machine** in a small fleet; the daemons form a [Raft](https://raft.github.io/) cluster, elect a leader, and keep a **replicated log** of everything that should be running. Any node can serve production traffic on port 443, and the cluster survives the loss of any minority of nodes with no manual failover.
+NSM is a self-managing deployment system. You run a **single identical daemon (`nsmd`) on every machine** in a small fleet. Exactly one machine is statically declared the **leader**; its SQLite database is the single source of truth. The leader clones your app repos, injects secrets, runs them with `docker compose`, renders nginx, and issues TLS certs. Followers pull their assigned work from the leader and report status back.
 
-It clones your app repos, injects secrets, runs them with `docker compose`, renders nginx configs, provisions TLS certificates, and keeps the whole fleet converged toward a single declared desired state — including keeping **itself** up to date.
+Two design goals shape everything:
+
+- **IP-less identity.** Nodes identify each other by a stable `nodeId`, never by IP. The leader keeps a `nodeId -> current IP` registry that every node updates via heartbeat, so a node's LAN IP can change (DHCP) without breaking routing.
+- **Full observability.** A self-hosted Grafana + Loki + Prometheus stack collects logs and metrics from every node, tagged per deployment, so logs/stats for one deployment are directly queryable through the NSM API.
 
 ---
 
 ## Table of contents
 
-- [Why it was redesigned](#why-it-was-redesigned)
-- [Core ideas](#core-ideas)
 - [Architecture](#architecture)
-- [How a deployment flows through the system](#how-a-deployment-flows-through-the-system)
-- [The replicated state machine](#the-replicated-state-machine)
-- [Networking: the floating VIP](#networking-the-floating-vip)
-- [TLS certificates](#tls-certificates)
-- [Self-updating](#self-updating)
+- [Coordination model (leader + registry)](#coordination-model-leader--registry)
+- [IP-less routing](#ip-less-routing)
+- [Ingress and TLS](#ingress-and-tls)
+- [Observability](#observability)
+- [Management UI](#management-ui)
+- [How a deployment flows](#how-a-deployment-flows)
 - [Failure handling](#failure-handling)
 - [Repository layout](#repository-layout)
 - [Configuration reference](#configuration-reference)
 - [Setting up a network](#setting-up-a-network)
-- [Day-2 operations](#day-2-operations)
 - [HTTP API surface](#http-api-surface)
-- [Development & testing](#development--testing)
-- [Troubleshooting](#troubleshooting)
-
----
-
-## Why it was redesigned
-
-The previous system had a **control plane** on one machine plus **worker nodes** on the others. Port 443 was forwarded to the single control-plane machine, which ran nginx and orchestrated everything. To do real work, `server-manager` sent commands to `server-manager-worker`, which shelled out to `pm2` outside its container. This was fragile: a single point of failure for ingress, a brittle multi-process command chain, and awkward host access from inside a container.
-
-NSM replaces all of that with **one process per machine, all equal**:
-
-| Old model | New model (NSM) |
-| --- | --- |
-| 1 control plane + N workers | N identical `nsmd` daemons |
-| 443 pinned to one machine | Floating **VIP** (VRRP) any node can hold |
-| Cross-process RPC → pm2 | Daemon runs on the host via systemd, drives docker/nginx/certbot directly |
-| Control-plane DB is the source of truth | **Raft replicated log** is the source of truth |
-| Manual failover | Automatic leader election + VIP failover |
-
----
-
-## Core ideas
-
-- **One daemon per host.** `nsmd` runs on the host (not in a container) under systemd so it can directly call `docker`, `nginx`, and `certbot`. There is no separate worker process and no named pipe.
-- **Raft is the source of truth.** All writes (projects, secrets, users, node membership, desired deployments, certs, desired NSM version) are proposed as **operations** appended to a replicated log. Each node applies committed operations, in order, to a **local SQLite materialized view**. Reads are served from that local view.
-- **Declarative reconciliation.** The leader turns a deploy request into a fully self-contained `DesiredDeployment` (rendered dotenv, compose, nginx conf, domains, assigned node) and replicates it. Every node runs a **reconcile loop** that converges its host toward whatever is assigned to it.
-- **Ingress is decoupled from consensus.** A floating **Virtual IP** managed by keepalived/VRRP owns port 443. Whichever node holds the VIP terminates TLS and proxies to backends. VRRP election is independent of Raft leadership — losing the leader does not necessarily move the VIP, and vice versa.
-- **Self-contained + self-updating.** A single `bootstrap.sh` installs and joins a node. A git tag push tells the cluster to roll itself to a new version, followers first.
+- [Development and testing](#development-and-testing)
 
 ---
 
@@ -57,367 +31,272 @@ NSM replaces all of that with **one process per machine, all equal**:
 
 ```mermaid
 flowchart TB
-    subgraph Node A["Node A (holds VIP + is Raft leader)"]
-        A_raft["Raft (leader)"]
-        A_sm["State machine → SQLite view"]
-        A_rec["Reconcile loop"]
-        A_ngx["nginx :443 (VIP)"]
-        A_ka["keepalived (VRRP MASTER)"]
-        A_docker["docker compose apps"]
+    Internet["Internet :443"] --> LNginx
+    subgraph leaderbox [Leader - DHCP-reserved IP - the one stable anchor]
+        LNginx["nginx (single TLS ingress)"]
+        LDB["SQLite = source of truth"]
+        Registry["Registry nodeId to current IP"]
+        Hosts["/etc/hosts managed block"]
+        Obs["Grafana + Loki + Prometheus"]
+        LAPI["nsmd API + /metrics"]
     end
-    subgraph Node B["Node B (follower)"]
-        B_raft["Raft (follower)"]
-        B_sm["State machine → SQLite view"]
-        B_rec["Reconcile loop"]
-        B_ngx["nginx (standby)"]
-        B_ka["keepalived (BACKUP)"]
-        B_docker["docker compose apps"]
+    subgraph followerbox [Follower - IP may change]
+        FAPI["nsmd role=follower + /metrics"]
+        Apps["docker compose apps"]
+        Agent["Alloy + node_exporter + cadvisor"]
     end
-    subgraph Node C["Node C (follower)"]
-        C_raft["Raft (follower)"]
-        C_sm["State machine → SQLite view"]
-        C_rec["Reconcile loop"]
-        C_docker["docker compose apps"]
-    end
-
-    A_raft <-->|"AppendEntries / RequestVote (TCP)"| B_raft
-    A_raft <-->|"AppendEntries / RequestVote (TCP)"| C_raft
-    A_raft --> A_sm --> A_rec --> A_docker
-    B_raft --> B_sm --> B_rec --> B_docker
-    C_raft --> C_sm --> C_rec --> C_docker
-    Internet["Internet :443"] --> A_ka
-    A_ngx -->|"proxy_pass to assigned node:port"| B_docker
+    FAPI -->|"register + heartbeat (current IP)"| Registry
+    FAPI -->|"POST /node/desired (pull)"| LAPI
+    FAPI -->|"push status + deploy logs"| LAPI
+    Registry --> Hosts
+    LNginx -->|"proxy_pass http://nodeId.INTERNAL:port"| Apps
+    Agent -->|"logs to Loki / metrics scraped"| Obs
+    LAPI -->|"LogQL/PromQL filtered by deployment labels"| Obs
 ```
 
-Each node runs the same components:
+Every node runs the same `nsmd` process (on the host, via systemd, so it can drive `docker`/`nginx`/`certbot` directly). The only difference between nodes is `NSM_ROLE`.
+
+All backend paths below are under `backend/`.
 
 | Component | Path | Responsibility |
 | --- | --- | --- |
-| **Raft** | `src/cluster/raft.ts`, `raftLog.ts`, `transport.ts` | Leader election, log replication, membership changes over newline-delimited JSON on TCP. |
-| **State machine** | `src/cluster/stateMachine.ts` | Applies each committed `Op` to the local SQLite view; tracks `lastAppliedIndex` for idempotent replay. |
-| **Cluster facade** | `src/cluster/node.ts` | Wires Raft + state machine; exposes `propose`, `addNode`, `removeNode`, `status`, `isLeader`, `leaderAddress`. |
-| **Reconciler** | `src/reconcile/*` | Converges the host: clone/deploy/teardown apps, render nginx, sync certs, manage keepalived. |
-| **Controllers** | `src/controllers/*` | Business logic for projects/secrets/users/deploys. Writes become Raft proposals; reads hit the local view. |
-| **HTTP API** | `src/routes.ts`, `src/app.ts` | Public (health, OAuth, deploy webhook), private (user-authenticated CRUD), internal (cluster-secret RPCs). |
-| **Persistence** | `src/persistence/*` | Sequelize models over SQLite — the materialized view + Raft metadata. |
+| Cluster facade | `backend/src/cluster/node.ts` | `isLeader()`/`leaderAddress()` from config; `propose()` applies ops directly on the leader. |
+| Registry | `backend/src/cluster/registry.ts` | Leader-hosted `nodeId -> current IP` map; register/heartbeat/deregister. |
+| State machine | `backend/src/cluster/stateMachine.ts` | Applies each `Op` to the leader's SQLite source of truth. |
+| Reconciler | `backend/src/reconcile/reconciler.ts` | Followers pull desired state; every node converges its host; leader renders ingress. |
+| Internal DNS | `backend/src/reconcile/internalDns.ts` | Leader writes `/etc/hosts` mapping `<nodeId>.<domain>` to current IPs. |
+| Certs | `backend/src/reconcile/certs.ts` | Leader-only certbot; certs live only on the leader (single ingress). |
+| Observability | `backend/src/reconcile/observabilityStack.ts`, `promTargets.ts`, `backend/src/controllers/observabilityController.ts` | Bring up the stack, generate Prometheus targets, proxy per-deployment queries. |
 
 ---
 
-## How a deployment flows through the system
+## Coordination model (leader + registry)
 
-A deploy is a **leader-only** operation. Followers transparently forward writes to the leader (`requireLeader` → `forwardToLeader`).
+- **One leader, declared in config.** Exactly one node sets `NSM_ROLE=leader`; all others are `follower`. There is no election and no automatic failover.
+- **The leader's SQLite DB is the sole source of truth.** All writes are `Op`s applied directly on the leader (`cluster.propose(op)` -> `applyOp(op)`). Followers do not hold authoritative state.
+- **Writes forward to the leader.** Any node accepts private API calls; write handlers call `requireLeader`, which proxies to the leader (`forwardToLeader`) using the stable `LEADER_ADDRESS`.
+- **Followers pull, then push.** Each reconcile tick, a follower `POST /node/desired` to get its assigned `DesiredDeployment`s plus the registry snapshot, mirrors them into its local DB, and converges. It pushes status + deploy logs back to the leader.
+- **The one stable anchor** is `LEADER_ADDRESS` — give the leader machine a DHCP reservation/static IP. Every other address is dynamic and resolved through the registry.
+
+If the leader is down: running apps keep serving, but no new deploys/writes happen, and followers skip reconciliation (they never tear down running apps on a failed pull) until the leader returns.
+
+---
+
+## IP-less routing
+
+Today a node's IP is never baked into a config. Instead:
+
+1. Each node detects its current primary IP (`getPrimaryIp()`), registers it with the leader on boot, and re-asserts it on every heartbeat. An IP change for a stable `nodeId` propagates into the registry within one interval.
+2. Rendered nginx configs target the assigned node's **stable internal hostname**: `proxy_pass http://<nodeId>.<INTERNAL_DOMAIN>:<port>` (e.g. `http://node-2.nsm.internal:34011`).
+3. The leader maintains a managed block in `/etc/hosts` mapping every `<nodeId>.<INTERNAL_DOMAIN>` to its current IP (`refreshInternalHosts()`), and reloads nginx only when the mapping changes.
+
+Because confs are IP-free, an IP change never re-renders a conf — it only refreshes the hosts mapping and reloads nginx.
 
 ```mermaid
 sequenceDiagram
-    participant U as User / CI webhook
-    participant L as Leader (nsmd)
-    participant N as Assigned node
-    participant R as Raft log
-    participant All as All nodes' reconcilers
-
-    U->>L: GET /deployweb/:projectId/:key  (or GET /deploy/... for CI)
-    L->>L: verifyDeploymentKey, getProject, check assigned node
-    L->>L: syncProjectToRepoData (pull repo, re-derive secrets/services)
-    L->>L: compareProjects — abort if config drifted since last view
-    L->>N: POST /node/plan (allocate free ports + ensure dirs)
-    N-->>L: { ports, dirs }
-    L->>L: render dotenv + nginx conf + inject NSM labels into compose
-    L->>R: propose SET_DESIRED_DEPLOYMENT (generation = prev+1)
-    R-->>All: commit + apply → desiredDeployment row on every node
-    All->>All: reconcile tick: is this assigned to me? gen changed?
-    N->>N: git clone, write .env + compose, docker compose up -d
-    N->>L: report deployment log (leader stores it on the instance)
-    All->>All: render nginx for ALL projects + sync ALL certs
-```
-
-Key properties:
-
-- The `DesiredDeployment` is **fully rendered and self-contained** — the compose file, `.env`, nginx conf and domains all travel inside the replicated log. Any node can act on it without re-reading the repo.
-- **`generation`** is a monotonic counter per project. A node's reconciler compares the desired generation to the generation it has locally deployed (a marker file under `DATABASE_DIR/generations`) and only redeploys on drift, so it is restart-safe.
-- **nginx is rendered on every node**, not just the assigned one, because any node may hold the VIP. The VIP-holder's nginx proxies `https://domain` → `http://<assigned-node-ip>:<allocated-port>`.
-
----
-
-## The replicated state machine
-
-Every mutation is an `Op` appended to the Raft log (`common/src/clusterOps.ts`). Committed ops are applied deterministically and idempotently by `applyOp` (`src/cluster/stateMachine.ts`):
-
-| Op | Effect on the local view |
-| --- | --- |
-| `UPSERT_PROJECT` / `DELETE_PROJECT` | Create/replace or remove a project (delete also clears its desired deployment). |
-| `SET_PROJECT_SECRETS` | Replace a project's full secret set. |
-| `UPSERT_SECRET` | Update/insert a single secret. |
-| `SET_PROJECT_ASSIGNMENT` | Assign a project to a node (`workerNodeId`). |
-| `SET_DESIRED_DEPLOYMENT` / `CLEAR_DESIRED_DEPLOYMENT` | Declare or remove what a node must run. |
-| `UPSERT_CERT` | Replicate TLS material (fullchain + privkey + expiry) to all nodes. |
-| `UPSERT_NODE` / `REMOVE_NODE` | Cluster membership bookkeeping in the view. |
-| `SET_DESIRED_NSM_VERSION` | Record the version the fleet should roll to. |
-| `UPSERT_USER` | Sign-in / sign-out state for dashboard users. |
-| `SET_ALLOWED_ENTITIES` | Replace the GitHub user/org allow-list. |
-
-**Why a log + view instead of just a shared DB?** The log gives a total order and a durable, replayable history. A node that has been offline, or a brand-new node, catches up simply by replaying the log from the start (NSM keeps the full log rather than implementing snapshot-install). `lastAppliedIndex` is persisted so a restarting node never re-applies work it already applied.
-
-Membership changes (`addLearner` / `removeNode`) are themselves special `config` entries in the log; when applied, each node rewrites its local `cluster.json` so the peer set survives restarts.
-
----
-
-## Networking: the floating VIP
-
-Port 443 is owned by a **Virtual IP** that floats between nodes via **VRRP** (keepalived). Your router/DNS points the public name at the VIP, not at any single machine.
-
-```mermaid
-flowchart LR
-    DNS["DNS: app.example.com → VIP (e.g. 192.168.1.240)"] --> VIP
-    VIP["VIP :443"] -->|VRRP MASTER| KA_A["Node A keepalived"]
-    KA_A -. failover .-> KA_B["Node B keepalived"]
-    KA_A --> NGX_A["Node A nginx"]
-    NGX_A -->|proxy_pass| APP["assigned node : allocated port"]
-```
-
-- `src/reconcile/keepalived.ts` renders `/etc/keepalived/keepalived.conf` from `deploy/keepalived.conf.tmpl`. Each node gets a deterministic priority derived from its `nodeId`, plus a health check that curls the local `/healthz`. If `nsmd`/nginx becomes unhealthy on the VIP holder, VRRP moves the VIP to another node within seconds.
-- Because every node renders nginx for **all** projects and holds **all** replicated certs, the new VIP holder can serve traffic immediately — no config regeneration needed at failover time.
-- **VRRP election is intentionally separate from Raft leadership.** The data plane (who answers 443) and the control plane (who accepts writes) fail over independently.
-
-> Same-LAN requirement: VRRP uses L2 multicast, so all nodes must share a subnet. The VIP is a spare address on that subnet.
-
----
-
-## TLS certificates
-
-- **Leader** (`leaderEnsureCerts` in `src/reconcile/certs.ts`): for every domain in the desired deployments, if there is no cert or it expires within 30 days, it runs `certbot` (DNS-01 when `CERTBOT_DNS_ARGS` is set — recommended, since it works regardless of which node holds the VIP — otherwise `--nginx` HTTP-01), then proposes `UPSERT_CERT` to replicate the material into the log.
-- **Every node** (`syncCertsToDisk`): writes the replicated cert material to `LETSENCRYPT_LIVE_DIR/<domain>/` (write-if-changed) so its local nginx can terminate TLS the instant it holds the VIP.
-
-Renewal runs on a cron registered at boot (`src/utils/initUtils.ts`).
-
----
-
-## Self-updating
-
-NSM upgrades itself via a git-tag-driven rolling upgrade.
-
-```mermaid
-sequenceDiagram
-    participant CI as GitHub Actions (tag push v*)
+    participant N as Follower
     participant L as Leader
-    participant R as Raft log
-    participant F as Follower
-
-    CI->>L: POST /cluster/self-update {version, artifactRef}
-    L->>R: propose SET_DESIRED_NSM_VERSION
-    R-->>L: applied on all nodes
-    loop rollout (followers first, leader last)
-        L->>F: POST /cluster/apply-update {artifactRef}
-        F->>F: git fetch/checkout tag, npm ci --omit=dev, systemctl restart nsmd
-        F-->>L: comes back healthy on new version (status gossip)
-    end
-    L->>L: leader upgrades itself last
+    N->>N: DHCP assigns a new IP
+    N->>L: heartbeat (currentAddress=newIP)
+    L->>L: registry updated for nodeId
+    L->>L: reconcile: rewrite /etc/hosts + nginx -s reload
+    Note over L: existing http://nodeId.nsm.internal confs now resolve to newIP
 ```
 
-- `.github/workflows/nsm-release.yml` fires on `v*` tags and calls `/cluster/self-update`.
-- `runSelfUpdateRolloutIfLeader` (`src/cluster/selfUpdate.ts`) runs on a cron; it upgrades one stale follower at a time and the leader last, using status gossip to know which nodes are still on the old version. systemd `Restart=always` brings each `nsmd` back on the new code.
+---
+
+## Ingress and TLS
+
+- The **leader is the single public 443 entrypoint**. Point your router's 443 forward and your app DNS at the leader (DHCP-reserved). The leader terminates TLS and reverse-proxies to backend nodes by internal hostname.
+- Only the leader renders nginx (`renderAllNginx`, guarded by `isLeader()`); followers just run app containers.
+- Certs are **leader-local**: `leaderEnsureCerts()` runs certbot (DNS-01 when `CERTBOT_DNS_ARGS` is set, else `--nginx`) and keeps material in `LETSENCRYPT_LIVE_DIR`. No cross-node cert replication.
+
+---
+
+## Observability
+
+A self-hosted stack (leader) plus per-node agents give logs + metrics filterable per deployment.
+
+- **Leader stack** (`deploy/observability/docker-compose.yml`): Grafana, Loki, Prometheus. Brought up at boot by `ensureObservabilityStack()`.
+- **Per-node agents** (`deploy/agent/docker-compose.yml`, on every node): Grafana Alloy (logs), node_exporter (host metrics), cadvisor (container metrics).
+- **Deployment labels.** App containers are labeled with `dev.mosaiq.nsm.projectId`, `.projectInstanceId`, `.serviceInstanceId`, `.serviceName`, `.managed`. Alloy relabels these into Loki labels; cadvisor exposes them for Prometheus (`metric_relabel_configs` promote them to `projectInstanceId`, etc.).
+- **nsmd logs.** `nsmd` logs structured JSON (pino); journald captures it; Alloy ships it to Loki labeled `source="nsmd"`, so control-plane and app logs are queryable together.
+- **IP-less scraping.** `promTargets.ts` regenerates Prometheus file-SD targets from the registry using internal hostnames.
+- **Query API.** The leader exposes `GET /observability/logs` and `GET /observability/metrics`, which proxy LogQL/PromQL filtered by `serviceInstanceId | projectInstanceId | projectId`, so the NSM UI can show logs/stats for one deployment. Every node also exposes `GET /metrics` (deploy/reconcile counters and durations).
+
+---
+
+## Management UI
+
+NSM ships its own management UI in `frontend/` — a Vite + React + Mantine single-page app that replaces the old external `server-manager` frontend. There is no separate service to run: the leader daemon serves the built UI **same-origin** with the API.
+
+- **Same-origin serving.** `initApp()` mounts `express.static(NSM_WWW_PATH)` and an SPA history fallback, so the UI, the API, and the OAuth callback all live on the leader's one origin. The client uses relative `fetch` calls — no `API_URL` baked into the build.
+- **Build on the leader.** `bootstrap.sh` runs `build_frontend()` on the leader, which builds `frontend/` straight into `NSM_WWW_PATH`. In dev, `npm run build` defaults its `outDir` to `../.devdata/www` (matching the dev `NSM_WWW_PATH`).
+- **Auth.** Sign-in uses the same GitHub OAuth flow as the API: the UI redirects to GitHub, GitHub calls the daemon's `/auth/github`, and the daemon redirects back to `FRONTEND_URL?token=…`. The token is stored in `localStorage` and sent as `Authorization: Bearer <token>`.
+- **What it manages.** Dashboard, per-project config (repo, node assignment, nginx editor, env vars, services), deploy/teardown with live deployment logs, the read-only node registry, cluster status/health, per-deployment logs + metrics, and GitHub access management.
+
+Client-side routes (`/`, `/p/:id/*`, `/nodes`, `/status`, `/access`) are chosen to never collide with API paths so deep links resolve through the SPA fallback.
+
+Local development runs the Vite dev server and proxies the API to a locally running daemon:
+
+```bash
+# terminal 1: the daemon (uses .env.local; PRODUCTION=false stubs host side effects)
+cd nsm && npm start
+
+# terminal 2: the UI (proxies /projects, /cluster, /observability, ... to 127.0.0.1:1025)
+cd nsm/frontend && npm ci && npm run dev   # http://localhost:5173
+```
+
+Build-time config is `VITE_`-prefixed (see `.env.sample`): `VITE_GITHUB_OAUTH_CLIENT_ID`, `VITE_GITHUB_OAUTH_CALLBACK_URL`, and optional `VITE_GITHUB_OAUTH_DEFAULT_USER`. The daemon reads these same three vars, so they are defined once; only `GITHUB_OAUTH_CLIENT_SECRET` is server-only.
+
+---
+
+## How a deployment flows
+
+```mermaid
+sequenceDiagram
+    participant UI as UI/CI
+    participant L as Leader
+    participant N as Assigned node
+    UI->>L: GET /deployweb/:projectId/:key
+    L->>L: syncProjectToRepoData + compareProjects
+    L->>N: POST /node/plan (allocate ports + dirs)
+    N-->>L: { ports, dirs }
+    L->>L: render dotenv + nginxConf(http://N.nsm.internal:port) + inject labels
+    L->>L: applyOp(SET_DESIRED_DEPLOYMENT) into leader DB (generation+1)
+    N->>L: POST /node/desired (pull) -> gets its DesiredDeployment
+    N->>N: clone + docker compose up -d; POST /cluster/log progress
+    L->>L: reconcile: renderAllNginx + refreshInternalHosts (reload nginx)
+```
+
+`generation` is a monotonic per-project counter; a node redeploys only when the desired generation differs from the generation marker it has on disk, so reconciliation is restart-safe.
 
 ---
 
 ## Failure handling
 
-| Failure | What happens |
+| Failure | Behavior |
 | --- | --- |
-| **Leader crashes** | Remaining nodes elect a new leader (majority quorum). In-flight uncommitted writes are retried by the client against the new leader. |
-| **VIP holder crashes** | keepalived moves the VIP to another node; its already-rendered nginx + synced certs serve traffic immediately. |
-| **Follower crashes/restarts** | On restart it replays the log from disk (persisted term/vote/log), catches up missed entries via `AppendEntries` backtracking, and does not re-apply already-applied ops. |
-| **New node joins** | Leader appends a membership config entry and streams the full log to the newcomer until it is caught up. |
-| **Network partition** | Only the side with a majority can elect a leader and commit; the minority side serves reads from its (possibly stale) view but rejects writes. |
+| Leader down | Running apps keep serving; no new writes/deploys; followers skip pulls (never tear down) until it returns. |
+| Follower IP changes | Registry updates via heartbeat; leader rewrites `/etc/hosts` + reloads nginx; confs unchanged. |
+| Follower crash/restart | On boot it re-registers and replays generation markers; only redeploys on drift. |
+| New follower joins | It registers with the leader and starts pulling its assigned deployments. |
 
-Quorum math is standard Raft: a cluster of `N` tolerates `floor((N-1)/2)` failures. Run an **odd** number of nodes (3 or 5).
+Note: there is intentionally no ingress failover — the leader is the single entrypoint (the user's chosen tradeoff for simplicity).
 
 ---
 
 ## Repository layout
 
+The repo is an npm-workspaces monorepo with three packages — `backend` (the daemon), `common` (shared, source-only), and `frontend` (the UI) — plus deploy/infra at the root.
+
 ```
-nsm/
-├── src/
-│   ├── index.ts              # boot sequence
-│   ├── config.ts             # env-driven config + cluster.json load/save
-│   ├── app.ts, routes.ts     # express app + public/private/internal routers
-│   ├── cluster/              # raft, transport, log, state machine, node facade,
-│   │                         #   membership, leaderClient, statusGossip, selfUpdate
-│   ├── reconcile/            # reconciler, deploy, teardown, ports, docker,
-│   │                         #   nginxRender, certs, keepalived, directories, state
-│   ├── controllers/          # project, deploy, secret, user, allowedEntity, status
-│   ├── persistence/          # Sequelize models (the materialized view + raft meta)
-│   ├── host/exec.ts          # direct host command execution (child_process)
-│   └── utils/                # nginx rendering, repo/git, auth, db, init
-├── common/src/               # shared types, routes, clusterOps, secret/git utils
-├── deploy/                   # nginx include + keepalived.conf template
-├── systemd/nsmd.service      # the systemd unit
-├── bootstrap.sh              # one-command node install/join
-├── .github/workflows/        # self-update release workflow
-├── .env.sample               # every configurable value
-└── test/                     # Vitest suite (unit + real-TCP raft + supertest)
+nsm/                          # workspace root (npm workspaces: common, backend, frontend)
+├── package.json              # workspace root + convenience scripts (start, web:dev, types, test)
+├── .env.sample               # single env file for daemon + UI; copied to /etc/nsm/nsm.env on bootstrap
+├── backend/                  # @mosaiq/nsm — the daemon (runs via tsx; served by systemd)
+│   ├── src/
+│   │   ├── index.ts          # boot: register -> (leader) observability -> reconcile + status
+│   │   ├── config.ts         # env-driven config (role, leaderAddress, internalDomain, obs URLs)
+│   │   ├── cluster/          # node facade, registry, stateMachine, leaderClient, statusGossip, selfUpdate
+│   │   ├── reconcile/        # reconciler, deploy, teardown, nginxRender, certs, internalDns,
+│   │   │                     #   promTargets, observabilityStack, ports, docker, directories, state
+│   │   ├── controllers/      # project, deploy, secret, user, allowedEntity, status, observability
+│   │   ├── persistence/      # Sequelize models (source of truth on the leader)
+│   │   ├── host/exec.ts      # host command execution + getPrimaryIp()
+│   │   └── utils/            # nginx, repo/git, auth, db, init, log (pino), metrics (prom-client)
+│   ├── test/                 # Vitest suite
+│   ├── tsconfig.json         # paths: @/* -> src/*, @mosaiq/nsm-common -> ../common/src
+│   └── vitest.config.ts
+├── common/                   # @mosaiq/nsm-common — shared types, routes, clusterOps (source-only)
+│   ├── package.json
+│   └── src/                  #   consumed by backend and frontend via TS/Vite path aliases
+├── frontend/                 # @mosaiq/nsm-frontend — Vite + React + Mantine UI (built into NSM_WWW_PATH)
+├── deploy/
+│   ├── observability/        # leader stack compose + prometheus + grafana provisioning
+│   ├── agent/                # per-node alloy + node_exporter + cadvisor
+│   └── nginx.main.conf       # include directive for host nginx
+├── systemd/nsmd.service      # host systemd unit (WorkingDirectory=/opt/nsm/backend)
+└── bootstrap.sh              # --leader / --follower one-command install
 ```
 
 ---
 
 ## Configuration reference
 
-Config is read from environment variables, layered as: process env → `./.env` → `/etc/nsm/nsm.env` (later files do **not** override values already set). See `.env.sample` for a complete template. All values live in `src/config.ts`.
+Config is read from process env, then the repo-root `.env.local`, then `.env`, then `/etc/nsm/nsm.env`. A single root env file is shared by the daemon and the Vite UI build (only `VITE_`-prefixed vars reach the client bundle). See `.env.sample`; all values live in `backend/src/config.ts`.
 
-### Identity & networking (per node)
-| Var | Default | Meaning |
-| --- | --- | --- |
-| `PRODUCTION` | `false` | `true` on real hosts. In dev, host side effects (docker/nginx/certbot/keepalived) are stubbed out. |
-| `NODE_ID` | `node-local` | Stable unique id for this node. |
-| `BIND_ADDRESS` | `127.0.0.1` | This node's LAN IP (advertised to peers). |
-| `API_PORT` | `1025` | HTTP API + inter-node RPC port. |
-| `RAFT_PORT` | `1027` | Raft TCP transport port. |
+Identity/role:
+- `PRODUCTION` — `true` on real hosts (dev stubs host side effects).
+- `NODE_ID` — stable unique id.
+- `NSM_ROLE` — `leader` (exactly one) or `follower`.
+- `BIND_ADDRESS` — fallback IP only; the current IP is auto-detected at runtime.
+- `API_PORT` — HTTP API + inter-node RPC + `/metrics`.
 
-### Cluster & VIP
-| Var | Default | Meaning |
-| --- | --- | --- |
-| `CLUSTER_SECRET` | `insecure-dev-secret` | Shared secret: authenticates internal RPCs and join tokens. **Set this.** |
-| `NSM_BOOTSTRAP` | _(empty)_ | `init` on the very first node of a new cluster; empty otherwise. |
-| `VIP` | _(empty)_ | Floating virtual IP for 443. Empty disables keepalived. |
-| `VRRP_ROUTER_ID` | `51` | VRRP virtual router id (same across the cluster). |
-| `VRRP_PASS` | `changeme` | VRRP auth password (same across the cluster). |
-| `VRRP_IFACE` | `eth0` | Network interface the VIP binds to. |
+Cluster:
+- `LEADER_ADDRESS` — the one stable anchor (leader's base URL; DHCP-reserved).
+- `INTERNAL_DOMAIN` — default `nsm.internal`; nodes addressed as `<nodeId>.<INTERNAL_DOMAIN>`.
+- `CLUSTER_SECRET` — authenticates internal RPCs (register/pull/status/self-update).
 
-### Data paths
-| Var | Default | Meaning |
-| --- | --- | --- |
-| `DATABASE_DIR` | `/var/lib/nsm` | SQLite view + generation markers. |
-| `DATABASE_NAME` | `nsmdb.sqlite` | SQLite filename. |
-| `RAFT_DATA_DIR` | `/var/lib/nsm/raft` | Raft log + hard state on disk. |
-| `REPO_SANDBOX_PATH` | `/var/lib/nsm/sandbox` | Scratch space for repo introspection. |
-| `DEPLOYMENT_PATH` | `/nsm/apps` | Where app repos are cloned and run. |
-| `PERSISTENT_PATH` | `/var/lib/nsm/persistent` | Base for app persistent volumes/dirs. |
-| `NGINX_CONF_DIR` | `/etc/nsm/nginx` | Rendered per-project nginx confs (included by host nginx). |
-| `LETSENCRYPT_LIVE_DIR` | `/etc/letsencrypt/live` | Where synced certs are written. |
-| `NSM_WWW_PATH` | `/var/lib/nsm/www` | Static dashboard files served by the daemon. |
+Data paths: `DATABASE_DIR`, `DATABASE_NAME`, `REPO_SANDBOX_PATH`, `DEPLOYMENT_PATH`, `PERSISTENT_PATH`, `NGINX_CONF_DIR`, `LETSENCRYPT_LIVE_DIR`, `NSM_WWW_PATH`.
 
-### Git / GitHub / self-update
-| Var | Default | Meaning |
-| --- | --- | --- |
-| `GIT_SSH_KEY_DIR` / `GIT_SSH_KEY_FILE` | `/etc/nsm/.ssh` / `id_ed25519` | Deploy key for cloning private repos over SSH. |
-| `GITHUB_OAUTH_CLIENT_ID` / `_SECRET` / `_CALLBACK_URL` | — | Dashboard login via GitHub OAuth. |
-| `GITHUB_OAUTH_DEFAULT_USER` | — | A GitHub login always allowed to sign in (bootstrap admin). |
-| `CERTBOT_DNS_ARGS` | _(empty)_ | certbot DNS-01 plugin args, e.g. `--dns-cloudflare --dns-cloudflare-credentials /etc/nsm/cf.ini`. |
-| `NSM_REPO_DIR` | `/opt/nsm` | Where the daemon's own code lives (for self-update). |
-| `FRONTEND_URL` | — | Dashboard origin (OAuth redirects). |
+Git/GitHub: `GIT_SSH_KEY_DIR`, `GIT_SSH_KEY_FILE`, `VITE_GITHUB_OAUTH_CLIENT_ID`, `VITE_GITHUB_OAUTH_CALLBACK_URL`, `VITE_GITHUB_OAUTH_DEFAULT_USER`, `GITHUB_OAUTH_CLIENT_SECRET`, `CERTBOT_DNS_ARGS`, `NSM_REPO_DIR`.
 
-> Optional test/dev knobs: `RAFT_ELECTION_MIN_MS`, `RAFT_ELECTION_MAX_MS`, `RAFT_HEARTBEAT_MS` override Raft timers (production defaults are 1200–2400ms election, 350ms heartbeat).
+Observability: `LOKI_URL`, `PROMETHEUS_URL`, `GRAFANA_URL` (leader query proxy), `OBS_LOKI_PUSH_URL` (agents; defaults to the leader host on `:3100`).
 
 ---
 
 ## Setting up a network
 
-### Prerequisites
+Prerequisites: Linux hosts on the same LAN; the leader machine on a DHCP reservation/static IP; root/sudo; DNS for each app domain pointing at the leader. `bootstrap.sh` installs node 22, nginx, certbot, docker, jq, etc.; agents/stack run as containers.
 
-- 3 (or 5) Linux hosts (Debian/Ubuntu assumed by `bootstrap.sh`) on the **same LAN/subnet**.
-- One **spare IP** on that subnet to use as the VIP.
-- Root/sudo on each host. `bootstrap.sh` installs: `node 22`, `nginx`, `keepalived`, `certbot`, `docker`, `netcat`, `jq`, `git`.
-- A **DNS record** for each app domain pointing at the VIP.
-- (For private repos) a GitHub **deploy key**; (for the dashboard) a GitHub **OAuth app**.
+1. Bootstrap the leader:
+   ```bash
+   git clone <this-repo> nsm && cd nsm
+   sudo ./bootstrap.sh --leader
+   ```
+   Edit `/etc/nsm/nsm.env` (`CLUSTER_SECRET`, `PRODUCTION=true`, GitHub OAuth, `LEADER_ADDRESS=http://127.0.0.1:1025`), then re-run or `sudo systemctl restart nsmd`. Verify: `curl -s localhost:1025/healthz | jq`.
 
-### 1. Bootstrap the first node (creates the cluster)
+2. Add the git deploy key at `${GIT_SSH_KEY_DIR}/${GIT_SSH_KEY_FILE}` (mode 600) and register its public half on GitHub.
 
-```bash
-git clone <this-repo> nsm && cd nsm
-sudo ./bootstrap.sh --init
-```
+3. Bootstrap each follower:
+   ```bash
+   sudo ./bootstrap.sh --follower --leader http://<leader-ip>:1025 --secret <CLUSTER_SECRET>
+   ```
+   It registers into the leader's registry and starts pulling assigned work.
 
-On first run this copies the code to `/opt/nsm`, creates `/etc/nsm/nsm.env` from `.env.sample` (auto-filling `NODE_ID`, `BIND_ADDRESS`, `VRRP_IFACE`), installs the systemd unit, wires the nginx include, and writes a single-node `cluster.json`. **Edit `/etc/nsm/nsm.env`** — at minimum set `CLUSTER_SECRET`, `VIP`, `PRODUCTION=true`, and the GitHub values — then re-run `sudo ./bootstrap.sh --init` (idempotent) or `sudo systemctl restart nsmd`.
+4. Point app-domain DNS at the leader. The leader terminates TLS and proxies to whichever node runs each app.
 
-Verify:
-
-```bash
-journalctl -u nsmd -f
-curl -s localhost:1025/healthz | jq   # { ok, nodeId, isLeader, leader, version }
-```
-
-### 2. Add the git deploy key & GitHub fingerprints
-
-Place the private deploy key at `${GIT_SSH_KEY_DIR}/${GIT_SSH_KEY_FILE}` (default `/etc/nsm/.ssh/id_ed25519`, mode `600`) and add its public half as a repo/org deploy key on GitHub. NSM installs GitHub's SSH host fingerprints automatically at boot.
-
-### 3. Join additional nodes
-
-On each new host, clone the repo and join using the first node's (or the VIP's) API and the shared secret:
-
-```bash
-sudo ./bootstrap.sh --join http://<leader-or-vip>:1025 --secret <CLUSTER_SECRET>
-```
-
-This POSTs to `/cluster/join`; the leader appends a membership entry, streams the full log to the newcomer, and returns the authoritative `cluster.json`. Watch it catch up with `journalctl -u nsmd -f`.
-
-### 4. Point DNS at the VIP
-
-Create `A` records for your app domains → the `VIP`. The VIP-holding node terminates TLS and proxies to whichever node runs each app.
-
-### 5. Create and deploy a project
-
-Use the dashboard (served at `NSM_WWW_PATH`) or the API to create a project, assign it to a node, and deploy. See [Day-2 operations](#day-2-operations).
-
----
-
-## Day-2 operations
-
-All commands hit the API on any node (writes auto-forward to the leader). Private routes need a user `Authorization` token; the deploy webhook uses the per-project key.
-
-- **Create a project:** `POST /project/create` with `{ id, repoOwner, repoName }`. NSM generates a deployment key and syncs repo metadata (compose services + env vars).
-- **Assign to a node:** `POST /project/:projectId/assign` with `{ nodeId }`.
-- **Set secret values:** `POST /project/:projectId/updateEnvVar`.
-- **Deploy (from the dashboard):** `GET /deployweb/:projectId/:key`.
-- **Deploy (from CI):** `GET /deploy/:projectId/:key` — requires the project's `allowCICD` flag.
-- **Tear down:** `POST /project/:projectId/teardown` (clears the desired deployment; owning node's reconciler `docker compose down` + prunes).
-- **Cluster status:** `GET /cluster/status` → leader, term, nodes, per-node health (version, reachable, VIP holder), desired NSM version.
-- **List nodes:** `GET /cluster/nodes`.
-- **Remove a node:** `POST /cluster/remove` `{ nodeId }` (internal, cluster-secret authed).
-- **Roll a new NSM version:** push a `v*` git tag — CI notifies `/cluster/self-update` and the fleet rolls itself.
-
-Dynamic env variables let a secret resolve at deploy time to allocated values — the proxy `Port`, static `Directory`, server `Domain`/`URL`, redirect `Target`, volume path, and assigned `WorkerNodeId` (see `common/src/secretUtil.ts`).
+5. Create/assign/deploy a project via the API (below) or dashboard.
 
 ---
 
 ## HTTP API surface
 
-Three routers (`src/routes.ts`):
+Three routers (`backend/src/routes.ts`):
 
-- **Public** (no auth): `GET /`, `GET /healthz`, `GET /auth/github`, `POST /login/github/:token`, and the CI deploy webhook `GET /deploy/:projectId/:key`.
-- **Private** (user `Authorization` token via GitHub OAuth): project/secret/user/allow-list CRUD, `GET /cluster/status`, `GET /cluster/nodes`, dashboard deploy `GET /deployweb/:projectId/:key`. Writes on a follower are transparently forwarded to the leader.
-- **Internal** (each route guarded by the `x-nsm-cluster-secret` header): `/cluster/join`, `/cluster/remove`, `/cluster/log`, `/cluster/status-report`, `/node/plan`, `/cluster/self-update`, `/cluster/apply-update`, and (non-production only) `/cluster/dev-propose`, `/cluster/dev-dump`.
-
-Route definitions and their typed params/bodies/returns live in `common/src/routes.ts`.
+- Public: `GET /healthz`, `GET /metrics`, `GET /auth/github`, `POST /login/github/:token`, CI deploy webhook `GET /deploy/:projectId/:key`. The leader also serves the built UI (`express.static(NSM_WWW_PATH)`) with an SPA history fallback for non-API GETs.
+- Private (user token): project/secret/user/allow-list CRUD, `GET /cluster/status`, `GET /cluster/nodes`, dashboard deploy `GET /deployweb/:projectId/:key`, and observability `GET /observability/logs`, `GET /observability/metrics`. Writes on a follower forward to the leader.
+- Internal (`x-nsm-cluster-secret`): `/cluster/register`, `/cluster/deregister`, `/node/desired`, `/cluster/log`, `/cluster/status-report`, `/node/plan`, `/cluster/self-update`, `/cluster/apply-update`.
 
 ---
 
-## Development & testing
+## Development and testing
 
-Requires Node 22+.
+Requires Node 22+. This is an npm-workspaces monorepo; a single install at the root covers all three packages.
 
 ```bash
 cd nsm
-npm ci
-npm start          # run the daemon (dev: host side effects are stubbed when PRODUCTION!=true)
-npm run dev        # watch mode
-npm run types      # tsc --noEmit
-npm run lint
+npm ci             # installs common + backend + frontend (hoisted)
 
-npm test           # full Vitest suite
-npm run test:watch
-npm run test:cov   # coverage report (HTML in coverage/)
+# Backend daemon (@mosaiq/nsm). Reads backend/.env.local; PRODUCTION=false stubs host side effects.
+npm start          # -> npm start -w backend  (dev daemon on :1025)
+npm run types      # -> backend + frontend tsc --noEmit
+npm test           # -> npm test -w backend  (Vitest suite)
+
+# Management UI (@mosaiq/nsm-frontend) against the local daemon via the Vite dev proxy.
+npm run web:dev    # -> npm run dev -w frontend  (http://localhost:5173, proxies API to :1025)
+npm run web:build  # -> npm run build -w frontend (builds into ../.devdata/www or NSM_UI_OUT)
 ```
 
-The test suite (`test/`) covers pure utilities, the SQLite persistence layer + state machine, the Raft log/transport, **real multi-node Raft over TCP** (election, replication, membership, failover, log repair, restart durability), the reconcile modules (with `host/exec` and fs mocked), the controllers, cluster wiring, and the HTTP layer via supertest. Raft timers are overridable via env so integration tests run fast and deterministically.
-
----
-
-## Troubleshooting
-
-- **`curl /healthz` shows `isLeader:false` everywhere / no leader:** peers can't reach each other on `RAFT_PORT`. Check firewalls and that each node's `BIND_ADDRESS` is its real LAN IP.
-- **A joined node never catches up:** confirm the `CLUSTER_SECRET` matches and the join URL is reachable; watch `journalctl -u nsmd -f` on both nodes.
-- **443 not reachable / VIP not assigned:** ensure all nodes share a subnet, `VIP` is a free address on it, `VRRP_IFACE` is correct, and keepalived is running (`systemctl status keepalived`). Only production nodes with a `VIP` set participate.
-- **TLS errors after failover:** verify the domain's cert exists in `LETSENCRYPT_LIVE_DIR` on the current VIP holder; the leader must have successfully run certbot and proposed `UPSERT_CERT`.
-- **Deploy aborts with "configuration changed after syncing":** the project's config in the view no longer matches the repo — re-sync/review the project, then redeploy.
-- **Writes return 503 "No leader elected yet":** the cluster has no quorum (too many nodes down). Restore a majority.
-```
-
+You can also target a single workspace directly, e.g. `npm run test:cov -w backend` or `cd frontend && npm run dev`.

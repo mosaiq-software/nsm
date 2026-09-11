@@ -78,19 +78,18 @@ export interface DeploymentLogUpdate {
     log: string;
 }
 
-// === Cluster membership / status (replaces the old WorkerNode + ControlPlane concepts) ===
+// === Cluster membership / status (leader-hosted registry, no raft/VIP) ===
 export interface ClusterNode {
     nodeId: string;
     address: string;
-    raftPort: number;
     apiPort: number;
-    voter: boolean;
+    lastSeen: number;
+    isLeader: boolean;
 }
 
 export enum NodeRole {
     LEADER = 'leader',
     FOLLOWER = 'follower',
-    CANDIDATE = 'candidate',
 }
 
 export interface NodeHealth {
@@ -98,17 +97,14 @@ export interface NodeHealth {
     reachable: boolean;
     nsmVersion: string;
     isLeader: boolean;
-    vipHolder: boolean;
     lastSeen: number;
 }
 
 export interface ClusterStatus {
     leaderId: string | null;
-    term: number;
     nodes: ClusterNode[];
     health: NodeHealth[];
     desiredNsmVersion: string | null;
-    vip: string | null;
 }
 
 export interface NodeContainerStatus {
@@ -121,8 +117,8 @@ export interface NodeStatusReport {
     nodeId: string;
     nsmVersion: string;
     healthy: boolean;
-    isLeader: boolean;
-    vipHolder: boolean;
+    currentAddress: string;
+    apiPort: number;
     containers: NodeContainerStatus[];
     ts: number;
 }
@@ -283,4 +279,22 @@ export interface LogMessage {
     time: number;
     lvl: LogLevel;
     msg: string;
+}
+
+// === Observability query results (proxied from Loki / Prometheus by the leader) ===
+export interface ObservabilityLogLine {
+    ts: string; // nanosecond epoch string from Loki
+    line: string;
+    labels: { [k: string]: string };
+}
+export interface ObservabilityLogsResult {
+    lines: ObservabilityLogLine[];
+}
+export interface ObservabilityMetricSample {
+    t: number; // unix seconds
+    v: number;
+}
+export interface ObservabilityMetricsResult {
+    metric: string;
+    series: { labels: { [k: string]: string }; values: ObservabilityMetricSample[] }[];
 }

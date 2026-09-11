@@ -1,10 +1,9 @@
 import { AllowedGithubEntity, Project, ProjectServiceInstance, Secret, User } from './types';
 
-// Static description of a peer in the cluster.
+// Static description of a peer in the cluster. Identity is nodeId; address is the current IP.
 export interface NodeInfo {
     nodeId: string;
     address: string;
-    raftPort: number;
     apiPort: number;
 }
 
@@ -38,7 +37,8 @@ export interface CertRecord {
     notAfter: number;
 }
 
-// === Replicated log operations (Raft state machine input) ===
+// === State mutations applied directly to the leader's source-of-truth DB (via applyOp). ===
+// Node membership is handled by the registry (not ops); certs are leader-local (not replicated).
 export enum OpType {
     UPSERT_PROJECT = 'UPSERT_PROJECT',
     DELETE_PROJECT = 'DELETE_PROJECT',
@@ -47,9 +47,6 @@ export enum OpType {
     SET_PROJECT_ASSIGNMENT = 'SET_PROJECT_ASSIGNMENT',
     SET_DESIRED_DEPLOYMENT = 'SET_DESIRED_DEPLOYMENT',
     CLEAR_DESIRED_DEPLOYMENT = 'CLEAR_DESIRED_DEPLOYMENT',
-    UPSERT_CERT = 'UPSERT_CERT',
-    UPSERT_NODE = 'UPSERT_NODE',
-    REMOVE_NODE = 'REMOVE_NODE',
     SET_DESIRED_NSM_VERSION = 'SET_DESIRED_NSM_VERSION',
     UPSERT_USER = 'UPSERT_USER',
     SET_ALLOWED_ENTITIES = 'SET_ALLOWED_ENTITIES',
@@ -63,9 +60,6 @@ export type Op =
     | { type: OpType.SET_PROJECT_ASSIGNMENT; projectId: string; nodeId: string }
     | { type: OpType.SET_DESIRED_DEPLOYMENT; deployment: DesiredDeployment }
     | { type: OpType.CLEAR_DESIRED_DEPLOYMENT; projectId: string }
-    | { type: OpType.UPSERT_CERT; cert: CertRecord }
-    | { type: OpType.UPSERT_NODE; node: NodeInfo }
-    | { type: OpType.REMOVE_NODE; nodeId: string }
     | { type: OpType.SET_DESIRED_NSM_VERSION; version: string; artifactRef: string }
     | { type: OpType.UPSERT_USER; user: User }
     | { type: OpType.SET_ALLOWED_ENTITIES; entities: AllowedGithubEntity[] };

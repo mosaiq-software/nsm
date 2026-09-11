@@ -1,0 +1,45 @@
+# NSM per-node observability agents (runs on EVERY node, including the leader).
+# Brought up by bootstrap:
+#   OBS_LOKI_PUSH_URL=http://<leader-ip>:3100 NODE_ID=<id> \
+#     docker compose -p nsm-agent -f deploy/agent/docker-compose.yml up -d
+services:
+    alloy:
+        image: grafana/alloy:v1.3.1
+        command:
+            - run
+            - /etc/alloy/config.alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+        environment:
+            - NODE_ID=${NODE_ID:-node-local}
+            - OBS_LOKI_PUSH_URL=${OBS_LOKI_PUSH_URL:-http://127.0.0.1:3100}
+        volumes:
+            - ./config.alloy:/etc/alloy/config.alloy:ro
+            - /var/run/docker.sock:/var/run/docker.sock:ro
+            - /var/log/journal:/var/log/journal:ro
+            - /etc/machine-id:/etc/machine-id:ro
+        restart: unless-stopped
+
+    node-exporter:
+        image: prom/node-exporter:v1.8.2
+        command:
+            - '--path.rootfs=/host'
+        pid: host
+        ports:
+            - '9100:9100'
+        volumes:
+            - '/:/host:ro,rslave'
+        restart: unless-stopped
+
+    cadvisor:
+        image: gcr.io/cadvisor/cadvisor:v0.49.1
+        ports:
+            - '8080:8080'
+        volumes:
+            - /:/rootfs:ro
+            - /var/run:/var/run:ro
+            - /sys:/sys:ro
+            - /var/lib/docker/:/var/lib/docker:ro
+            - /dev/disk/:/dev/disk:ro
+        devices:
+            - /dev/kmsg
+        restart: unless-stopped

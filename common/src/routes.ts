@@ -1,4 +1,4 @@
-import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, LogMessage, Project, ProjectInstance, Secret, User } from './types';
+import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, LogMessage, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, Secret, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -12,6 +12,8 @@ export enum API_ROUTES {
     GET_WORKER_STATUSES = '/cluster/nodes/status',
     GET_CONTROL_PLANE_STATUS = '/cluster/status',
     GET_ALLOWED_ENTITIES = '/allowed-entities',
+    GET_OBSERVABILITY_LOGS = '/observability/logs',
+    GET_OBSERVABILITY_METRICS = '/observability/metrics',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -39,6 +41,8 @@ export interface API_PARAMS {
     [API_ROUTES.GET_WORKER_STATUSES]: {};
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: {};
     [API_ROUTES.GET_ALLOWED_ENTITIES]: {};
+    [API_ROUTES.GET_OBSERVABILITY_LOGS]: {};
+    [API_ROUTES.GET_OBSERVABILITY_METRICS]: {};
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -67,6 +71,8 @@ export interface API_BODY {
     [API_ROUTES.GET_WORKER_STATUSES]: undefined;
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: undefined;
     [API_ROUTES.GET_ALLOWED_ENTITIES]: undefined;
+    [API_ROUTES.GET_OBSERVABILITY_LOGS]: undefined;
+    [API_ROUTES.GET_OBSERVABILITY_METRICS]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -94,6 +100,8 @@ export interface API_RETURN {
     [API_ROUTES.GET_WORKER_STATUSES]: undefined; //TODO
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: ClusterStatus | undefined;
     [API_ROUTES.GET_ALLOWED_ENTITIES]: AllowedGithubEntity[] | undefined;
+    [API_ROUTES.GET_OBSERVABILITY_LOGS]: ObservabilityLogsResult | undefined;
+    [API_ROUTES.GET_OBSERVABILITY_METRICS]: ObservabilityMetricsResult | undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -123,6 +131,8 @@ export interface API_AUTH {
     [API_ROUTES.GET_WORKER_STATUSES]: string;
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: string;
     [API_ROUTES.GET_ALLOWED_ENTITIES]: string;
+    [API_ROUTES.GET_OBSERVABILITY_LOGS]: string;
+    [API_ROUTES.GET_OBSERVABILITY_METRICS]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;
