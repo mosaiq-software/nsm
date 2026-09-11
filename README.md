@@ -335,6 +335,22 @@ Advanced: if you already have the repo checked out on a machine, you can skip `i
 
 Uninstall / start over: to completely remove NSM from a machine (services, containers, config, data, and the `nsm` user), run `sudo nsm-uninstall` (or `sudo bash uninstall.sh` from a checkout). It leaves system packages and Let's Encrypt certs in place; add `--purge-data` to also delete `PERSISTENT_PATH`, or `--prune-docker` to prune all unused Docker resources. Use `--yes` to skip the confirmation.
 
+### Self-updating (push to main → cluster upgrades itself)
+
+NSM upgrades itself from git. Each node's installed tree at `/opt/nsm` is a real git checkout, and the reported node version is its **deployed commit SHA**. The flow:
+
+1. A push to `main` runs the `.github/workflows/self-update.yml` GitHub Action, which `POST`s the new commit SHA to the leader's secret-gated `POST /cluster/self-update`.
+2. The leader records it as the desired version in its source-of-truth DB.
+3. A leader cron (every minute) drives a **rolling upgrade** — followers first (one at a time), leader last — comparing each node's reported commit to the desired one.
+4. Each node runs `git fetch && git checkout <sha> && npm ci`, the leader also rebuilds the dashboard UI, then the node restarts via `systemctl restart nsmd` (systemd `Restart=always` brings it back on the new code).
+
+To enable it, add two repository secrets in GitHub (Settings → Secrets and variables → Actions):
+
+- `NSM_API_URL` — the leader's externally reachable base URL (e.g. `https://nsm.example.com`).
+- `NSM_CLUSTER_SECRET` — the cluster secret (matches `CLUSTER_SECRET` on the leader).
+
+Follower nodes only self-update from git if their `/opt/nsm` is a git checkout (leader installs are; the leader-served follower bundle is not — those nodes stay put and log a skip rather than failing).
+
 ### Repo access (GitHub App)
 
 NSM clones private app repos using a **GitHub App**. You install the App on the repos you deploy (Contents: Read-only) and place its private key on the **leader only** (`/etc/nsm/github-app.pem`; `sudo nsm-setup` writes it for you). The leader signs a short-lived App JWT, mints **repo-scoped installation tokens** (~1h, auto-rotating) on demand, and serves fresh tokens to followers over the secret-gated `POST /cluster/git-token`. Nothing long-lived is stored on followers, tokens never appear in argv or logs (git reads them via a `GIT_ASKPASS` helper), and access is revocable per repo by changing the App installation.

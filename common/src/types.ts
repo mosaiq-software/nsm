@@ -268,6 +268,13 @@ export interface AllowedGithubEntity {
     avatarUrl: string;
 }
 
+// A user/org that has installed the NSM GitHub App, surfaced as create-project suggestions.
+export interface GithubOwner {
+    login: string;
+    type: string; // 'User' | 'Organization'
+    avatarUrl: string;
+}
+
 export enum LogLevel {
     ERROR = 'error',
     WARN = 'warn',

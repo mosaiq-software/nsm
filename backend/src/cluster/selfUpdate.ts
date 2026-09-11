@@ -19,12 +19,21 @@ const applyVersionLocally = async (artifactRef: string): Promise<void> => {
         console.log(`[selfupdate] (dev) would update to ${artifactRef}`);
         return;
     }
-    // Pull the new code (git-tag based by default) and restart the service.
-    const cmd = `cd ${config.nsmRepoDir} && git fetch --all --tags && git checkout ${artifactRef} && npm ci --omit=dev`;
+    // Check out the target commit and install all deps. `npm ci` (not --omit=dev) is required
+    // because the daemon runs via tsx, a devDependency, and `git checkout --force` discards any
+    // in-place edits so a node can always converge on the target commit.
+    const cmd = `cd ${config.nsmRepoDir} && git fetch --all --tags --prune && git checkout --force ${artifactRef} && npm ci`;
     const { out, code } = await execSafe(cmd, 1000 * 60 * 5);
     if (code !== 0) {
-        console.error(`[selfupdate] failed to fetch ${artifactRef}: ${out}`);
+        console.error(`[selfupdate] failed to update to ${artifactRef}: ${out}`);
         return;
+    }
+    // The leader serves the management UI, so rebuild it from the new code before restarting. The
+    // VITE_* build inputs are already in the daemon's environment via the systemd EnvironmentFile.
+    if (cluster.isLeader()) {
+        const build = `cd ${config.nsmRepoDir} && NSM_UI_OUT=${config.wwwPath} npm run build -w frontend`;
+        const { out: buildOut, code: buildCode } = await execSafe(build, 1000 * 60 * 5);
+        if (buildCode !== 0) console.error(`[selfupdate] UI rebuild failed: ${buildOut}`);
     }
     // Detach so the restart survives this process exiting.
     void execSafe(sudo('systemctl restart nsmd'), 5000);
@@ -48,7 +57,7 @@ export const runSelfUpdateRolloutIfLeader = async (): Promise<void> => {
 
     if (staleFollowers.length === 0) {
         // All followers are up to date; if leader itself is stale, upgrade last.
-        if (config.version !== desired.version) {
+        if ((config.commit || config.version) !== desired.version) {
             rolloutInProgress = true;
             console.log('[selfupdate] leader is last to upgrade; applying now');
             await applyVersionLocally(desired.artifactRef);

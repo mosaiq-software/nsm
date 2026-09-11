@@ -79,7 +79,10 @@ install_deps() {
 install_code() {
     log "Installing NSM code to $INSTALL_DIR..."
     mkdir -p "$INSTALL_DIR" "$ETC_DIR" /var/lib/nsm /etc/nsm/prometheus
-    rsync -a --delete --exclude node_modules --exclude .git "$REPO_DIR/" "$INSTALL_DIR/"
+    # Keep the .git dir (when the source has one) so the installed tree is a real checkout that the
+    # self-update flow can `git fetch`/`git checkout` against. --exclude node_modules avoids clobbering
+    # the installed deps with the source's (they are reinstalled below).
+    rsync -a --delete --exclude node_modules "$REPO_DIR/" "$INSTALL_DIR/"
     (cd "$INSTALL_DIR" && npm ci)
 
     if [[ ! -f "$ENV_FILE" ]]; then

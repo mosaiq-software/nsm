@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
-import { useDisclosure } from '@mantine/hooks';
-import { AppShell, Avatar, Burger, Button, Center, Divider, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
+import React, { useEffect, useState } from 'react';
+import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
+import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import RouterLink from '@/components/RouterLink';
 import { useProjects } from '@/contexts/project-context';
 import { Link, useNavigate } from 'react-router-dom';
-import { Project } from '@mosaiq/nsm-common/types';
+import { GithubOwner, Project } from '@mosaiq/nsm-common/types';
+import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
+import { rawApiGetNoHook, useAPI } from '@/utils/api';
 
 const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle }] = useDisclosure();
@@ -21,6 +23,56 @@ const Layout = (props: { children: React.ReactNode }) => {
         repoBranch: '',
         allowCICD: false,
     });
+
+    const { token } = useAPI();
+    const [owners, setOwners] = useState<GithubOwner[]>([]);
+    const [repos, setRepos] = useState<string[]>([]);
+    const [branches, setBranches] = useState<string[]>([]);
+    // Debounce the free-text owner/repo so typing doesn't fire a GitHub lookup on every keystroke.
+    const [debouncedOwner] = useDebouncedValue(newProject.repoOwner?.trim() || '', 400);
+    const [debouncedRepo] = useDebouncedValue(newProject.repoName?.trim() || '', 400);
+
+    // Owners that installed the GitHub App: loaded once when the modal opens.
+    useEffect(() => {
+        if (modal !== 'create') return;
+        let cancelled = false;
+        void rawApiGetNoHook(API_ROUTES.GET_GITHUB_OWNERS, {}, token).then((res) => {
+            if (!cancelled && res) setOwners(res);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [modal, token]);
+
+    // Repos the App can access for the chosen owner.
+    useEffect(() => {
+        if (modal !== 'create' || !debouncedOwner) {
+            setRepos([]);
+            return;
+        }
+        let cancelled = false;
+        void rawApiGetNoHook(API_ROUTES.GET_GITHUB_REPOS, {}, token, { owner: debouncedOwner }).then((res) => {
+            if (!cancelled) setRepos(res || []);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [modal, debouncedOwner, token]);
+
+    // Branches of the chosen repo.
+    useEffect(() => {
+        if (modal !== 'create' || !debouncedOwner || !debouncedRepo) {
+            setBranches([]);
+            return;
+        }
+        let cancelled = false;
+        void rawApiGetNoHook(API_ROUTES.GET_GITHUB_BRANCHES, {}, token, { owner: debouncedOwner, repo: debouncedRepo }).then((res) => {
+            if (!cancelled) setBranches(res || []);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [modal, debouncedOwner, debouncedRepo, token]);
 
     return (
         <>
@@ -42,26 +94,29 @@ const Layout = (props: { children: React.ReactNode }) => {
                             value={newProject?.id || ''}
                             onChange={(e) => setNewProject({ ...newProject, id: e.target.value })}
                         />
-                        <TextInput
+                        <Autocomplete
                             label="Repo Owner"
                             placeholder="mosaiq-software"
-                            description="As seen in the URL"
+                            description="Accounts/orgs that installed the NSM GitHub App. You can also type any owner."
+                            data={owners.map((o) => o.login)}
                             value={newProject?.repoOwner || ''}
-                            onChange={(e) => setNewProject({ ...newProject, repoOwner: e.target.value })}
+                            onChange={(value) => setNewProject({ ...newProject, repoOwner: value })}
                         />
-                        <TextInput
+                        <Autocomplete
                             label="Repo Name"
                             placeholder="terrazzo-api"
-                            description="As seen in the URL"
+                            description="Repositories the GitHub App can access for this owner. You can also type any name."
+                            data={repos}
                             value={newProject?.repoName || ''}
-                            onChange={(e) => setNewProject({ ...newProject, repoName: e.target.value })}
+                            onChange={(value) => setNewProject({ ...newProject, repoName: value })}
                         />
-                        <TextInput
+                        <Autocomplete
                             label="Repo Branch"
                             placeholder="main"
-                            description="The branch to deploy from. Defaults to repo default branch if not set."
+                            description="Branches in the selected repo. Defaults to the repo default branch if not set."
+                            data={branches}
                             value={newProject?.repoBranch || ''}
-                            onChange={(e) => setNewProject({ ...newProject, repoBranch: e.target.value })}
+                            onChange={(value) => setNewProject({ ...newProject, repoBranch: value })}
                         />
                         {newProject.repoOwner && newProject.repoName && (
                             <Link to={`https://github.com/${newProject.repoOwner}/${newProject.repoName}`} target="_blank">{`https://github.com/${newProject.repoOwner}/${newProject.repoName}`}</Link>

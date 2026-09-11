@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { NodeInfo } from '@mosaiq/nsm-common/clusterOps';
 
@@ -40,6 +41,7 @@ export interface NsmConfig {
     grafanaUrl: string;
     obsLokiPushUrl: string;
     version: string;
+    commit: string;
 }
 
 const bool = (v: string | undefined) => v === 'true';
@@ -97,6 +99,7 @@ export const config: NsmConfig = {
     grafanaUrl: process.env.GRAFANA_URL || 'http://127.0.0.1:3000',
     obsLokiPushUrl: deriveLokiPush(),
     version: readVersion(),
+    commit: readGitCommit(),
 };
 
 export const gitSshKeyPath = (): string => `${config.gitSshKeyDir}/${config.gitSshKeyFile}`;
@@ -118,6 +121,21 @@ function readVersion(): string {
         return pkg.version || '0.0.0';
     } catch {
         return process.env.NSM_VERSION || '0.0.0';
+    }
+}
+
+// The git commit of the installed tree. This is the identity self-update converges on (a push to
+// main changes it), so it must be the deployed commit rather than the static package.json version.
+// Empty when the tree isn't a git checkout (e.g. some dev setups), in which case callers fall back
+// to the package.json version.
+function readGitCommit(): string {
+    try {
+        const dir = process.env.NSM_REPO_DIR || '/opt/nsm';
+        return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] })
+            .toString()
+            .trim();
+    } catch {
+        return '';
     }
 }
 

@@ -1,4 +1,4 @@
-import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, LogMessage, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, Secret, User } from './types';
+import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, GithubOwner, LogMessage, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, Secret, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -15,6 +15,9 @@ export enum API_ROUTES {
     GET_ALLOWED_ENTITIES = '/allowed-entities',
     GET_OBSERVABILITY_LOGS = '/observability/logs',
     GET_OBSERVABILITY_METRICS = '/observability/metrics',
+    GET_GITHUB_OWNERS = '/github/owners',
+    GET_GITHUB_REPOS = '/github/repos',
+    GET_GITHUB_BRANCHES = '/github/branches',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -45,6 +48,9 @@ export interface API_PARAMS {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: {};
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: {};
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: {};
+    [API_ROUTES.GET_GITHUB_OWNERS]: {};
+    [API_ROUTES.GET_GITHUB_REPOS]: {};
+    [API_ROUTES.GET_GITHUB_BRANCHES]: {};
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -76,6 +82,9 @@ export interface API_BODY {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: undefined;
+    [API_ROUTES.GET_GITHUB_OWNERS]: undefined;
+    [API_ROUTES.GET_GITHUB_REPOS]: undefined;
+    [API_ROUTES.GET_GITHUB_BRANCHES]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -106,6 +115,9 @@ export interface API_RETURN {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: AllowedGithubEntity[] | undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: ObservabilityLogsResult | undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: ObservabilityMetricsResult | undefined;
+    [API_ROUTES.GET_GITHUB_OWNERS]: GithubOwner[];
+    [API_ROUTES.GET_GITHUB_REPOS]: string[];
+    [API_ROUTES.GET_GITHUB_BRANCHES]: string[];
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -138,6 +150,9 @@ export interface API_AUTH {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: string;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: string;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: string;
+    [API_ROUTES.GET_GITHUB_OWNERS]: string;
+    [API_ROUTES.GET_GITHUB_REPOS]: string;
+    [API_ROUTES.GET_GITHUB_BRANCHES]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;

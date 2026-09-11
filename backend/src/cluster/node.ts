@@ -33,7 +33,7 @@ class Cluster {
             return {
                 nodeId: n.nodeId,
                 reachable: r ? Date.now() - r.ts < 60000 : n.isLeader,
-                nsmVersion: r?.nsmVersion || (n.isLeader ? config.version : 'unknown'),
+                nsmVersion: r?.nsmVersion || (n.isLeader ? config.commit || config.version : 'unknown'),
                 isLeader: n.isLeader,
                 lastSeen: r?.ts ?? n.lastSeen ?? 0,
             };

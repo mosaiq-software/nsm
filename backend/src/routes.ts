@@ -15,7 +15,7 @@ import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userCont
 import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
-import { mintInstallationToken } from '@/utils/githubApp';
+import { mintInstallationToken, listInstallationOwners, listInstallationRepos, listRepoBranches } from '@/utils/githubApp';
 import { cluster } from '@/cluster/node';
 import { CLUSTER_SECRET_HEADER, forwardToLeader } from '@/cluster/leaderClient';
 import { ingestReport } from '@/cluster/statusGossip';
@@ -232,6 +232,46 @@ privateRouter.get(API_ROUTES.GET_OBSERVABILITY_METRICS, async (req, res) => {
         res.status(200).json(await queryMetric({ projectInstanceId, serviceInstanceId, projectId }, (metric as MetricKind) || 'cpu', start, end, step || '30s'));
     } catch (e: any) {
         res.status(400).send(e.message);
+    }
+});
+
+// GitHub App-backed suggestions for the create-project form. Leader-only (only the leader holds the
+// App private key). These degrade to an empty list on any failure so the form's free-text entry
+// still works when the App isn't configured or GitHub is unreachable.
+privateRouter.get(API_ROUTES.GET_GITHUB_OWNERS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    if (!isGithubAppConfigured()) return void res.status(200).json([]);
+    try {
+        res.status(200).json(await listInstallationOwners());
+    } catch (e) {
+        console.error('Error listing GitHub App owners', e);
+        res.status(200).json([]);
+    }
+});
+
+privateRouter.get(API_ROUTES.GET_GITHUB_REPOS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    const owner = String((req.query as Record<string, string>).owner || '').trim();
+    if (!owner) return void res.status(400).send('owner required');
+    if (!isGithubAppConfigured()) return void res.status(200).json([]);
+    try {
+        res.status(200).json(await listInstallationRepos(owner));
+    } catch (e) {
+        console.error(`Error listing GitHub repos for ${owner}`, e);
+        res.status(200).json([]);
+    }
+});
+
+privateRouter.get(API_ROUTES.GET_GITHUB_BRANCHES, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    const { owner, repo } = req.query as Record<string, string>;
+    if (!owner?.trim() || !repo?.trim()) return void res.status(400).send('owner and repo required');
+    if (!isGithubAppConfigured()) return void res.status(200).json([]);
+    try {
+        res.status(200).json(await listRepoBranches(owner.trim(), repo.trim()));
+    } catch (e) {
+        console.error(`Error listing GitHub branches for ${owner}/${repo}`, e);
+        res.status(200).json([]);
     }
 });
 

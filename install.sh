@@ -64,7 +64,9 @@ fetch_leader_code() {
         clone_url="https://x-access-token:${NSM_TOKEN}@${NSM_REPO#https://}"
     fi
     log "Cloning ${NSM_REPO}@${NSM_REF}..."
-    if ! git clone --depth 1 --branch "$NSM_REF" "$clone_url" "$SRC_DIR"; then
+    # Full clone (not --depth 1): the installed tree is reused as a git checkout for self-update, which
+    # must be able to check out arbitrary commits pushed to the tracked branch.
+    if ! git clone --branch "$NSM_REF" "$clone_url" "$SRC_DIR"; then
         echo "Clone failed. If you are installing from a private fork, pass a GitHub token:" >&2
         echo "  ... | sudo GITHUB_TOKEN=<token> bash -s -- --leader" >&2
         exit 1

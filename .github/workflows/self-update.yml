@@ -1,0 +1,25 @@
+name: NSM Self-Update
+
+# On every push to main, tell the running cluster to update to this commit. The leader records the
+# desired commit in its source-of-truth DB and drives a rolling upgrade (followers first, leader
+# last); each node checks out this commit, reinstalls deps, and restarts via systemd.
+on:
+    push:
+        branches:
+            - main
+
+jobs:
+    notify-cluster:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Announce desired commit to the cluster
+              env:
+                  # NSM_API_URL: the leader's externally reachable base URL (e.g. https://nsm.example.com).
+                  # NSM_CLUSTER_SECRET: the cluster secret, matching CLUSTER_SECRET on the leader.
+                  NSM_API_URL: ${{ secrets.NSM_API_URL }}
+                  NSM_CLUSTER_SECRET: ${{ secrets.NSM_CLUSTER_SECRET }}
+              run: |
+                  curl -fsS -X POST "$NSM_API_URL/cluster/self-update" \
+                    -H 'content-type: application/json' \
+                    -H "x-nsm-cluster-secret: $NSM_CLUSTER_SECRET" \
+                    -d "{\"version\":\"${GITHUB_SHA}\",\"artifactRef\":\"${GITHUB_SHA}\"}"

@@ -47,7 +47,7 @@ const buildReport = async (): Promise<NodeStatusReport> => {
     }
     return {
         nodeId: config.nodeId,
-        nsmVersion: config.version,
+        nsmVersion: config.commit || config.version,
         healthy: true,
         currentAddress: await getPrimaryIp(),
         apiPort: config.apiPort,
