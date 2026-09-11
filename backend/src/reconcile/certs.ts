@@ -3,6 +3,7 @@ import { execStream, execSafe } from '@/host/exec';
 import { sudo } from '@/host/privilege';
 import { getAllCertsModel, upsertCertModel } from '@/persistence/certPersistence';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
+import { dashboardDomain } from './dashboardIngress';
 import { CertRecord } from '@mosaiq/nsm-common/clusterOps';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -16,6 +17,9 @@ export const leaderEnsureCerts = async (): Promise<void> => {
     const deployments = await getAllDesiredDeploymentsModel();
     const domains = new Set<string>();
     for (const dep of deployments) for (const d of dep.domains || []) domains.add(d);
+    // The leader also fronts its own management dashboard over TLS.
+    const dashDomain = dashboardDomain();
+    if (dashDomain) domains.add(dashDomain);
 
     const existing = await getAllCertsModel();
     for (const domain of domains) {

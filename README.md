@@ -110,6 +110,7 @@ sequenceDiagram
 - The **leader is the single public 443 entrypoint**. Point your router's 443 forward and your app DNS at the leader (DHCP-reserved). The leader terminates TLS and reverse-proxies to backend nodes by internal hostname.
 - Only the leader renders nginx (`renderAllNginx`, guarded by `isLeader()`); followers just run app containers.
 - Certs are **leader-local**: `leaderEnsureCerts()` runs certbot (DNS-01 when `CERTBOT_DNS_ARGS` is set, else `--nginx`) and keeps material in `LETSENCRYPT_LIVE_DIR`. No cross-node cert replication.
+- The leader also **fronts its own dashboard over TLS**. When `NSM_PUBLIC_URL` (or `FRONTEND_URL`) is an `https://` FQDN, the reconciler obtains a cert for that host and renders a vhost (`dashboardIngress.ts`) that proxies `:443` → the local daemon, so `https://<dashboard-domain>/` just works. Requires the domain's DNS `A` record to point at the leader and ports 80/443 reachable. If the public URL is plain HTTP, an IP, or `localhost`, no dashboard cert/vhost is created and you use `http://<leader-ip>:1025`.
 
 ---
 
@@ -289,7 +290,7 @@ This installs dependencies (Node, Docker, nginx, certbot), lays down the code, c
    ```
    It walks you through everything and writes the files for you - it prompts for (and you paste in) each value:
    - the **cluster secret** (defaults to the one the installer generated in step 1; press Enter to keep it, or set your own - every follower needs the exact same value),
-   - the leader's **public URL**,
+   - the leader's **public URL** (if you give an `https://` domain, the leader automatically obtains a cert and serves the dashboard over HTTPS on that domain - just point its DNS `A` record at the leader and open ports 80/443),
    - the **GitHub App ID** from step 2.4 and the **private key** (paste the whole `.pem`, then press `Ctrl-D`),
    - your **GitHub OAuth** client ID / secret / callback / default user for dashboard sign-in.
 

@@ -3,6 +3,8 @@ import { config } from '@/config';
 import { execSafe } from '@/host/exec';
 import { sudo } from '@/host/privilege';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
+import { getAllCertsModel } from '@/persistence/certPersistence';
+import { dashboardDomain, buildDashboardConf, DASHBOARD_CONF_NAME } from './dashboardIngress';
 
 // The leader is the single TLS ingress, so only the leader renders nginx. It renders one conf per
 // project (from its authoritative desired-deployment set); each conf's proxy_pass targets a
@@ -15,6 +17,16 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
     for (const dep of deployments) {
         if (dep.nginxConf && dep.nginxConf.trim().length) {
             desiredFiles.set(`${dep.projectId}.conf`, dep.nginxConf);
+        }
+    }
+
+    // Front the management dashboard over TLS once its cert exists. Gate on the cert record so a
+    // not-yet-issued domain can't reference missing PEMs and fail `nginx -t` for every vhost.
+    const dashDomain = dashboardDomain();
+    if (dashDomain) {
+        const certs = await getAllCertsModel();
+        if (certs.some((c) => c.domain === dashDomain)) {
+            desiredFiles.set(DASHBOARD_CONF_NAME, buildDashboardConf(dashDomain));
         }
     }
 
