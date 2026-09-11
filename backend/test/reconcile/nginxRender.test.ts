@@ -31,9 +31,9 @@ describe('renderAllNginx', () => {
         expect(changed).toBe(true);
         expect(await fsp.readFile(`${config.nginxConfDir}/p1.conf`, 'utf-8')).toBe('server p1');
         expect(await fsp.readFile(`${config.nginxConfDir}/p2.conf`, 'utf-8')).toBe('server p2');
-        // nginx -t + reload gated on changed && production
-        expect(mockExec).toHaveBeenCalledWith('nginx -t', expect.any(Number));
-        expect(mockExec).toHaveBeenCalledWith('nginx -s reload', expect.any(Number));
+        // nginx -t + reload gated on changed && production; sudo-prefixed in production
+        expect(mockExec).toHaveBeenCalledWith('sudo -n nginx -t', expect.any(Number));
+        expect(mockExec).toHaveBeenCalledWith('sudo -n nginx -s reload', expect.any(Number));
     });
 
     it('reports no change on a second identical render', async () => {
@@ -56,9 +56,9 @@ describe('renderAllNginx', () => {
 
     it('does not reload when nginx -t fails', async () => {
         mockDeps.mockResolvedValue([dep('p1', 'server p1')]);
-        mockExec.mockImplementation(async (cmd: string) => (cmd === 'nginx -t' ? { out: 'bad', code: 1 } : { out: '', code: 0 }));
+        mockExec.mockImplementation(async (cmd: string) => (cmd === 'sudo -n nginx -t' ? { out: 'bad', code: 1 } : { out: '', code: 0 }));
         const { changed } = await renderAllNginx();
         expect(changed).toBe(false);
-        expect(mockExec).not.toHaveBeenCalledWith('nginx -s reload', expect.any(Number));
+        expect(mockExec).not.toHaveBeenCalledWith('sudo -n nginx -s reload', expect.any(Number));
     });
 });

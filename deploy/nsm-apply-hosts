@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Atomically replace /etc/hosts with content read from stdin. Invoked by nsmd through sudo so the
+# unprivileged nsm user can refresh the NSM-managed hosts block without full root.
+set -euo pipefail
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+cat > "$tmp"
+install -m 0644 -o root -g root "$tmp" /etc/hosts

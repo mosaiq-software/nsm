@@ -1,6 +1,6 @@
-import * as fs from 'fs/promises';
 import { config } from '@/config';
 import { execStream, execSafe } from '@/host/exec';
+import { sudo } from '@/host/privilege';
 import { getAllCertsModel, upsertCertModel } from '@/persistence/certPersistence';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 import { CertRecord } from '@mosaiq/nsm-common/clusterOps';
@@ -28,18 +28,18 @@ export const leaderEnsureCerts = async (): Promise<void> => {
 const obtainCert = async (domain: string): Promise<void> => {
     // DNS-01 when configured (recommended); otherwise nginx/HTTP-01 on the leader's ingress.
     const method = config.certbotDnsArgs ? config.certbotDnsArgs : '--nginx';
-    const cmd = `certbot certonly ${method} -d ${domain} --agree-tos --non-interactive --keep-until-expiring`;
+    const cmd = sudo(`certbot certonly ${method} -d ${domain} --agree-tos --non-interactive --keep-until-expiring`);
     const { out, code } = await execStream(cmd, 1000 * 60 * 3);
     if (code !== 0) {
         console.error(`certbot failed for ${domain}: ${out}`);
         return;
     }
     try {
-        const dir = `${config.letsencryptLiveDir}/${domain}`;
-        const fullchainPem = await fs.readFile(`${dir}/fullchain.pem`, 'utf-8');
-        const privkeyPem = await fs.readFile(`${dir}/privkey.pem`, 'utf-8');
-        const notAfter = await readCertNotAfter(`${dir}/fullchain.pem`);
-        const cert: CertRecord = { domain, fullchainPem, privkeyPem, notAfter };
+        // Record only expiry. The PEMs live under /etc/letsencrypt (root-only 0700/0600) and are
+        // read by nginx directly; the daemon runs as the unprivileged nsm user and reads notAfter
+        // via a sudo-scoped `openssl x509 -enddate`, so it never needs to read the key material.
+        const notAfter = await readCertNotAfter(`${config.letsencryptLiveDir}/${domain}/fullchain.pem`);
+        const cert: CertRecord = { domain, notAfter };
         await upsertCertModel(cert);
     } catch (e) {
         console.error(`Failed to record cert for ${domain}:`, e);
@@ -47,7 +47,7 @@ const obtainCert = async (domain: string): Promise<void> => {
 };
 
 const readCertNotAfter = async (path: string): Promise<number> => {
-    const { out, code } = await execSafe(`openssl x509 -enddate -noout -in ${path}`, 5000);
+    const { out, code } = await execSafe(sudo(`openssl x509 -enddate -noout -in ${path}`), 5000);
     if (code !== 0) return Date.now() + 60 * 24 * 60 * 60 * 1000;
     const match = out.match(/notAfter=(.*)/);
     if (match) {

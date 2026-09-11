@@ -204,6 +204,7 @@ nsm/                          # workspace root (npm workspaces: common, backend,
 │   │   ├── controllers/      # project, deploy, secret, user, allowedEntity, status, observability
 │   │   ├── persistence/      # Sequelize models (source of truth on the leader)
 │   │   ├── host/exec.ts      # host command execution + getPrimaryIp()
+│   │   ├── host/privilege.ts # sudo() wrapper (production only) + execWithInput()
 │   │   └── utils/            # nginx, repo/git, auth, db, init, log (pino), metrics (prom-client)
 │   ├── test/                 # Vitest suite
 │   ├── tsconfig.json         # paths: @/* -> src/*, @mosaiq/nsm-common -> ../common/src
@@ -215,9 +216,12 @@ nsm/                          # workspace root (npm workspaces: common, backend,
 ├── deploy/
 │   ├── observability/        # leader stack compose + prometheus + grafana provisioning
 │   ├── agent/                # per-node alloy + node_exporter + cadvisor
-│   └── nginx.main.conf       # include directive for host nginx
-├── systemd/nsmd.service      # host systemd unit (WorkingDirectory=/opt/nsm/backend)
-└── bootstrap.sh              # --leader / --follower one-command install
+│   ├── nginx.main.conf       # include directive for host nginx
+│   ├── nsm-apply-hosts       # root helper: atomically rewrites /etc/hosts from stdin (via sudo)
+│   └── nsm.sudoers           # scoped NOPASSWD policy installed to /etc/sudoers.d/nsm
+├── systemd/nsmd.service      # host systemd unit (runs as the nsm user)
+├── install.sh                # universal one-command installer (leader git-clone / follower bundle)
+└── bootstrap.sh              # --leader / --follower installer (run as root; creates the nsm user)
 ```
 
 ---
@@ -248,26 +252,37 @@ Observability: `LOKI_URL`, `PROMETHEUS_URL`, `GRAFANA_URL` (leader query proxy),
 
 ## Setting up a network
 
-Prerequisites: Linux hosts on the same LAN; the leader machine on a DHCP reservation/static IP; root/sudo; DNS for each app domain pointing at the leader. `bootstrap.sh` installs node 22, nginx, certbot, docker, jq, etc.; agents/stack run as containers.
+Prerequisites: Ubuntu hosts on the same LAN; the leader machine on a DHCP reservation/static IP; root/sudo; DNS for each app domain pointing at the leader. The installer/bootstrap installs node 22, nginx, certbot, docker, jq, etc.; agents/stack run as containers.
 
-1. Bootstrap the leader:
+### One command per node
+
+`install.sh` fetches the code and delegates to `bootstrap.sh`. Both roles are a single paste.
+
+1. **Leader** (first node) — pull the installer straight from GitHub:
    ```bash
-   git clone <this-repo> nsm && cd nsm
-   sudo ./bootstrap.sh --leader
+   curl -fsSL https://raw.githubusercontent.com/mosaiq-software/nsm/main/install.sh | sudo bash -s -- --leader
    ```
-   Edit `/etc/nsm/nsm.env` (`CLUSTER_SECRET`, `PRODUCTION=true`, GitHub OAuth, `LEADER_ADDRESS=http://127.0.0.1:1025`), then re-run or `sudo systemctl restart nsmd`. Verify: `curl -s localhost:1025/healthz | jq`.
+   This clones the repo, bootstraps the leader, generates the shared git **deploy key**, and prints its public half. Register that public key **once** on GitHub (a repo/org deploy key or a machine user) so every node can clone your app repos. Then set your real values in `/etc/nsm/nsm.env` (`CLUSTER_SECRET`, `PRODUCTION=true`, GitHub OAuth) and `sudo systemctl restart nsmd`. Verify: `curl -s localhost:1025/healthz | jq`.
 
-2. Add the git deploy key at `${GIT_SSH_KEY_DIR}/${GIT_SSH_KEY_FILE}` (mode 600) and register its public half on GitHub.
-
-3. Bootstrap each follower:
+2. **Followers** (joining nodes) — copy the ready-made command from the dashboard's **Nodes → Add a node** panel, or build it by hand:
    ```bash
-   sudo ./bootstrap.sh --follower --leader http://<leader-ip>:1025 --secret <CLUSTER_SECRET>
+   curl -fsSL http://<leader-ip>:1025/install.sh | sudo bash -s -- --secret <CLUSTER_SECRET>
    ```
-   It registers into the leader's registry and starts pulling assigned work.
+   The leader-served `install.sh` bakes in its own URL. The follower downloads the code bundle and the shared deploy key from the leader (both gated by the cluster secret), bootstraps itself, registers into the leader's registry, and starts pulling assigned work. No manual key handling.
 
-4. Point app-domain DNS at the leader. The leader terminates TLS and proxies to whichever node runs each app.
+3. Point app-domain DNS at the leader. The leader terminates TLS and proxies to whichever node runs each app.
 
-5. Create/assign/deploy a project via the API (below) or dashboard.
+4. Create/assign/deploy a project via the API (below) or dashboard.
+
+The lower-level `bootstrap.sh --leader` / `bootstrap.sh --follower --leader <url> --secret <token>` entry points still work if you've already cloned the repo.
+
+### Shared deploy key
+
+Every node clones app repos over SSH using one **shared** deploy key. The leader generates it on first bootstrap (`/etc/nsm/.ssh/id_ed25519` by default) and serves the private half to joining followers over the secret-gated `GET /cluster/deploy-key`. You register the public half on GitHub exactly once.
+
+### The `nsm` user and privileges
+
+`nsmd` does **not** run as root. Bootstrap creates a dedicated system user `nsm`, adds it to the `docker` group, and `chown`s the daemon's data directories (`/opt/nsm`, `/var/lib/nsm`, `/nsm`, `/etc/nsm`, `NSM_WWW_PATH`) to it. The few genuinely root-only commands are granted through a scoped `/etc/sudoers.d/nsm` policy (NOPASSWD for exactly `nginx -t`, `nginx -s reload`, `certbot *`, `openssl x509 *`, `systemctl restart nsmd`, and the `/usr/local/sbin/nsm-apply-hosts` helper that rewrites `/etc/hosts`). Docker operations go through group membership, not sudo. In dev/test (`PRODUCTION != true`) none of these are sudo-prefixed.
 
 ---
 
@@ -275,9 +290,9 @@ Prerequisites: Linux hosts on the same LAN; the leader machine on a DHCP reserva
 
 Three routers (`backend/src/routes.ts`):
 
-- Public: `GET /healthz`, `GET /metrics`, `GET /auth/github`, `POST /login/github/:token`, CI deploy webhook `GET /deploy/:projectId/:key`. The leader also serves the built UI (`express.static(NSM_WWW_PATH)`) with an SPA history fallback for non-API GETs.
-- Private (user token): project/secret/user/allow-list CRUD, `GET /cluster/status`, `GET /cluster/nodes`, dashboard deploy `GET /deployweb/:projectId/:key`, and observability `GET /observability/logs`, `GET /observability/metrics`. Writes on a follower forward to the leader.
-- Internal (`x-nsm-cluster-secret`): `/cluster/register`, `/cluster/deregister`, `/node/desired`, `/cluster/log`, `/cluster/status-report`, `/node/plan`, `/cluster/self-update`, `/cluster/apply-update`.
+- Public: `GET /healthz`, `GET /metrics`, `GET /install.sh` (leader-templated universal installer), `GET /auth/github`, `POST /login/github/:token`, CI deploy webhook `GET /deploy/:projectId/:key`. The leader also serves the built UI (`express.static(NSM_WWW_PATH)`) with an SPA history fallback for non-API GETs.
+- Private (user token): project/secret/user/allow-list CRUD, `GET /cluster/status`, `GET /cluster/nodes`, `GET /cluster/join-info` (copy-paste join command + deploy public key), dashboard deploy `GET /deployweb/:projectId/:key`, and observability `GET /observability/logs`, `GET /observability/metrics`. Writes on a follower forward to the leader.
+- Internal (`x-nsm-cluster-secret`): `/cluster/register`, `/cluster/deregister`, `GET /install/bundle.tgz` (leader source bundle), `GET /cluster/deploy-key` (shared deploy key), `/node/desired`, `/cluster/log`, `/cluster/status-report`, `/node/plan`, `/cluster/self-update`, `/cluster/apply-update`.
 
 ---
 

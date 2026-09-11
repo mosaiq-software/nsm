@@ -1,0 +1,9 @@
+# Installed to /etc/sudoers.d/nsm (mode 0440) by bootstrap.sh. Grants the unprivileged nsm user
+# NOPASSWD access to exactly the host commands the daemon must run as root. Everything else the
+# daemon does runs unprivileged (data dirs owned by nsm) or via the docker group.
+# Validate before installing with: visudo -cf deploy/nsm.sudoers
+nsm ALL=(root) NOPASSWD: /usr/sbin/nginx -t, /usr/sbin/nginx -s reload
+nsm ALL=(root) NOPASSWD: /usr/bin/certbot *
+nsm ALL=(root) NOPASSWD: /usr/bin/openssl x509 *
+nsm ALL=(root) NOPASSWD: /usr/bin/systemctl restart nsmd
+nsm ALL=(root) NOPASSWD: /usr/local/sbin/nsm-apply-hosts

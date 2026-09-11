@@ -1,5 +1,6 @@
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
+import { sudo } from '@/host/privilege';
 import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { getDesiredNsmVersion } from '@/persistence/clusterMetaPersistence';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
@@ -26,7 +27,7 @@ const applyVersionLocally = async (artifactRef: string): Promise<void> => {
         return;
     }
     // Detach so the restart survives this process exiting.
-    void execSafe('systemctl restart nsmd', 5000);
+    void execSafe(sudo('systemctl restart nsmd'), 5000);
 };
 
 // === Leader-orchestrated rolling upgrade ===

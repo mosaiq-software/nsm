@@ -11,8 +11,12 @@ EnvironmentFile=/etc/nsm/nsm.env
 ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=3
-# nsmd runs on the host (no container) so it can drive docker/nginx/certbot directly.
-User=root
+# nsmd runs on the host (no container) so it can drive docker/nginx/certbot. It runs as the
+# unprivileged `nsm` user: the docker group covers container ops, and a scoped /etc/sudoers.d/nsm
+# policy covers the few root-only commands (nginx reload, certbot, systemctl restart, /etc/hosts).
+User=nsm
+Group=nsm
+SupplementaryGroups=docker
 KillSignalRestart=SIGTERM
 LimitNOFILE=65536
 

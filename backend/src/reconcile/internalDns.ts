@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
+import { sudo, execWithInput } from '@/host/privilege';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
 
 const BEGIN = '# BEGIN NSM-managed';
@@ -32,8 +33,16 @@ export const refreshInternalHosts = async (): Promise<boolean> => {
     const next = `${without.trimEnd()}\n${block}`;
     if (next === current) return false;
 
-    await fs.writeFile(path, next);
-    const reload = await execSafe('nginx -s reload', 10000);
+    // As the unprivileged nsm user we cannot write /etc/hosts directly, so pipe the new contents
+    // to the sudo-scoped nsm-apply-hosts helper. Tests/dev point NSM_HOSTS_PATH at a writable temp
+    // file and take the direct fs path.
+    if (process.env.NSM_HOSTS_PATH) {
+        await fs.writeFile(path, next);
+    } else {
+        const write = await execWithInput(sudo('/usr/local/sbin/nsm-apply-hosts'), next, 10000);
+        if (write.code !== 0) console.error('[internalDns] failed to write /etc/hosts:', write.out);
+    }
+    const reload = await execSafe(sudo('nginx -s reload'), 10000);
     if (reload.code !== 0) console.error('[internalDns] nginx reload after hosts change failed:', reload.out);
     return true;
 };

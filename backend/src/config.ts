@@ -19,6 +19,7 @@ export interface NsmConfig {
     bindAddress: string;
     apiPort: number;
     leaderAddress: string;
+    publicUrl: string;
     internalDomain: string;
     clusterSecret: string;
     databaseDir: string;
@@ -46,6 +47,12 @@ const num = (v: string | undefined, d: number) => (v && !isNaN(Number(v)) ? Numb
 const apiPort = num(process.env.API_PORT, 1025);
 const leaderAddress = process.env.LEADER_ADDRESS || `http://127.0.0.1:${apiPort}`;
 
+// The externally reachable base URL of this node, used to template the served install.sh and the
+// copy-paste join command. Derived from trusted server config only (never request headers) so it
+// cannot be poisoned into the root-executed installer.
+const bindAddress = process.env.BIND_ADDRESS || '127.0.0.1';
+const publicUrl = process.env.NSM_PUBLIC_URL || process.env.API_URL || process.env.FRONTEND_URL || `http://${bindAddress}:${apiPort}`;
+
 // Default the Loki push target to the leader host on the standard Loki port.
 const deriveLokiPush = (): string => {
     if (process.env.OBS_LOKI_PUSH_URL) return process.env.OBS_LOKI_PUSH_URL;
@@ -61,9 +68,10 @@ export const config: NsmConfig = {
     production: bool(process.env.PRODUCTION),
     nodeId: process.env.NODE_ID || 'node-local',
     role: (process.env.NSM_ROLE as 'leader' | 'follower') || 'follower',
-    bindAddress: process.env.BIND_ADDRESS || '127.0.0.1',
+    bindAddress,
     apiPort,
     leaderAddress,
+    publicUrl,
     internalDomain: process.env.INTERNAL_DOMAIN || 'nsm.internal',
     clusterSecret: process.env.CLUSTER_SECRET || 'insecure-dev-secret',
     databaseDir: process.env.DATABASE_DIR || '/var/lib/nsm',

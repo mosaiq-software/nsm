@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
+import { sudo } from '@/host/privilege';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 
 // The leader is the single TLS ingress, so only the leader renders nginx. It renders one conf per
@@ -50,12 +51,12 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
     }
 
     if (changed && config.production) {
-        const test = await execSafe('nginx -t', 10000);
+        const test = await execSafe(sudo('nginx -t'), 10000);
         if (test.code !== 0) {
             console.error('nginx -t failed, not reloading:', test.out);
             return { changed: false };
         }
-        const reload = await execSafe('nginx -s reload', 10000);
+        const reload = await execSafe(sudo('nginx -s reload'), 10000);
         if (reload.code !== 0) console.error('nginx reload failed:', reload.out);
     }
 

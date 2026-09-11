@@ -1,5 +1,8 @@
-import { Alert, Badge, Center, Group, Loader, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { useEffect, useState } from 'react';
+import { Alert, Badge, Button, Center, Code, CopyButton, Group, Loader, Paper, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useCluster } from '@/contexts/cluster-context';
+import { useAPI } from '@/utils/api';
 import { MdOutlineStar } from 'react-icons/md';
 
 const relativeTime = (ts: number) => {
@@ -15,6 +18,63 @@ const relativeTime = (ts: number) => {
     return new Date(ts).toLocaleString();
 };
 
+const AddNodePanel = () => {
+    const api = useAPI();
+    const [command, setCommand] = useState<string | null>(null);
+    const [deployPublicKey, setDeployPublicKey] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!api.token) return;
+        void (async () => {
+            const info = await api.get(API_ROUTES.GET_JOIN_INFO, {});
+            if (cancelled || !info) return;
+            setCommand(info.command);
+            setDeployPublicKey(info.deployPublicKey);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [api.token]);
+
+    if (!command) return null;
+
+    return (
+        <Paper withBorder p="md" radius="md">
+            <Stack gap="xs">
+                <Title order={4}>Add a node</Title>
+                <Text c="dimmed" size="sm">Run this on a fresh Ubuntu machine to install NSM and join it to this cluster. The cluster secret and this leader&apos;s address are already baked in.</Text>
+                <Group align="stretch" wrap="nowrap">
+                    <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{command}</Code>
+                    <CopyButton value={command}>
+                        {({ copied, copy }) => (
+                            <Button variant="light" color={copied ? 'green' : 'blue'} onClick={copy}>
+                                {copied ? 'Copied' : 'Copy'}
+                            </Button>
+                        )}
+                    </CopyButton>
+                </Group>
+                {deployPublicKey && (
+                    <Stack gap={4}>
+                        <Text size="sm" fw={600}>Deploy public key</Text>
+                        <Text c="dimmed" size="xs">Register this once on GitHub (as a repo/org deploy key or a machine user) so nodes can clone your app repositories.</Text>
+                        <Group align="stretch" wrap="nowrap">
+                            <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{deployPublicKey}</Code>
+                            <CopyButton value={deployPublicKey}>
+                                {({ copied, copy }) => (
+                                    <Button variant="light" color={copied ? 'green' : 'blue'} onClick={copy}>
+                                        {copied ? 'Copied' : 'Copy'}
+                                    </Button>
+                                )}
+                            </CopyButton>
+                        </Group>
+                    </Stack>
+                )}
+            </Stack>
+        </Paper>
+    );
+};
+
 const NodesPage = () => {
     const clusterCtx = useCluster();
 
@@ -22,6 +82,7 @@ const NodesPage = () => {
         <Stack>
             <Title order={2}>Nodes</Title>
             <Text c="dimmed">Nodes self-register with the leader. This registry is read-only; membership is declared in each node&apos;s configuration.</Text>
+            <AddNodePanel />
             {!clusterCtx.hasLeader && (
                 <Alert color="red" variant="light" title="No Leader">
                     No leader node is currently reachable. Cluster status and deployments are unavailable until a leader is up.

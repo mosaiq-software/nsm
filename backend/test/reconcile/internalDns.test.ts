@@ -60,7 +60,7 @@ describe('refreshInternalHosts', () => {
         const written = await fsp.readFile(tmpHosts, 'utf-8');
         expect(written).toContain('127.0.0.1 localhost'); // preserved
         expect(written).toContain('10.0.0.1 a.nsm.internal');
-        expect(mExec).toHaveBeenCalledWith('nginx -s reload', expect.any(Number));
+        expect(mExec).toHaveBeenCalledWith('sudo -n nginx -s reload', expect.any(Number));
 
         // Second run with identical registry must not rewrite or reload.
         mExec.mockClear();

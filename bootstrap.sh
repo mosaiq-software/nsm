@@ -16,6 +16,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR=/opt/nsm
 ETC_DIR=/etc/nsm
 ENV_FILE=$ETC_DIR/nsm.env
+NSM_USER=nsm
 
 ROLE=""
 LEADER_URL=""
@@ -77,6 +78,25 @@ install_code() {
     fi
 }
 
+# --- 2a. Shared git deploy key (leader generates it once; followers fetch it on join) ---
+ensure_deploy_key() {
+    [[ "$ROLE" != "leader" ]] && return 0
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    local keydir="${GIT_SSH_KEY_DIR:-$ETC_DIR/.ssh}"
+    local keyfile="${GIT_SSH_KEY_FILE:-id_ed25519}"
+    mkdir -p "$keydir"; chmod 700 "$keydir"
+    if [[ ! -f "${keydir}/${keyfile}" ]]; then
+        log "Generating shared NSM git deploy key..."
+        ssh-keygen -t ed25519 -N '' -C nsm-deploy -f "${keydir}/${keyfile}" >/dev/null
+    fi
+    chmod 600 "${keydir}/${keyfile}"
+    log "NSM deploy public key - register this ONCE on GitHub (repo/org deploy key or a machine user):"
+    echo "-----------------------------------------------------------------"
+    cat "${keydir}/${keyfile}.pub"
+    echo "-----------------------------------------------------------------"
+}
+
 # --- 2b. Build the management UI on the leader (served same-origin by the daemon) ---
 build_frontend() {
     [[ "$ROLE" != "leader" ]] && return 0
@@ -93,6 +113,50 @@ build_frontend() {
            npm run build -w frontend)
 }
 
+# --- 2c. Dedicated nsm system user (nsmd runs as this user, not root) ---
+create_nsm_user() {
+    if ! id -u "$NSM_USER" >/dev/null 2>&1; then
+        log "Creating system user '$NSM_USER'..."
+        useradd --system --home-dir /var/lib/nsm --shell /usr/sbin/nologin "$NSM_USER"
+    fi
+    # Manage docker without sudo (docker group is created by the docker install).
+    if getent group docker >/dev/null 2>&1; then
+        usermod -aG docker "$NSM_USER"
+    fi
+}
+
+# --- 2d. Ownership: the daemon reads/writes these as the nsm user ---
+chown_dirs() {
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    log "Setting ownership for the '$NSM_USER' user..."
+    local deploy_parent="${DEPLOYMENT_PATH:-/nsm/apps}"; deploy_parent="${deploy_parent%/*}"
+    local paths=("$INSTALL_DIR" /var/lib/nsm "$deploy_parent" "$ETC_DIR" "$ETC_DIR/prometheus")
+    [[ -n "${NSM_WWW_PATH:-}" ]] && paths+=("$NSM_WWW_PATH")
+    for p in "${paths[@]}"; do
+        [[ -n "$p" ]] || continue
+        mkdir -p "$p"
+        chown -R "$NSM_USER":"$NSM_USER" "$p" || true
+    done
+    # The env file holds the cluster secret; keep it readable only by nsm.
+    chmod 640 "$ENV_FILE" || true
+    local keyfile="${GIT_SSH_KEY_DIR:-$ETC_DIR/.ssh}/${GIT_SSH_KEY_FILE:-id_ed25519}"
+    [[ -f "$keyfile" ]] && chmod 600 "$keyfile" || true
+}
+
+# --- 2e. Scoped privileges: helper script + sudoers policy for the few root-only commands ---
+install_privileged_helpers() {
+    log "Installing privileged hosts helper + sudoers policy..."
+    install -m 0755 -o root -g root "$INSTALL_DIR/deploy/nsm-apply-hosts" /usr/local/sbin/nsm-apply-hosts
+    # Validate first so a malformed file can never lock us out of sudo.
+    if visudo -cf "$INSTALL_DIR/deploy/nsm.sudoers" >/dev/null 2>&1; then
+        install -m 0440 -o root -g root "$INSTALL_DIR/deploy/nsm.sudoers" /etc/sudoers.d/nsm
+    else
+        echo "ERROR: deploy/nsm.sudoers failed validation; refusing to install it." >&2
+        exit 1
+    fi
+}
+
 # --- 3. systemd + nginx wiring (nginx ingress only needed on the leader) ---
 install_services() {
     log "Installing systemd unit..."
@@ -100,6 +164,8 @@ install_services() {
     systemctl daemon-reload
     if [[ "$ROLE" == "leader" ]]; then
         mkdir -p "$ETC_DIR/nginx"
+        # Created after chown_dirs, so give it to nsm explicitly: the daemon renders vhosts here.
+        chown "$NSM_USER":"$NSM_USER" "$ETC_DIR/nginx"
         if ! grep -q "include /etc/nsm/nginx" /etc/nginx/nginx.conf; then
             sed -i "/http {/a \    include /etc/nsm/nginx/*.conf;" /etc/nginx/nginx.conf
         fi
@@ -142,7 +208,11 @@ start_services() {
 
 install_deps
 install_code
+ensure_deploy_key
 build_frontend
+create_nsm_user
+chown_dirs
+install_privileged_helpers
 install_services
 start_observability
 start_services

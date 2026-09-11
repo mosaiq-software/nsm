@@ -32,9 +32,11 @@ export interface DesiredDeployment {
 
 export interface CertRecord {
     domain: string;
-    fullchainPem: string;
-    privkeyPem: string;
     notAfter: number;
+    // Cert material is served to nginx directly from LETSENCRYPT_LIVE_DIR and is not replicated, so
+    // these are optional: the leader records only expiry (notAfter) for cheap renewal checks.
+    fullchainPem?: string;
+    privkeyPem?: string;
 }
 
 // === State mutations applied directly to the leader's source-of-truth DB (via applyOp). ===

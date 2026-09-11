@@ -37,16 +37,14 @@ describe('leaderEnsureCerts', () => {
         expect(mockStream).not.toHaveBeenCalled();
     });
 
-    it('obtains a cert for an expiring/missing domain and records it locally (no replication)', async () => {
+    it('obtains a cert for an expiring/missing domain and records its expiry locally (no replication)', async () => {
         mockDeps.mockResolvedValue([{ domains: ['new.com'], projectId: 'p', generation: 1, assignedNodeId: 'n', repoOwner: 'o', repoName: 'r', timeout: 1, logId: 'l', dotenv: '', compose: '', nginxConf: '', services: [] }]);
         mockCerts.mockResolvedValue([]);
-        const dir = `${config.letsencryptLiveDir}/new.com`;
-        await fsp.mkdir(dir, { recursive: true });
-        await fsp.writeFile(`${dir}/fullchain.pem`, 'FULL');
-        await fsp.writeFile(`${dir}/privkey.pem`, 'PRIV');
         await leaderEnsureCerts();
         expect(mockStream).toHaveBeenCalledWith(expect.stringContaining('certbot certonly'), expect.any(Number));
-        // Cert material is recorded in the leader-local DB, not proposed/replicated.
-        expect(mockUpsertCert).toHaveBeenCalledWith(expect.objectContaining({ domain: 'new.com', fullchainPem: 'FULL', privkeyPem: 'PRIV' }));
+        // Only expiry is recorded in the leader-local DB (PEMs stay on disk, read by nginx, unreplicated).
+        expect(mockUpsertCert).toHaveBeenCalledWith(expect.objectContaining({ domain: 'new.com', notAfter: expect.any(Number) }));
+        const [[recorded]] = mockUpsertCert.mock.calls;
+        expect(recorded.privkeyPem).toBeUndefined();
     });
 });

@@ -10,6 +10,7 @@ export enum API_ROUTES {
     GET_PROJECT_INSTANCE = '/project-instance/:projectInstanceId',
     GET_WORKER_NODES = '/cluster/nodes',
     GET_WORKER_STATUSES = '/cluster/nodes/status',
+    GET_JOIN_INFO = '/cluster/join-info',
     GET_CONTROL_PLANE_STATUS = '/cluster/status',
     GET_ALLOWED_ENTITIES = '/allowed-entities',
     GET_OBSERVABILITY_LOGS = '/observability/logs',
@@ -39,6 +40,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_PROJECT_INSTANCE]: { projectInstanceId: string };
     [API_ROUTES.GET_WORKER_NODES]: {};
     [API_ROUTES.GET_WORKER_STATUSES]: {};
+    [API_ROUTES.GET_JOIN_INFO]: {};
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: {};
     [API_ROUTES.GET_ALLOWED_ENTITIES]: {};
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: {};
@@ -69,6 +71,7 @@ export interface API_BODY {
     [API_ROUTES.GET_PROJECT_INSTANCE]: undefined;
     [API_ROUTES.GET_WORKER_NODES]: undefined;
     [API_ROUTES.GET_WORKER_STATUSES]: undefined;
+    [API_ROUTES.GET_JOIN_INFO]: undefined;
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: undefined;
     [API_ROUTES.GET_ALLOWED_ENTITIES]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: undefined;
@@ -98,6 +101,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_PROJECT_INSTANCE]: ProjectInstance | undefined;
     [API_ROUTES.GET_WORKER_NODES]: ClusterNode[] | undefined;
     [API_ROUTES.GET_WORKER_STATUSES]: undefined; //TODO
+    [API_ROUTES.GET_JOIN_INFO]: { command: string; deployPublicKey: string | null };
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: ClusterStatus | undefined;
     [API_ROUTES.GET_ALLOWED_ENTITIES]: AllowedGithubEntity[] | undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: ObservabilityLogsResult | undefined;
@@ -129,6 +133,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_PROJECT_INSTANCE]: string;
     [API_ROUTES.GET_WORKER_NODES]: string;
     [API_ROUTES.GET_WORKER_STATUSES]: string;
+    [API_ROUTES.GET_JOIN_INFO]: string;
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: string;
     [API_ROUTES.GET_ALLOWED_ENTITIES]: string;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: string;

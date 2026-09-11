@@ -1,4 +1,7 @@
 import express from 'express';
+import * as fs from 'fs';
+import * as path from 'path';
+import { spawn } from 'child_process';
 import { API_BODY, API_PARAMS, API_RETURN, API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeStatusReport } from '@mosaiq/nsm-common/types';
 import { createProject, deleteProject, getAllProjects, getProject, resetDeploymentKey, setProjectAssignment, syncProjectToRepoData, updateProject, verifyDeploymentKey } from '@/controllers/projectController';
@@ -11,7 +14,7 @@ import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
-import { config } from '@/config';
+import { config, gitSshKeyPath } from '@/config';
 import { cluster } from '@/cluster/node';
 import { CLUSTER_SECRET_HEADER, forwardToLeader } from '@/cluster/leaderClient';
 import { ingestReport } from '@/cluster/statusGossip';
@@ -23,6 +26,16 @@ import { registry } from '@/utils/metrics';
 const publicRouter = express.Router();
 const privateRouter = express.Router();
 const internalRouter = express.Router();
+
+// The externally reachable base URL of this node, taken from trusted server config (config.publicUrl)
+// rather than request headers: this value is spliced into the root-executed install.sh and the
+// join command, so a client-controllable Host/X-Forwarded-Host must never reach it. Returns null if
+// the configured URL is malformed, so callers can refuse rather than emit an injectable artifact.
+const PUBLIC_URL_RE = /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?$/;
+const safePublicUrl = (): string | null => {
+    const base = config.publicUrl.replace(/\/+$/, '');
+    return PUBLIC_URL_RE.test(base) ? base : null;
+};
 
 // Returns false (and forwards to leader) if this node is not the leader. Use in write handlers.
 const requireLeader = (req: express.Request, res: express.Response): boolean => {
@@ -70,6 +83,25 @@ publicRouter.get('/healthz', async (_req, res) => {
 publicRouter.get('/metrics', async (_req, res) => {
     res.setHeader('Content-Type', registry.contentType);
     res.status(200).send(await registry.metrics());
+});
+
+// Serves the universal installer, templated with this node's URL so followers can join with just
+// their cluster secret: `curl -fsSL <leader>/install.sh | sudo bash -s -- --secret <TOKEN>`.
+publicRouter.get('/install.sh', async (_req, res) => {
+    try {
+        const base = safePublicUrl();
+        if (!base) {
+            console.error(`Refusing to serve install.sh: config.publicUrl is not a valid URL: ${config.publicUrl}`);
+            return void res.status(500).send('server misconfigured');
+        }
+        const script = await fs.promises.readFile(path.join(config.nsmRepoDir, 'install.sh'), 'utf-8');
+        const templated = script.replace('NSM_LEADER_DEFAULT="${NSM_LEADER_DEFAULT:-}"', () => `NSM_LEADER_DEFAULT="${base}"`);
+        res.setHeader('Content-Type', 'text/x-shellscript');
+        res.status(200).send(templated);
+    } catch (e) {
+        console.error('Error serving install.sh', e);
+        res.status(500).send();
+    }
 });
 
 publicRouter.get('/auth/github', async (req, res) => {
@@ -151,6 +183,25 @@ privateRouter.get(API_ROUTES.GET_WORKER_NODES, async (_req, res) => {
 
 privateRouter.get(API_ROUTES.GET_WORKER_STATUSES, async (_req, res) => {
     res.status(200).json(undefined);
+});
+
+// Everything a new node needs to join: the one-line install command (with this leader's URL and
+// the cluster secret baked in) and the shared deploy public key to register on GitHub.
+privateRouter.get(API_ROUTES.GET_JOIN_INFO, async (_req, res) => {
+    const base = safePublicUrl();
+    if (!base) {
+        console.error(`Cannot build join command: config.publicUrl is not a valid URL: ${config.publicUrl}`);
+        return void res.status(500).send('server misconfigured');
+    }
+    const command = `curl -fsSL ${base}/install.sh | sudo bash -s -- --secret ${config.clusterSecret}`;
+    let deployPublicKey: string | null = null;
+    try {
+        deployPublicKey = (await fs.promises.readFile(`${gitSshKeyPath()}.pub`, 'utf-8')).trim();
+    } catch {
+        deployPublicKey = null;
+    }
+    const payload: API_RETURN[API_ROUTES.GET_JOIN_INFO] = { command, deployPublicKey };
+    res.status(200).json(payload);
 });
 
 privateRouter.get(API_ROUTES.GET_CONTROL_PLANE_STATUS, async (_req, res) => {
@@ -347,6 +398,38 @@ internalRouter.post('/cluster/deregister', requireClusterSecret, async (req, res
     if (!requireLeader(req, res)) return;
     await deregisterNode(req.body?.nodeId);
     res.status(200).json({ ok: true });
+});
+
+// Streams the leader's NSM source tree so a joining follower can install without cloning from
+// GitHub. Secret-gated; excludes secrets and build artifacts.
+internalRouter.get('/install/bundle.tgz', requireClusterSecret, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    const excludes = ['node_modules', '.git', '.env', '.env.local', '.devdata', 'coverage', 'dist'];
+    const args = ['czf', '-', ...excludes.flatMap((e) => ['--exclude', e]), '-C', config.nsmRepoDir, '.'];
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', 'attachment; filename="bundle.tgz"');
+    const tar = spawn('tar', args);
+    tar.stdout.pipe(res);
+    tar.stderr.on('data', (d) => console.error('[bundle] tar:', d.toString()));
+    tar.on('error', (e) => {
+        console.error('[bundle] failed to spawn tar', e);
+        if (!res.headersSent) res.status(500);
+        res.end();
+    });
+});
+
+// Hands the shared git deploy private key to a joining follower so it can clone app repos. This is
+// deliberately secret-gated: the cluster secret is the join credential.
+internalRouter.get('/cluster/deploy-key', requireClusterSecret, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const key = await fs.promises.readFile(gitSshKeyPath(), 'utf-8');
+        res.setHeader('Content-Type', 'text/plain');
+        res.status(200).send(key);
+    } catch (e) {
+        console.error('Error reading deploy key', e);
+        res.status(404).send('deploy key not found');
+    }
 });
 
 // Follower pull: returns the desired deployments assigned to a node + the registry snapshot.
