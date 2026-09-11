@@ -331,6 +331,8 @@ Repeat Part B for every additional worker you want.
 
 Advanced: if you already have the repo checked out on a machine, you can skip `install.sh` and call the bootstrap directly - `sudo bash bootstrap.sh --leader` or `sudo bash bootstrap.sh --follower --leader http://<leader-ip>:1025 --secret <CLUSTER_SECRET>`.
 
+Uninstall / start over: to completely remove NSM from a machine (services, containers, config, data, and the `nsm` user), run `sudo nsm-uninstall` (or `sudo bash uninstall.sh` from a checkout). It leaves system packages and Let's Encrypt certs in place; add `--purge-data` to also delete `PERSISTENT_PATH`, or `--prune-docker` to prune all unused Docker resources. Use `--yes` to skip the confirmation.
+
 ### Repo access (GitHub App)
 
 NSM clones private app repos using a **GitHub App**. You install the App on the repos you deploy (Contents: Read-only) and place its private key on the **leader only** (`/etc/nsm/github-app.pem`; `sudo nsm-setup` writes it for you). The leader signs a short-lived App JWT, mints **repo-scoped installation tokens** (~1h, auto-rotating) on demand, and serves fresh tokens to followers over the secret-gated `POST /cluster/git-token`. Nothing long-lived is stored on followers, tokens never appear in argv or logs (git reads them via a `GIT_ASKPASS` helper), and access is revocable per repo by changing the App installation.

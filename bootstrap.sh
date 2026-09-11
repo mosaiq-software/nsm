@@ -54,7 +54,13 @@ install_deps() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y
     apt-get install -y curl git nginx certbot python3-certbot-nginx netcat-openbsd jq rsync
-    if ! command -v node >/dev/null 2>&1; then
+    # Force NodeSource Node 22 when node is missing or older than 22. This also replaces any
+    # distro-packaged npm (which conflicts with a newer node and breaks with "Cannot find module 'semver'").
+    local node_major=0
+    if command -v node >/dev/null 2>&1; then
+        node_major="$(node -v 2>/dev/null | sed 's/^v//; s/\..*//')"
+    fi
+    if [[ "${node_major:-0}" -lt 22 ]]; then
         curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
         apt-get install -y nodejs
     fi
@@ -168,6 +174,8 @@ install_privileged_helpers() {
     install -m 0755 -o root -g root "$INSTALL_DIR/deploy/nsm-apply-hosts" /usr/local/sbin/nsm-apply-hosts
     # Interactive leader configuration CLI (GitHub App + OAuth + cluster secret).
     install -m 0755 -o root -g root "$INSTALL_DIR/nsm-setup.sh" /usr/local/sbin/nsm-setup
+    # Full teardown CLI for clean reinstalls/tests.
+    install -m 0755 -o root -g root "$INSTALL_DIR/uninstall.sh" /usr/local/sbin/nsm-uninstall
     # Validate first so a malformed file can never lock us out of sudo.
     if visudo -cf "$INSTALL_DIR/deploy/nsm.sudoers" >/dev/null 2>&1; then
         install -m 0440 -o root -g root "$INSTALL_DIR/deploy/nsm.sudoers" /etc/sudoers.d/nsm

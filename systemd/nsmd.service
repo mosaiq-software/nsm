@@ -8,7 +8,8 @@ Type=simple
 # The daemon is the `backend` workspace; deps are hoisted to /opt/nsm/node_modules.
 WorkingDirectory=/opt/nsm/backend
 EnvironmentFile=/etc/nsm/nsm.env
-ExecStart=/usr/bin/npm start
+# Run tsx directly (no npm at runtime) so a broken/mismatched system npm can't take the daemon down.
+ExecStart=/opt/nsm/node_modules/.bin/tsx src/index.ts
 Restart=always
 RestartSec=3
 # nsmd runs on the host (no container) so it can drive docker/nginx/certbot. It runs as the
