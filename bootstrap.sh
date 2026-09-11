@@ -61,8 +61,14 @@ install_deps() {
         node_major="$(node -v 2>/dev/null | sed 's/^v//; s/\..*//')"
     fi
     if [[ "${node_major:-0}" -lt 22 ]]; then
+        # Ubuntu's distro Node stack (libnode-dev/libnode72 and the node-* helpers) ships headers
+        # such as /usr/include/node/common.gypi that NodeSource's nodejs package also installs.
+        # dpkg aborts the upgrade with "trying to overwrite ...", so drop the distro packages first.
+        apt-get remove -y --purge libnode-dev libnode72 nodejs-doc >/dev/null 2>&1 || true
+        apt-get autoremove -y >/dev/null 2>&1 || true
         curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-        apt-get install -y nodejs
+        # --force-overwrite is a safety net for any remaining distro file collisions.
+        apt-get install -y -o Dpkg::Options::=--force-overwrite nodejs
     fi
     if ! command -v docker >/dev/null 2>&1; then
         curl -fsSL https://get.docker.com | sh
