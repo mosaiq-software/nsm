@@ -244,7 +244,7 @@ Cluster:
 
 Data paths: `DATABASE_DIR`, `DATABASE_NAME`, `REPO_SANDBOX_PATH`, `DEPLOYMENT_PATH`, `PERSISTENT_PATH`, `NGINX_CONF_DIR`, `LETSENCRYPT_LIVE_DIR`, `NSM_WWW_PATH`.
 
-Git/GitHub: `GIT_SSH_KEY_DIR`, `GIT_SSH_KEY_FILE`, `VITE_GITHUB_OAUTH_CLIENT_ID`, `VITE_GITHUB_OAUTH_CALLBACK_URL`, `VITE_GITHUB_OAUTH_DEFAULT_USER`, `GITHUB_OAUTH_CLIENT_SECRET`, `CERTBOT_DNS_ARGS`, `NSM_REPO_DIR`.
+Git/GitHub: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`, `GITHUB_APP_INSTALLATION_ID` (repo access via GitHub App), `GIT_SSH_KEY_DIR`, `GIT_SSH_KEY_FILE` (legacy deploy-key fallback), `VITE_GITHUB_OAUTH_CLIENT_ID`, `VITE_GITHUB_OAUTH_CALLBACK_URL`, `VITE_GITHUB_OAUTH_DEFAULT_USER`, `GITHUB_OAUTH_CLIENT_SECRET`, `CERTBOT_DNS_ARGS`, `NSM_REPO_DIR`.
 
 Observability: `LOKI_URL`, `PROMETHEUS_URL`, `GRAFANA_URL` (leader query proxy), `OBS_LOKI_PUSH_URL` (agents; defaults to the leader host on `:3100`).
 
@@ -252,33 +252,90 @@ Observability: `LOKI_URL`, `PROMETHEUS_URL`, `GRAFANA_URL` (leader query proxy),
 
 ## Setting up a network
 
-Prerequisites: Ubuntu hosts on the same LAN; the leader machine on a DHCP reservation/static IP; root/sudo; DNS for each app domain pointing at the leader. The installer/bootstrap installs node 22, nginx, certbot, docker, jq, etc.; agents/stack run as containers.
+This is a full walkthrough for standing up a brand-new NSM cluster from nothing. Follow it top to bottom; each step is short and self-contained. You do NOT need to install Node, Docker, nginx, or certbot yourself - the bootstrap script installs all of that for you.
 
-### One command per node
+### What you need before you start
 
-`install.sh` fetches the code and delegates to `bootstrap.sh`. Both roles are a single paste.
+- One or more machines running **Ubuntu** (a fresh install is fine), all on the **same network**.
+- **sudo/root** access on each machine.
+- The first machine (the "leader") should keep a **fixed IP address** - set a DHCP reservation in your router, or a static IP. Every other machine finds the cluster through this address, so it must not change.
+- A **GitHub account** with **admin** access to the app repositories you want to deploy (you'll create a GitHub App and install it on them). NSM itself is public, so no token is needed to install NSM.
+- Optional but recommended: a **domain name** you control, if you want real HTTPS for your deployed apps.
 
-1. **Leader** (first node) — pull the installer straight from GitHub:
+Terminology: the **leader** is the one machine that holds the source of truth and terminates web traffic. A **follower** (or worker) is any other machine that runs your apps. You set up the leader once, then add as many followers as you like.
+
+### Part A - Set up the leader (do this once, on the first machine)
+
+**1. Install NSM.** It's public, so the leader installs with a single command - no token, no file copying. On the leader machine, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mosaiq-software/nsm/main/install.sh | sudo bash -s -- --leader
+```
+
+This installs dependencies (Node, Docker, nginx, certbot), lays down the code, creates the `nsm` user, and starts the daemon. When it finishes it prints a generated **cluster secret** in a boxed line - **copy it now**; every follower needs it (you can also retrieve it later with `sudo grep CLUSTER_SECRET /etc/nsm/nsm.env`).
+
+**2. Create a GitHub App** (in your browser) so the leader can clone your private app repos for deployment, unattended, without a machine-user account. You do this once.
+
+   1. Go to **GitHub -> Settings -> Developer settings -> GitHub Apps -> New GitHub App** (personal account or an organization).
+   2. Give it any name. Set **Homepage URL** to anything (e.g. your leader's address). Under **Webhook**, **uncheck Active** (NSM doesn't need webhooks).
+   3. Under **Repository permissions**, set **Contents** to **Read-only**. Leave everything else as **No access**.
+   4. Create the App. On its page, note the **App ID** (a number).
+   5. Scroll to **Private keys** and click **Generate a private key**. Your browser downloads a `.pem` file - keep it handy; you'll paste it in the next step.
+   6. In the left sidebar click **Install App**, install it on your account/org, and choose **Only select repositories** -> pick the app repos you'll deploy (you can add more later).
+
+**3. Configure the leader** with the interactive setup. On the leader, run:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/mosaiq-software/nsm/main/install.sh | sudo bash -s -- --leader
+   sudo nsm-setup
    ```
-   This clones the repo, bootstraps the leader, generates the shared git **deploy key**, and prints its public half. Register that public key **once** on GitHub (a repo/org deploy key or a machine user) so every node can clone your app repos. Then set your real values in `/etc/nsm/nsm.env` (`CLUSTER_SECRET`, `PRODUCTION=true`, GitHub OAuth) and `sudo systemctl restart nsmd`. Verify: `curl -s localhost:1025/healthz | jq`.
+   It walks you through everything and writes the files for you - it prompts for (and you paste in) each value:
+   - the **cluster secret** (defaults to the one the installer generated in step 1; press Enter to keep it, or set your own - every follower needs the exact same value),
+   - the leader's **public URL**,
+   - the **GitHub App ID** from step 2.4 and the **private key** (paste the whole `.pem`, then press `Ctrl-D`),
+   - your **GitHub OAuth** client ID / secret / callback / default user for dashboard sign-in.
 
-2. **Followers** (joining nodes) — copy the ready-made command from the dashboard's **Nodes → Add a node** panel, or build it by hand:
+   It then saves `/etc/nsm/nsm.env` and `/etc/nsm/github-app.pem` (both secured, owned by `nsm`), rebuilds the UI if needed, restarts the daemon, and checks health. The App private key lives **only** on the leader - followers ask the leader for short-lived per-repo tokens on demand. Re-run `sudo nsm-setup` anytime to change settings.
+
+   <sub>Prefer to edit by hand? You can instead `sudo nano /etc/nsm/github-app.pem` (paste the key) and `sudo nano /etc/nsm/nsm.env` (set `CLUSTER_SECRET`, `PRODUCTION=true`, `GITHUB_APP_ID`, and the `VITE_GITHUB_OAUTH_*` / `GITHUB_OAUTH_CLIENT_SECRET` values), then `sudo systemctl restart nsmd`.</sub>
+
+**4. Confirm the leader is healthy** (`nsm-setup` already prints this, but to re-check):
+   ```bash
+   curl -s localhost:1025/healthz | jq
+   ```
+   You should see `"isLeader": true`. The management dashboard is now available at `http://<leader-ip>:1025`.
+
+### Part B - Add a worker node (repeat for each follower machine)
+
+Followers pull everything **from the leader** - the code bundle, and (at deploy time) short-lived per-repo git tokens - so they never touch GitHub directly and need no token or key here.
+
+1. In a browser, open the dashboard at `http://<leader-ip>:1025`, sign in, and go to **Nodes -> Add a node**. Click **Copy** - this gives you a command with the leader's address and cluster secret already filled in.
+2. Paste and run that command on the brand-new machine. It looks like this:
    ```bash
    curl -fsSL http://<leader-ip>:1025/install.sh | sudo bash -s -- --secret <CLUSTER_SECRET>
    ```
-   The leader-served `install.sh` bakes in its own URL. The follower downloads the code bundle and the shared deploy key from the leader (both gated by the cluster secret), bootstraps itself, registers into the leader's registry, and starts pulling assigned work. No manual key handling.
+   (If you're typing it by hand, replace `<leader-ip>` with the leader's IP and `<CLUSTER_SECRET>` with the value from Part A step 3.)
+3. Wait for it to finish. It installs dependencies, downloads the code bundle from the leader, starts the `nsm` daemon, and registers itself with the leader. When it later deploys an app repo, it requests a short-lived git token from the leader on demand.
+4. Confirm it joined: back in the dashboard, refresh the **Nodes** page - the new machine should appear in the table as a follower.
 
-3. Point app-domain DNS at the leader. The leader terminates TLS and proxies to whichever node runs each app.
+Repeat Part B for every additional worker you want.
 
-4. Create/assign/deploy a project via the API (below) or dashboard.
+### Part C - Point your domains at the leader and deploy
 
-The lower-level `bootstrap.sh --leader` / `bootstrap.sh --follower --leader <url> --secret <token>` entry points still work if you've already cloned the repo.
+1. For each app domain, create a **DNS A record** pointing at the leader's public IP. The leader terminates TLS (obtaining certificates automatically via certbot) and proxies each request to whichever node runs that app.
+2. In the dashboard, **create a project**, **assign** it to a node, and **deploy** it (or trigger the CI deploy webhook). Logs and metrics for the app then show up under the project.
 
-### Shared deploy key
+### If something goes wrong
 
-Every node clones app repos over SSH using one **shared** deploy key. The leader generates it on first bootstrap (`/etc/nsm/.ssh/id_ed25519` by default) and serves the private half to joining followers over the secret-gated `GET /cluster/deploy-key`. You register the public half on GitHub exactly once.
+- Watch a node's logs live: `journalctl -u nsmd -f`
+- Re-running the bootstrap or the follower command is **safe** - it's idempotent, so you can just run it again.
+- A follower can't reach the leader? Check that the leader's port `1025` is reachable (firewall) and that the follower's `CLUSTER_SECRET` exactly matches the leader's.
+
+Advanced: if you already have the repo checked out on a machine, you can skip `install.sh` and call the bootstrap directly - `sudo bash bootstrap.sh --leader` or `sudo bash bootstrap.sh --follower --leader http://<leader-ip>:1025 --secret <CLUSTER_SECRET>`.
+
+### Repo access (GitHub App)
+
+NSM clones private app repos using a **GitHub App**. You install the App on the repos you deploy (Contents: Read-only) and place its private key on the **leader only** (`/etc/nsm/github-app.pem`; `sudo nsm-setup` writes it for you). The leader signs a short-lived App JWT, mints **repo-scoped installation tokens** (~1h, auto-rotating) on demand, and serves fresh tokens to followers over the secret-gated `POST /cluster/git-token`. Nothing long-lived is stored on followers, tokens never appear in argv or logs (git reads them via a `GIT_ASKPASS` helper), and access is revocable per repo by changing the App installation.
+
+If `GITHUB_APP_ID` is unset (or the key file is missing), NSM falls back to the legacy **shared SSH deploy key**: the leader generates it on first bootstrap (`/etc/nsm/.ssh/id_ed25519` by default) and serves the private half to joining followers over the secret-gated `GET /cluster/deploy-key`.
 
 ### The `nsm` user and privileges
 
@@ -292,7 +349,7 @@ Three routers (`backend/src/routes.ts`):
 
 - Public: `GET /healthz`, `GET /metrics`, `GET /install.sh` (leader-templated universal installer), `GET /auth/github`, `POST /login/github/:token`, CI deploy webhook `GET /deploy/:projectId/:key`. The leader also serves the built UI (`express.static(NSM_WWW_PATH)`) with an SPA history fallback for non-API GETs.
 - Private (user token): project/secret/user/allow-list CRUD, `GET /cluster/status`, `GET /cluster/nodes`, `GET /cluster/join-info` (copy-paste join command + deploy public key), dashboard deploy `GET /deployweb/:projectId/:key`, and observability `GET /observability/logs`, `GET /observability/metrics`. Writes on a follower forward to the leader.
-- Internal (`x-nsm-cluster-secret`): `/cluster/register`, `/cluster/deregister`, `GET /install/bundle.tgz` (leader source bundle), `GET /cluster/deploy-key` (shared deploy key), `/node/desired`, `/cluster/log`, `/cluster/status-report`, `/node/plan`, `/cluster/self-update`, `/cluster/apply-update`.
+- Internal (`x-nsm-cluster-secret`): `/cluster/register`, `/cluster/deregister`, `GET /install/bundle.tgz` (leader source bundle), `POST /cluster/git-token` (leader mints a repo-scoped GitHub App token), `GET /cluster/deploy-key` (legacy shared deploy key), `/node/desired`, `/cluster/log`, `/cluster/status-report`, `/node/plan`, `/cluster/self-update`, `/cluster/apply-update`.
 
 ---
 

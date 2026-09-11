@@ -14,7 +14,8 @@ import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
-import { config, gitSshKeyPath } from '@/config';
+import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
+import { mintInstallationToken } from '@/utils/githubApp';
 import { cluster } from '@/cluster/node';
 import { CLUSTER_SECRET_HEADER, forwardToLeader } from '@/cluster/leaderClient';
 import { ingestReport } from '@/cluster/statusGossip';
@@ -416,6 +417,22 @@ internalRouter.get('/install/bundle.tgz', requireClusterSecret, async (req, res)
         if (!res.headersSent) res.status(500);
         res.end();
     });
+});
+
+// Mints a short-lived, repo-scoped GitHub App installation token for a follower to clone a private
+// app repo. Leader-only (only the leader holds the App private key); secret-gated. The token is
+// never logged.
+internalRouter.post('/cluster/git-token', requireClusterSecret, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    if (!isGithubAppConfigured()) return void res.status(501).send('GitHub App not configured');
+    const { repoOwner, repoName } = req.body || {};
+    if (!repoOwner || !repoName) return void res.status(400).send('repoOwner + repoName required');
+    try {
+        res.status(200).json(await mintInstallationToken(String(repoOwner), String(repoName)));
+    } catch (e: any) {
+        console.error(`Failed to mint git token for ${repoOwner}/${repoName}:`, e?.message || e);
+        res.status(502).send('failed to mint installation token');
+    }
 });
 
 // Hands the shared git deploy private key to a joining follower so it can clone app repos. This is

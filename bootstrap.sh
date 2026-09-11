@@ -40,6 +40,14 @@ if [[ -z "$ROLE" ]]; then echo "Specify --leader OR --follower --leader <url> --
 
 log() { echo -e "\033[1;36m[bootstrap]\033[0m $*"; }
 
+gen_secret() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+    else
+        head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+    fi
+}
+
 # --- 1. System dependencies (no keepalived; agents run as containers) ---
 install_deps() {
     log "Installing system dependencies..."
@@ -71,6 +79,10 @@ install_code() {
         sed -i "s#^BIND_ADDRESS=.*#BIND_ADDRESS=${ip}#" "$ENV_FILE"
         sed -i "s/^NSM_ROLE=.*/NSM_ROLE=${ROLE}/" "$ENV_FILE"
         [[ -n "$LEADER_URL" ]] && sed -i "s#^LEADER_ADDRESS=.*#LEADER_ADDRESS=${LEADER_URL}#" "$ENV_FILE"
+        # The leader mints its own cluster secret if one wasn't provided; followers receive it via --secret.
+        if [[ "$ROLE" == "leader" && -z "$SECRET" ]]; then
+            SECRET="$(gen_secret)"
+        fi
         [[ -n "$SECRET" ]] && sed -i "s/^CLUSTER_SECRET=.*/CLUSTER_SECRET=${SECRET}/" "$ENV_FILE"
         if [[ "$ROLE" == "leader" ]]; then
             sed -i "s#^LEADER_ADDRESS=.*#LEADER_ADDRESS=http://127.0.0.1:1025#" "$ENV_FILE"
@@ -142,12 +154,20 @@ chown_dirs() {
     chmod 640 "$ENV_FILE" || true
     local keyfile="${GIT_SSH_KEY_DIR:-$ETC_DIR/.ssh}/${GIT_SSH_KEY_FILE:-id_ed25519}"
     [[ -f "$keyfile" ]] && chmod 600 "$keyfile" || true
+    # GitHub App private key (leader only, user-provided): keep it readable only by nsm.
+    local appkey="${GITHUB_APP_PRIVATE_KEY_PATH:-$ETC_DIR/github-app.pem}"
+    if [[ -f "$appkey" ]]; then
+        chown "$NSM_USER":"$NSM_USER" "$appkey" || true
+        chmod 600 "$appkey" || true
+    fi
 }
 
 # --- 2e. Scoped privileges: helper script + sudoers policy for the few root-only commands ---
 install_privileged_helpers() {
     log "Installing privileged hosts helper + sudoers policy..."
     install -m 0755 -o root -g root "$INSTALL_DIR/deploy/nsm-apply-hosts" /usr/local/sbin/nsm-apply-hosts
+    # Interactive leader configuration CLI (GitHub App + OAuth + cluster secret).
+    install -m 0755 -o root -g root "$INSTALL_DIR/nsm-setup.sh" /usr/local/sbin/nsm-setup
     # Validate first so a malformed file can never lock us out of sudo.
     if visudo -cf "$INSTALL_DIR/deploy/nsm.sudoers" >/dev/null 2>&1; then
         install -m 0440 -o root -g root "$INSTALL_DIR/deploy/nsm.sudoers" /etc/sudoers.d/nsm
@@ -204,6 +224,15 @@ start_services() {
     log "Enabling and starting nsmd..."
     systemctl enable --now nsmd
     log "Done. Check status: journalctl -u nsmd -f"
+    if [[ "$ROLE" == "leader" ]]; then
+        echo
+        echo "==================================================================="
+        echo "  CLUSTER SECRET (every follower needs this - save it now):"
+        echo "    ${CLUSTER_SECRET}"
+        echo "==================================================================="
+        echo
+        log "Next: configure this leader interactively with:  sudo nsm-setup"
+    fi
 }
 
 install_deps

@@ -3,7 +3,8 @@ import * as fs from 'fs/promises';
 import { getGitHttpsUri, getGitSshUri } from '@mosaiq/nsm-common/gitUtils';
 import YAML from 'yaml';
 import { DockerCompose } from '@mosaiq/nsm-common/dockerComposeTypes';
-import { config, gitSshKeyPath } from '@/config';
+import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
+import { getCloneToken, withCloneCredentials } from '@/utils/githubApp';
 
 export interface RepoData {
     dotenv: string;
@@ -135,10 +136,24 @@ const cloneRepository = async (projectId: string, repoOwner: string, repoName: s
     }
 
     try {
+        // Preferred: GitHub App installation token over HTTPS (no machine user, per-repo, short-lived).
+        if (isGithubAppConfigured()) {
+            const httpsUri = getGitHttpsUri(repoOwner, repoName);
+            const { token } = await getCloneToken(repoOwner, repoName);
+            const { out: gitOut, code: gitCode } = await withCloneCredentials(token, (envPrefix) =>
+                execSafe(`${envPrefix} git clone --progress ${branchFlags} ${httpsUri} ${repoPath}`, 1000 * 60 * 5)
+            );
+            if (gitCode !== 0) {
+                console.error('Git clone output:', gitOut);
+                throw new Error(`Git clone exited with code ${gitCode}`);
+            }
+            return;
+        }
+
+        // Fallback: shared SSH deploy key.
         const gitSshUri = getGitSshUri(repoOwner, repoName);
         const sshFlags = `-c core.sshCommand="/usr/bin/ssh -i ${gitSshKeyPath()}"`;
         const cmd = `git clone --progress ${branchFlags} ${sshFlags} ${gitSshUri} ${repoPath}`;
-        console.log('Cloning repository with command:', cmd);
         const { out: gitOut, code: gitCode } = await execSafe(cmd, 1000 * 60 * 5);
         if (gitCode !== 0) {
             console.error('Git clone output:', gitOut);

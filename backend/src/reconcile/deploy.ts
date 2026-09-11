@@ -2,7 +2,8 @@ import { DeploymentState } from '@mosaiq/nsm-common/types';
 import { DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 import { getGitHttpsUri, getGitSshUri } from '@mosaiq/nsm-common/gitUtils';
 import * as fs from 'fs/promises';
-import { config, gitSshKeyPath } from '@/config';
+import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
+import { getCloneToken, withCloneCredentials } from '@/utils/githubApp';
 import { execSafe, execStream } from '@/host/exec';
 import { reportDeploymentLog } from './report';
 import { setLocalGeneration } from './state';
@@ -55,6 +56,20 @@ const cloneRepository = async (dep: DesiredDeployment): Promise<void> => {
         return;
     }
 
+    // Preferred: GitHub App installation token over HTTPS (no machine user, per-repo, short-lived).
+    if (isGithubAppConfigured()) {
+        const httpsUri = getGitHttpsUri(dep.repoOwner, dep.repoName);
+        await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, `Cloning repository ${httpsUri}...\n`);
+        const { token } = await getCloneToken(dep.repoOwner, dep.repoName);
+        const { out, code } = await withCloneCredentials(token, (envPrefix) =>
+            execSafe(`${envPrefix} git clone --progress ${branchFlags} ${httpsUri} ${repoPath}`, 1000 * 60 * 5)
+        );
+        if (code !== 0) throw new Error(`Git clone exited with code ${code}: ${out}`);
+        await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, `Git clone output:\n${out}\n`);
+        return;
+    }
+
+    // Fallback: shared SSH deploy key.
     const gitSshUri = getGitSshUri(dep.repoOwner, dep.repoName);
     const sshFlags = `-c core.sshCommand="/usr/bin/ssh -i ${gitSshKeyPath()}"`;
     const cmd = `git clone --progress ${branchFlags} ${sshFlags} ${gitSshUri} ${repoPath}`;

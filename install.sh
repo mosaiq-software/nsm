@@ -15,6 +15,9 @@ set -euo pipefail
 NSM_LEADER_DEFAULT="${NSM_LEADER_DEFAULT:-}"
 NSM_REPO="${NSM_REPO:-https://github.com/mosaiq-software/nsm.git}"
 NSM_REF="${NSM_REF:-main}"
+# GitHub token with read access to the (private) repo, used only for the leader's initial clone.
+# Read from the GITHUB_TOKEN env var or --token. Followers need no token (they pull from the leader).
+NSM_TOKEN="${GITHUB_TOKEN:-}"
 
 ROLE=""
 LEADER_URL="$NSM_LEADER_DEFAULT"
@@ -28,6 +31,7 @@ while [[ $# -gt 0 ]]; do
         --secret) SECRET="$2"; shift 2 ;;
         --repo) NSM_REPO="$2"; shift 2 ;;
         --ref) NSM_REF="$2"; shift 2 ;;
+        --token) NSM_TOKEN="$2"; shift 2 ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -53,8 +57,18 @@ ensure_pkg() {
 
 fetch_leader_code() {
     ensure_pkg git
+    local clone_url="$NSM_REPO"
+    # NSM is public, so the leader clones anonymously. --token / GITHUB_TOKEN is an optional override
+    # for anyone running NSM from a private fork.
+    if [[ -n "$NSM_TOKEN" && "$NSM_REPO" == https://* ]]; then
+        clone_url="https://x-access-token:${NSM_TOKEN}@${NSM_REPO#https://}"
+    fi
     log "Cloning ${NSM_REPO}@${NSM_REF}..."
-    git clone --depth 1 --branch "$NSM_REF" "$NSM_REPO" "$SRC_DIR"
+    if ! git clone --depth 1 --branch "$NSM_REF" "$clone_url" "$SRC_DIR"; then
+        echo "Clone failed. If you are installing from a private fork, pass a GitHub token:" >&2
+        echo "  ... | sudo GITHUB_TOKEN=<token> bash -s -- --leader" >&2
+        exit 1
+    fi
 }
 
 fetch_follower_code() {
@@ -79,6 +93,7 @@ fetch_follower_code() {
 if [[ "$ROLE" == "leader" ]]; then
     fetch_leader_code
     bash "$SRC_DIR/bootstrap.sh" --leader
+    log "Leader installed. Configure it interactively (GitHub App + OAuth + secret): sudo nsm-setup"
 else
     fetch_follower_code
     bash "$SRC_DIR/bootstrap.sh" --follower --leader "$LEADER_URL" --secret "$SECRET"

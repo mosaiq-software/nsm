@@ -34,6 +34,7 @@ export interface NsmConfig {
     nsmRepoDir: string;
     gitSshKeyDir: string;
     gitSshKeyFile: string;
+    githubApp: { appId: string; privateKeyPath: string; installationId: string };
     lokiUrl: string;
     prometheusUrl: string;
     grafanaUrl: string;
@@ -86,6 +87,11 @@ export const config: NsmConfig = {
     nsmRepoDir: process.env.NSM_REPO_DIR || '/opt/nsm',
     gitSshKeyDir: process.env.GIT_SSH_KEY_DIR || '/etc/nsm/.ssh',
     gitSshKeyFile: process.env.GIT_SSH_KEY_FILE || 'id_ed25519',
+    githubApp: {
+        appId: process.env.GITHUB_APP_ID || '',
+        privateKeyPath: process.env.GITHUB_APP_PRIVATE_KEY_PATH || '/etc/nsm/github-app.pem',
+        installationId: process.env.GITHUB_APP_INSTALLATION_ID || '',
+    },
     lokiUrl: process.env.LOKI_URL || 'http://127.0.0.1:3100',
     prometheusUrl: process.env.PROMETHEUS_URL || 'http://127.0.0.1:9090',
     grafanaUrl: process.env.GRAFANA_URL || 'http://127.0.0.1:3000',
@@ -94,6 +100,17 @@ export const config: NsmConfig = {
 };
 
 export const gitSshKeyPath = (): string => `${config.gitSshKeyDir}/${config.gitSshKeyFile}`;
+
+// True when this node can mint GitHub App installation tokens (App id set + private key present).
+// Only the leader holds the key, so this is effectively leader-only in production.
+export const isGithubAppConfigured = (): boolean => {
+    if (!config.githubApp.appId) return false;
+    try {
+        return fs.existsSync(config.githubApp.privateKeyPath);
+    } catch {
+        return false;
+    }
+};
 
 function readVersion(): string {
     try {
