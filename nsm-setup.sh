@@ -67,6 +67,16 @@ ask() {
     printf -v "$__var" '%s' "$input"
 }
 
+# Like ask, but insists on an absolute path.
+ask_dir() {
+    local __var="$1" prompt="$2" default="${3:-}" val
+    while :; do
+        ask val "$prompt" "$default"
+        [[ "$val" == /* ]] && { printf -v "$__var" '%s' "$val"; return; }
+        c_warn "Please enter an absolute path (starting with /)."
+    done
+}
+
 confirm() {
     local q="$1" def="${2:-Y}" ans hint="[Y/n]"
     [[ "$def" == "N" ]] && hint="[y/N]"
@@ -130,8 +140,20 @@ set_env FRONTEND_URL "$public_url"
 set_env API_URL "$public_url"
 echo
 
+# --- Storage directories ------------------------------------------------------------------------
+c_hd "3) Storage directories"
+echo "Where this machine keeps deployed app repos and persistent app data. Pick paths that exist on"
+echo "this box (e.g. a mounted data drive); they are created recursively if missing."
+cur_deploy="$(get_env DEPLOYMENT_PATH)"; cur_deploy="${cur_deploy:-/nsm/apps}"
+cur_persist="$(get_env PERSISTENT_PATH)"; cur_persist="${cur_persist:-/var/lib/nsm/persistent}"
+ask_dir deploy_path "Deployment path (app repos/containers)" "$cur_deploy"
+ask_dir persist_path "Persistent data path (e.g. a mounted data drive)" "$cur_persist"
+set_env DEPLOYMENT_PATH "$deploy_path"
+set_env PERSISTENT_PATH "$persist_path"
+echo
+
 # --- GitHub App ---------------------------------------------------------------------------------
-c_hd "3) GitHub App (repo access)"
+c_hd "4) GitHub App (repo access)"
 echo "Create it at GitHub -> Settings -> Developer settings -> GitHub Apps (Contents: Read-only),"
 echo "install it on the repos you deploy, and have the App ID and downloaded .pem ready."
 ask app_id "GitHub App ID (number; blank = use SSH deploy key instead)" "$(get_env GITHUB_APP_ID)"
@@ -166,7 +188,7 @@ fi
 echo
 
 # --- GitHub OAuth (dashboard sign-in) -----------------------------------------------------------
-c_hd "4) GitHub OAuth (dashboard sign-in)"
+c_hd "5) GitHub OAuth (dashboard sign-in)"
 echo "From your GitHub OAuth App (Settings -> Developer settings -> OAuth Apps)."
 ask oauth_client_id "OAuth client ID" "$(get_env VITE_GITHUB_OAUTH_CLIENT_ID)"
 ask oauth_client_secret "OAuth client secret" "$(get_env GITHUB_OAUTH_CLIENT_SECRET)"
@@ -187,13 +209,18 @@ set_env PRODUCTION true
 echo
 
 # --- Persist + secure ---------------------------------------------------------------------------
-c_hd "5) Writing config"
+c_hd "6) Writing config"
 chown "$NSM_USER":"$NSM_USER" "$ENV_FILE" 2>/dev/null || true
 chmod 640 "$ENV_FILE" || true
 if [[ -n "${pem_path:-}" && -f "${pem_path:-}" ]]; then
     chown "$NSM_USER":"$NSM_USER" "$pem_path" 2>/dev/null || true
     chmod 600 "$pem_path" || true
 fi
+# Create the storage directories (recursively) and hand them to the nsm user.
+for d in "$deploy_path" "$persist_path"; do
+    [[ -n "$d" ]] || continue
+    mkdir -p "$d" && chown -R "$NSM_USER":"$NSM_USER" "$d" 2>/dev/null || c_warn "Could not create/own $d"
+done
 c_ok "Wrote $ENV_FILE"
 
 # --- Rebuild UI (VITE_ values are baked in at build time) ----------------------------------------
@@ -219,7 +246,7 @@ fi
 echo
 
 # --- Restart + verify ---------------------------------------------------------------------------
-c_hd "6) Restarting nsmd"
+c_hd "7) Restarting nsmd"
 if systemctl cat nsmd.service >/dev/null 2>&1; then
     systemctl restart nsmd && c_ok "nsmd restarted."
 else

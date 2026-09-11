@@ -151,6 +151,7 @@ chown_dirs() {
     local deploy_parent="${DEPLOYMENT_PATH:-/nsm/apps}"; deploy_parent="${deploy_parent%/*}"
     local paths=("$INSTALL_DIR" /var/lib/nsm "$deploy_parent" "$ETC_DIR" "$ETC_DIR/prometheus")
     [[ -n "${NSM_WWW_PATH:-}" ]] && paths+=("$NSM_WWW_PATH")
+    [[ -n "${PERSISTENT_PATH:-}" ]] && paths+=("$PERSISTENT_PATH")
     for p in "${paths[@]}"; do
         [[ -n "$p" ]] || continue
         mkdir -p "$p"

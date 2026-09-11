@@ -291,6 +291,7 @@ This installs dependencies (Node, Docker, nginx, certbot), lays down the code, c
    It walks you through everything and writes the files for you - it prompts for (and you paste in) each value:
    - the **cluster secret** (defaults to the one the installer generated in step 1; press Enter to keep it, or set your own - every follower needs the exact same value),
    - the leader's **public URL** (if you give an `https://` domain, the leader automatically obtains a cert and serves the dashboard over HTTPS on that domain - just point its DNS `A` record at the leader and open ports 80/443),
+   - the **storage directories** for deployed apps and persistent data (defaults are fine on most boxes; point the persistent path at a mounted data drive if you have one - it's created for you if missing),
    - the **GitHub App ID** from step 2.4 and the **private key** (paste the whole `.pem`, then press `Ctrl-D`),
    - your **GitHub OAuth** client ID / secret / callback / default user for dashboard sign-in.
 
