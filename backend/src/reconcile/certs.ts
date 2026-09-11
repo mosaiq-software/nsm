@@ -29,15 +29,30 @@ export const leaderEnsureCerts = async (): Promise<void> => {
     }
 };
 
+// Back off per-domain after a failure so a domain that can't be issued (bad DNS, LE rate limit,
+// etc.) doesn't get retried on every reconcile tick and exhaust Let's Encrypt's rate limits.
+const CERT_RETRY_COOLDOWN_MS = 15 * 60 * 1000;
+const lastFailedAt = new Map<string, number>();
+
 const obtainCert = async (domain: string): Promise<void> => {
+    const failedAt = lastFailedAt.get(domain);
+    if (failedAt && Date.now() - failedAt < CERT_RETRY_COOLDOWN_MS) return;
+
     // DNS-01 when configured (recommended); otherwise nginx/HTTP-01 on the leader's ingress.
     const method = config.certbotDnsArgs ? config.certbotDnsArgs : '--nginx';
-    const cmd = sudo(`certbot certonly ${method} -d ${domain} --agree-tos --non-interactive --keep-until-expiring`);
+    // Pin --cert-name and --key-type so certbot reuses one deterministic lineage per domain (whose
+    // live dir matches the path nginx references) instead of auto-selecting a stray lineage, and so
+    // it never blocks in --non-interactive mode asking to confirm an ECDSA<->RSA key-type change.
+    const cmd = sudo(
+        `certbot certonly ${method} -d ${domain} --cert-name ${domain} --key-type ecdsa --agree-tos --non-interactive --keep-until-expiring`,
+    );
     const { out, code } = await execStream(cmd, 1000 * 60 * 3);
     if (code !== 0) {
+        lastFailedAt.set(domain, Date.now());
         console.error(`certbot failed for ${domain}: ${out}`);
         return;
     }
+    lastFailedAt.delete(domain);
     try {
         // Record only expiry. The PEMs live under /etc/letsencrypt (root-only 0700/0600) and are
         // read by nginx directly; the daemon runs as the unprivileged nsm user and reads notAfter
