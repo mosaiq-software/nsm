@@ -13,6 +13,7 @@ vi.mock('@/cluster/selfUpdate', () => ({ applyUpdateInstruction: vi.fn(), setDes
 vi.mock('@/controllers/userController', () => ({ verifyAuthToken: vi.fn(async () => true), signInUser: vi.fn(), signOutUser: vi.fn() }));
 vi.mock('@/controllers/projectController', () => ({ getProject: vi.fn(async () => ({ id: 'p1' })), getAllProjects: vi.fn(async () => []), verifyDeploymentKey: vi.fn(async () => true), createProject: vi.fn(), updateProject: vi.fn(), deleteProject: vi.fn(), resetDeploymentKey: vi.fn(), setProjectAssignment: vi.fn(), syncProjectToRepoData: vi.fn() }));
 vi.mock('@/controllers/deployController', () => ({ deployProject: vi.fn(async () => 'log1'), planLocally: vi.fn(async () => ({ ports: [1], dirs: {} })), teardownProject: vi.fn(), updateDeploymentLog: vi.fn() }));
+vi.mock('@/controllers/deployQueue', () => ({ enqueueDeploy: vi.fn(async () => 'log1') }));
 vi.mock('@/controllers/secretController', () => ({ updateEnvironmentVariable: vi.fn() }));
 vi.mock('@/controllers/projectInstanceController', () => ({ getProjectInstance: vi.fn() }));
 vi.mock('@/controllers/statusController', () => ({ getControlPlaneStatus: vi.fn(async () => ({})) }));
@@ -28,7 +29,7 @@ import { verifyAuthToken } from '@/controllers/userController';
 import { verifyDeploymentKey } from '@/controllers/projectController';
 import { setAllowedEntities } from '@/controllers/allowedEntityController';
 import { ingestReport } from '@/cluster/statusGossip';
-import { deployProject } from '@/controllers/deployController';
+import { enqueueDeploy } from '@/controllers/deployQueue';
 
 const SECRET = 'x-nsm-cluster-secret';
 const isLeader = cluster.isLeader as unknown as Mock;
@@ -95,7 +96,7 @@ describe('deploy webhook gate', () => {
     it('200 and triggers deploy on a valid key (leader)', async () => {
         const res = await request(app).get('/deploy/p1/KEY');
         expect(res.status).toBe(200);
-        expect(deployProject).toHaveBeenCalledWith('p1');
+        expect(enqueueDeploy).toHaveBeenCalledWith('p1');
     });
 });
 

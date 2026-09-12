@@ -1,10 +1,11 @@
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useUser } from '@/contexts/user-context';
-import { Badge, Button, Card, Group, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { DeploymentState } from '@mosaiq/nsm-common/types';
 import { useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 
 const stateColor = (state?: DeploymentState) => {
     switch (state) {
@@ -13,6 +14,8 @@ const stateColor = (state?: DeploymentState) => {
             return 'green';
         case DeploymentState.DEPLOYING:
             return 'blue';
+        case DeploymentState.QUEUED:
+            return 'grape';
         case DeploymentState.FAILED:
             return 'red';
         case DeploymentState.DESTROYING:
@@ -20,6 +23,13 @@ const stateColor = (state?: DeploymentState) => {
         default:
             return 'gray';
     }
+};
+
+const relativeTime = (ts: number): string => {
+    const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.round(secs / 60);
+    return `${mins}m ago`;
 };
 
 const DashboardPage = () => {
@@ -38,6 +48,8 @@ const DashboardPage = () => {
     }, [token]);
 
     const reachable = clusterCtx.status?.health.filter((h) => h.reachable).length ?? 0;
+    const deployQueue = clusterCtx.status?.deployQueue;
+    const queueCount = (deployQueue?.active ? 1 : 0) + (deployQueue?.queued.length ?? 0);
 
     return (
         <Stack>
@@ -78,6 +90,62 @@ const DashboardPage = () => {
                     </Stack>
                 </Card>
             </SimpleGrid>
+            <Card withBorder>
+                <Stack gap="sm">
+                    <Group justify="space-between" align="center">
+                        <Title order={4}>Deploy Queue</Title>
+                        <Badge color={queueCount > 0 ? 'grape' : 'gray'} variant="light">
+                            {queueCount} {queueCount === 1 ? 'deploy' : 'deploys'}
+                        </Badge>
+                    </Group>
+                    {queueCount === 0 ? (
+                        <Text c="dimmed" size="sm">
+                            No deploys in progress. Deploys run one at a time.
+                        </Text>
+                    ) : (
+                        <Table>
+                            <Table.Thead>
+                                <Table.Tr>
+                                    <Table.Th w={110}>Position</Table.Th>
+                                    <Table.Th>Project</Table.Th>
+                                    <Table.Th>Since</Table.Th>
+                                </Table.Tr>
+                            </Table.Thead>
+                            <Table.Tbody>
+                                {deployQueue?.active && (
+                                    <Table.Tr key={deployQueue.active.instanceId} onClick={() => navigate(`/p/${deployQueue.active!.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
+                                        <Table.Td>
+                                            <Group gap={6} wrap="nowrap">
+                                                <Loader size="xs" />
+                                                <Badge color="blue" variant="light">
+                                                    Deploying
+                                                </Badge>
+                                            </Group>
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Text fw={600}>{deployQueue.active.projectId}</Text>
+                                        </Table.Td>
+                                        <Table.Td>{relativeTime(deployQueue.active.startedAt)}</Table.Td>
+                                    </Table.Tr>
+                                )}
+                                {deployQueue?.queued.map((entry, idx) => (
+                                    <Table.Tr key={entry.instanceId} onClick={() => navigate(`/p/${entry.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
+                                        <Table.Td>
+                                            <Badge color="grape" variant="light">
+                                                #{idx + 1}
+                                            </Badge>
+                                        </Table.Td>
+                                        <Table.Td>
+                                            <Text fw={600}>{entry.projectId}</Text>
+                                        </Table.Td>
+                                        <Table.Td>queued {relativeTime(entry.enqueuedAt)}</Table.Td>
+                                    </Table.Tr>
+                                ))}
+                            </Table.Tbody>
+                        </Table>
+                    )}
+                </Stack>
+            </Card>
             <Group justify="space-between" align="center">
                 <Title order={4}>Projects</Title>
                 <Button component={Link} to="/nodes" variant="subtle" size="compact-sm">
@@ -107,7 +175,10 @@ const DashboardPage = () => {
                                 </Table.Td>
                                 <Table.Td>{project.workerNodeId ?? 'Unassigned'}</Table.Td>
                                 <Table.Td>
-                                    <Badge color={stateColor(project.state)}>{project.state ?? 'unknown'}</Badge>
+                                    <Group gap="xs">
+                                        <Badge color={stateColor(project.state)}>{project.state ?? 'unknown'}</Badge>
+                                        <DeployQueueBadge projectId={project.id} />
+                                    </Group>
                                 </Table.Td>
                             </Table.Tr>
                         ))}

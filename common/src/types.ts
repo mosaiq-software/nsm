@@ -50,6 +50,7 @@ export interface ProjectInstance extends ProjectInstanceHeader {
 
 export enum DeploymentState {
     READY = 'ready',
+    QUEUED = 'queued',
     DEPLOYING = 'deploying',
     FAILED = 'failed',
     DEPLOYED = 'deployed',
@@ -103,11 +104,28 @@ export interface NodeHealth {
     lastSeen: number;
 }
 
+// A single project waiting in (or actively being processed by) the leader's deploy queue. Only the
+// leader deploys, so the queue is leader-local; `instanceId` is the ProjectInstance/log id created
+// at enqueue time so the UI can watch a deploy from the moment it is queued.
+export interface DeployQueueEntry {
+    projectId: string;
+    instanceId: string;
+    enqueuedAt: number;
+}
+
+// Snapshot of the leader's deploy queue: at most one entry deploys at a time (`active`), the rest
+// wait in `queued` order.
+export interface DeployQueueState {
+    active: (DeployQueueEntry & { startedAt: number }) | null;
+    queued: DeployQueueEntry[];
+}
+
 export interface ClusterStatus {
     leaderId: string | null;
     nodes: ClusterNode[];
     health: NodeHealth[];
     desiredNsmVersion: string | null;
+    deployQueue?: DeployQueueState;
 }
 
 export interface NodeContainerStatus {

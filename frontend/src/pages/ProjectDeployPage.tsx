@@ -9,6 +9,8 @@ import { useCluster } from '@/contexts/cluster-context';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { MdOutlineCheckBox, MdOutlineDelete, MdOutlineInsertLink, MdOutlineKey, MdOutlineRefresh, MdOutlineRocketLaunch } from 'react-icons/md';
 import { ConsoleLog } from '@/components/ConsoleLog';
+import { DeployQueueBadge } from '@/components/DeployQueueBadge';
+import { deployQueueStatusFor } from '@/utils/deployQueue';
 import { useAPI } from '@/utils/api';
 
 const ProjectDeployPage = () => {
@@ -34,7 +36,7 @@ const ProjectDeployPage = () => {
                 const instance = await api.get(API_ROUTES.GET_PROJECT_INSTANCE, { projectInstanceId: currentProjectInstanceId });
                 if (!instance) return;
                 setCurrentProjectInstance({ ...instance });
-                if (instance?.state !== DeploymentState.DEPLOYING) {
+                if (instance?.state !== DeploymentState.DEPLOYING && instance?.state !== DeploymentState.QUEUED) {
                     clearInterval(intervalId);
                 }
             }
@@ -62,7 +64,7 @@ const ProjectDeployPage = () => {
 
     const handleDeploy = async () => {
         if (!project) return;
-        notifications.show({ message: 'Deploying project...', color: 'blue' });
+        notifications.show({ message: 'Queued for deployment...', color: 'blue' });
         const newLogId = await api.get(API_ROUTES.GET_DEPLOY_WEB, { projectId: project.id, key: project.deploymentKey ?? '' });
         if (!newLogId) {
             notifications.show({ message: 'Failed to get deployment log ID. Reload to see log', color: 'yellow' });
@@ -93,7 +95,9 @@ const ProjectDeployPage = () => {
         notifications.show({ message: 'Teardown requested', color: 'green' });
     };
 
-    const canDeploy = project.hasDockerCompose && clusterCtx.hasLeader && project.state !== DeploymentState.DEPLOYING && project.state !== DeploymentState.DESTROYING;
+    const queueStatus = deployQueueStatusFor(clusterCtx.status, project.id);
+    const inQueue = queueStatus.state !== null;
+    const canDeploy = project.hasDockerCompose && clusterCtx.hasLeader && !inQueue && project.state !== DeploymentState.DEPLOYING && project.state !== DeploymentState.DESTROYING;
 
     const deployUrl = `${window.location.origin}/deploy/${project.id}/${project.deploymentKey}`;
 
@@ -175,6 +179,12 @@ const ProjectDeployPage = () => {
                 <Button onClick={() => setModal('deploy')} variant="light" color="green" leftSection={<MdOutlineRocketLaunch />} disabled={!canDeploy}>
                     Deploy
                 </Button>
+                <DeployQueueBadge projectId={project.id} />
+                {inQueue && (
+                    <Text size="sm" c="dimmed">
+                        {queueStatus.state === 'active' ? 'Deploying now.' : `Waiting in queue (position ${queueStatus.position}).`}
+                    </Text>
+                )}
                 <Button onClick={() => setModal('teardown')} variant="light" color="red" leftSection={<MdOutlineDelete />} disabled={!clusterCtx.hasLeader || project.state === DeploymentState.DESTROYING}>
                     Teardown
                 </Button>

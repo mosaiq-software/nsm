@@ -8,6 +8,7 @@ import { startReconciler } from './reconcile/reconciler';
 import { startStatusReporting } from './cluster/statusGossip';
 import { ensureObservabilityStack } from './reconcile/observabilityStack';
 import { ensureSecretSchema } from './persistence/secretPersistence';
+import { recoverDeployQueue } from './controllers/deployQueue';
 
 const start = async () => {
     applyGithubFingerprints();
@@ -20,8 +21,12 @@ const start = async () => {
     // Register this node (and its current IP) into the leader-hosted registry.
     await ensureSelfRegistered();
 
-    // Leader only: bring up the self-hosted observability stack (Grafana + Loki + Prometheus).
-    if (config.role === 'leader') await ensureObservabilityStack();
+    // Leader only: bring up the self-hosted observability stack (Grafana + Loki + Prometheus) and
+    // resume any deploys that were still queued when the leader last stopped.
+    if (config.role === 'leader') {
+        await ensureObservabilityStack();
+        await recoverDeployQueue();
+    }
 
     // Converge local host toward desired state; report status/IP to the leader.
     startReconciler();

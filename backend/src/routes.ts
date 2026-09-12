@@ -5,7 +5,8 @@ import { spawn } from 'child_process';
 import { API_BODY, API_PARAMS, API_RETURN, API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeStatusReport } from '@mosaiq/nsm-common/types';
 import { createProject, deleteProject, getAllProjects, getProject, resetDeploymentKey, setProjectAssignment, syncProjectToRepoData, updateProject, verifyDeploymentKey } from '@/controllers/projectController';
-import { deployProject, planLocally, teardownProject, updateDeploymentLog } from '@/controllers/deployController';
+import { planLocally, teardownProject, updateDeploymentLog } from '@/controllers/deployController';
+import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
@@ -136,7 +137,7 @@ publicRouter.get(API_ROUTES.GET_DEPLOY, async (req, res) => {
         if (!params.key) return void res.status(401).send('Unauthorized');
         if (!(await verifyDeploymentKey(params.projectId, params.key, false))) return void res.status(403).send('Forbidden');
         if (!requireLeader(req, res)) return;
-        await deployProject(params.projectId);
+        await enqueueDeploy(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
         console.error('Error deploying (webhook)', e);
@@ -281,7 +282,7 @@ privateRouter.get(API_ROUTES.GET_DEPLOY_WEB, async (req, res) => {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!(await verifyDeploymentKey(params.projectId, params.key, true))) return void res.status(403).send('Forbidden');
         if (!requireLeader(req, res)) return;
-        const logId = await deployProject(params.projectId);
+        const logId = await enqueueDeploy(params.projectId);
         res.status(200).json(logId);
     } catch (e) {
         console.error('Error deploying (web)', e);

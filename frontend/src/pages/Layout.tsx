@@ -3,6 +3,7 @@ import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
 import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, FileInput, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import RouterLink from '@/components/RouterLink';
+import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 import { useProjects } from '@/contexts/project-context';
 import { Link, useNavigate } from 'react-router-dom';
 import { GithubOwner, Project } from '@mosaiq/nsm-common/types';
@@ -263,7 +264,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                     <Space h="md" />
                     <Divider w="80%" mx="auto" my="sm" />
                     {projectCtx.projects.map((project) => (
-                        <RouterLink to={`/p/${project.id}`} label={`${project.id}`} key={project.id} showActive>
+                        <RouterLink to={`/p/${project.id}`} label={`${project.id}`} key={project.id} showActive rightSection={<DeployQueueBadge projectId={project.id} size="xs" />}>
                             <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />
                             <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />
                             <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />

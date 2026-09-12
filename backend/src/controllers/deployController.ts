@@ -55,9 +55,11 @@ const planOnAssignedNode = async (nodeId: string, proxyCount: number, dirs: Rela
 };
 
 // Leader-only: render a project into a self-contained DesiredDeployment and replicate it.
-export const deployProject = async (projectId: string): Promise<string | undefined> => {
+// When `existingInstanceId` is passed (by the deploy queue), that already-created ProjectInstance is
+// transitioned from QUEUED to DEPLOYING and reused as the log target, rather than creating a new one.
+export const deployProject = async (projectId: string, existingInstanceId?: string): Promise<string | undefined> => {
     if (!cluster.isLeader()) throw new Error('deployProject must run on the leader');
-    let instanceId: string | undefined = undefined;
+    let instanceId: string | undefined = existingInstanceId;
     try {
         let project = await getProject(projectId);
         if (!project) throw new Error('Project not found');
@@ -67,18 +69,23 @@ export const deployProject = async (projectId: string): Promise<string | undefin
         const assignedNode = await getNodeByIdModel(project.workerNodeId);
         if (!assignedNode) throw new Error('Assigned node not found in cluster');
 
-        instanceId = crypto.randomUUID();
-        const projectInstanceHeader: ProjectInstanceHeader = {
-            id: instanceId,
-            projectId,
-            workerNodeId: project.workerNodeId,
-            state: DeploymentState.DEPLOYING,
-            created: Date.now(),
-            lastUpdated: Date.now(),
-            active: true,
-            directories: {},
-        };
-        await createProjectInstanceModel(projectInstanceHeader);
+        if (existingInstanceId) {
+            instanceId = existingInstanceId;
+            await updateProjectInstanceModel(instanceId, { state: DeploymentState.DEPLOYING, workerNodeId: project.workerNodeId });
+        } else {
+            instanceId = crypto.randomUUID();
+            const projectInstanceHeader: ProjectInstanceHeader = {
+                id: instanceId,
+                projectId,
+                workerNodeId: project.workerNodeId,
+                state: DeploymentState.DEPLOYING,
+                created: Date.now(),
+                lastUpdated: Date.now(),
+                active: true,
+                directories: {},
+            };
+            await createProjectInstanceModel(projectInstanceHeader);
+        }
 
         const beforeSync = JSON.stringify(project);
         await syncProjectToRepoData(projectId);
