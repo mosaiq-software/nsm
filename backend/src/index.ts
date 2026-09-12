@@ -7,17 +7,30 @@ import { ensureSelfRegistered } from './cluster/registry';
 import { startReconciler } from './reconcile/reconciler';
 import { startStatusReporting } from './cluster/statusGossip';
 import { ensureObservabilityStack } from './reconcile/observabilityStack';
-import { ensureSecretSchema } from './persistence/secretPersistence';
+import { runMigrations } from './db/migrator';
 import { recoverDeployQueue } from './controllers/deployQueue';
 import { initWebPush } from './controllers/pushController';
+
+// Daemon resilience backstop. A single un-caught async error in a request handler (e.g. a DB query
+// hitting schema drift) must never take down the whole daemon: without this, an unhandled promise
+// rejection crashes the process, systemd restarts it, and the offending request keeps re-killing it
+// - a full outage from one bad query. Log and keep running instead.
+process.on('unhandledRejection', (reason) => {
+    console.error('[fatal-guard] unhandledRejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('[fatal-guard] uncaughtException:', err);
+});
 
 const start = async () => {
     applyGithubFingerprints();
     await ensureBaseDirectories();
 
-    // Source-of-truth store must be ready before we register or reconcile.
+    // Source-of-truth store must be ready before we register or reconcile. sync() creates any
+    // missing tables; migrations then reconcile schema changes sync() can't apply (e.g. adding a
+    // column to an existing table).
     await sequelize.sync();
-    await ensureSecretSchema();
+    await runMigrations();
 
     // Register this node (and its current IP) into the leader-hosted registry.
     await ensureSelfRegistered();

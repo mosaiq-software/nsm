@@ -25,6 +25,7 @@
         "query-string": "^9.1.1",
         "sequelize": "^6.37.5",
         "sqlite3": "^5.1.7",
+        "umzug": "^3.8.3",
         "web-push": "^3.6.7",
         "yaml": "^2.8.1"
     },

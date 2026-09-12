@@ -169,7 +169,12 @@ privateRouter.get(API_ROUTES.GET_PROJECT, async (req, res) => {
 });
 
 privateRouter.get(API_ROUTES.GET_PROJECTS, async (_req, res) => {
-    res.status(200).json(await getAllProjects());
+    try {
+        res.status(200).json(await getAllProjects());
+    } catch (e) {
+        console.error('Error listing projects', e);
+        res.status(500).send();
+    }
 });
 
 privateRouter.get(API_ROUTES.GET_PROJECT_INSTANCE, async (req, res) => {
