@@ -17,6 +17,7 @@ export interface ProjectModelType {
     workerNodeId?: string;
     hasDockerCompose?: boolean;
     hasDotenv?: boolean;
+    zeroDowntime?: boolean;
     createdAt?: string;
     updatedAt?: string;
 }
@@ -41,6 +42,7 @@ ProjectModel.init(
         workerNodeId: DataTypes.STRING,
         hasDockerCompose: DataTypes.BOOLEAN,
         hasDotenv: DataTypes.BOOLEAN,
+        zeroDowntime: DataTypes.BOOLEAN,
     },
     { sequelize }
 );

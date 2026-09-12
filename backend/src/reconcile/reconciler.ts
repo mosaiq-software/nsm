@@ -5,18 +5,47 @@ import { RegistryNode } from '@/cluster/registry';
 import { DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 import { getDesiredDeploymentsAssignedToModel, upsertDesiredDeploymentModel, deleteDesiredDeploymentModel } from '@/persistence/desiredDeploymentPersistence';
 import { applyDeployment } from './deploy';
-import { teardownProjectLocal } from './teardown';
+import { teardownProjectLocal, teardownGenerationLocal } from './teardown';
 import { renderAllNginx } from './nginxRender';
 import { leaderEnsureCerts } from './certs';
 import { refreshInternalHosts } from './internalDns';
 import { regeneratePromTargets } from './promTargets';
-import { clearLocalGeneration, getLocalGeneration, listLocalProjects, setLocalGeneration } from './state';
+import { clearLocalGeneration, getLocalGeneration, getLiveGenerations, getReadyGeneration, listLocalProjects, removeLiveGeneration, setLocalGeneration } from './state';
 import { reconcileDuration, errorsTotal } from '@/utils/metrics';
 
 const RECONCILE_INTERVAL_MS = 5000;
 
 let running = false;
 let timer: NodeJS.Timeout | undefined;
+
+// Generations scheduled to be drained (torn down) after the grace period, keyed `${projectId}:${gen}`.
+// Prevents re-scheduling the same teardown on every 5s tick while the timer is pending.
+const drainScheduled = new Set<string>();
+
+// After a zero-downtime cutover (leader promoted a newer generation), tear down any live generation
+// older than the active one - but only after config.deployDrainMs so in-flight requests to the old
+// upstream can finish. Non-blocking: scheduled via setTimeout so it never stalls the reconcile loop.
+const scheduleDrain = (projectId: string, activeGeneration: number): void => {
+    void (async () => {
+        const live = await getLiveGenerations(projectId);
+        for (const g of live) {
+            if (g >= activeGeneration) continue;
+            const key = `${projectId}:${g}`;
+            if (drainScheduled.has(key)) continue;
+            drainScheduled.add(key);
+            setTimeout(async () => {
+                try {
+                    await teardownGenerationLocal(projectId, g);
+                    await removeLiveGeneration(projectId, g);
+                } catch (e) {
+                    console.error(`[reconcile] failed to drain ${projectId} generation ${g}:`, e);
+                } finally {
+                    drainScheduled.delete(key);
+                }
+            }, config.deployDrainMs);
+        }
+    })();
+};
 
 interface DesiredPullResponse {
     deployments: DesiredDeployment[];
@@ -56,9 +85,24 @@ export const reconcileTick = async (): Promise<void> => {
 
         // A. Ensure everything assigned to me is at the right generation.
         for (const dep of desired) {
-            const current = await getLocalGeneration(dep.projectId);
-            if (current !== dep.generation) {
-                await applyDeployment(dep);
+            if (dep.zeroDowntime) {
+                // Blue-green: bring up the new generation (blue) only until it has passed its
+                // readiness gate (reported ready). Drift is keyed on the READY generation so a
+                // half-deployed blue is retried on the next tick.
+                const ready = await getReadyGeneration(dep.projectId);
+                if (ready !== dep.generation) {
+                    await applyDeployment(dep);
+                }
+                // Once the leader has promoted (activeGeneration advanced -> nginx flipped), drain
+                // any older generations after the grace period.
+                if (dep.activeGeneration != null) {
+                    scheduleDrain(dep.projectId, dep.activeGeneration);
+                }
+            } else {
+                const current = await getLocalGeneration(dep.projectId);
+                if (current !== dep.generation) {
+                    await applyDeployment(dep);
+                }
             }
         }
 

@@ -13,11 +13,12 @@ import { cluster } from '@/cluster/node';
 import { getProject, syncProjectToRepoData } from '@/controllers/projectController';
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
 import { postToNode } from '@/cluster/leaderClient';
-import { deployProject, teardownProject, updateDeploymentLog, planLocally } from '@/controllers/deployController';
+import { deployProject, teardownProject, updateDeploymentLog, planLocally, promoteDeployment } from '@/controllers/deployController';
 import { NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_MANAGED, NSM_LABEL_PROJECT_ID } from '@/constants';
-import { OpType } from '@mosaiq/nsm-common/clusterOps';
+import { OpType, DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 import { DeploymentState, DockerStatus, NginxConfigLocationType, Project } from '@mosaiq/nsm-common/types';
 import { upsertProjectModel } from '@/persistence/projectPersistence';
+import { upsertDesiredDeploymentModel } from '@/persistence/desiredDeploymentPersistence';
 import { createProjectInstanceModel, getProjectInstanceByIdModel } from '@/persistence/projectInstancePersistence';
 
 const isLeader = cluster.isLeader as unknown as Mock;
@@ -73,6 +74,100 @@ describe('deployProject happy path', () => {
         expect(op.deployment.compose).toContain(NSM_LABEL_SERVICE_INSTANCE_ID);
         expect(op.deployment.compose).toContain(NSM_LABEL_PROJECT_ID);
         expect(op.deployment.compose).toContain(NSM_LABEL_MANAGED);
+    });
+});
+
+describe('deployProject zero-downtime', () => {
+    it('defaults to zero-downtime: stamps the flag + ports and does NOT flip the active conf on the first deploy', async () => {
+        mockGetProject.mockResolvedValue(baseProject());
+        await deployProject('p1');
+        const op = proposedOps().find((o) => o.type === OpType.SET_DESIRED_DEPLOYMENT);
+        expect(op.deployment.zeroDowntime).toBe(true);
+        expect(op.deployment.ports).toEqual([{ proxyLocationId: 'lp', port: 1025, readinessPath: undefined }]);
+        // First deploy: no previously-active generation, so nginx has nothing to serve until promotion.
+        expect(op.deployment.activeGeneration).toBeUndefined();
+        expect(op.deployment.activeNginxConf).toBeUndefined();
+    });
+
+    it('opt-out project cuts over immediately (active = pending) and is not blue-green', async () => {
+        mockGetProject.mockResolvedValue(baseProject({ zeroDowntime: false } as Partial<Project>));
+        await deployProject('p1');
+        const op = proposedOps().find((o) => o.type === OpType.SET_DESIRED_DEPLOYMENT);
+        expect(op.deployment.zeroDowntime).toBe(false);
+        expect(op.deployment.activeGeneration).toBe(1);
+        expect(op.deployment.activeNginxConf).toBe(op.deployment.nginxConf);
+        expect(op.deployment.activeDomains).toEqual(op.deployment.domains);
+    });
+
+    it('sanitizes the compose for coexistence: strips container_name + fixed host ports and logs warnings', async () => {
+        mockGetProject.mockResolvedValue(
+            baseProject({ dockerCompose: { services: { web: { image: 'x', container_name: 'fixed', ports: ['8080:3000'] } } } } as unknown as Partial<Project>)
+        );
+        const instanceId = await deployProject('p1');
+        const op = proposedOps().find((o) => o.type === OpType.SET_DESIRED_DEPLOYMENT);
+        expect(op.deployment.compose).not.toContain('container_name');
+        expect(op.deployment.compose).not.toContain('8080:3000');
+        const log = (await getProjectInstanceByIdModel(instanceId!))?.deploymentLog || '';
+        expect(log).toContain('[zero-downtime]');
+        expect(log).toContain('container_name');
+    });
+});
+
+describe('promoteDeployment', () => {
+    it('promotes the pending conf to active for the ready generation and deactivates superseded instances', async () => {
+        const desired: DesiredDeployment = {
+            projectId: 'p1',
+            generation: 2,
+            assignedNodeId: 'n1',
+            repoOwner: 'o',
+            repoName: 'r',
+            timeout: 1,
+            logId: 'iCurrent',
+            dotenv: '',
+            compose: '',
+            nginxConf: 'NEWCONF',
+            domains: ['ex.com'],
+            services: [],
+            zeroDowntime: true,
+            ports: [{ proxyLocationId: 'lp', port: 1025 }],
+            activeGeneration: 1,
+            activeNginxConf: 'OLDCONF',
+            activeDomains: ['ex.com'],
+        };
+        await upsertDesiredDeploymentModel(desired);
+        await createProjectInstanceModel({ id: 'iOld', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DEPLOYED, created: 1, lastUpdated: 1, active: true, directories: {} });
+        await createProjectInstanceModel({ id: 'iCurrent', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DEPLOYED, created: 2, lastUpdated: 2, active: true, directories: {} });
+
+        await promoteDeployment('p1', 2, 'n1');
+
+        const op = proposedOps().find((o) => o.type === OpType.SET_DESIRED_DEPLOYMENT);
+        expect(op.deployment.activeGeneration).toBe(2);
+        expect(op.deployment.activeNginxConf).toBe('NEWCONF');
+        expect((await getProjectInstanceByIdModel('iOld'))?.active).toBe(false);
+        expect((await getProjectInstanceByIdModel('iCurrent'))?.active).toBe(true);
+    });
+
+    it('ignores a stale ready report for a superseded generation', async () => {
+        const desired: DesiredDeployment = {
+            projectId: 'p1',
+            generation: 5,
+            assignedNodeId: 'n1',
+            repoOwner: 'o',
+            repoName: 'r',
+            timeout: 1,
+            logId: 'i5',
+            dotenv: '',
+            compose: '',
+            nginxConf: 'C5',
+            domains: [],
+            services: [],
+            zeroDowntime: true,
+            ports: [],
+            activeGeneration: 4,
+        };
+        await upsertDesiredDeploymentModel(desired);
+        await promoteDeployment('p1', 3, 'n1'); // stale (current desired is gen 5)
+        expect(proposedOps().some((o) => o.type === OpType.SET_DESIRED_DEPLOYMENT)).toBe(false);
     });
 });
 

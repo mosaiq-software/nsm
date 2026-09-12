@@ -5,6 +5,7 @@ import '@/persistence/secretPersistence';
 import '@/persistence/projectInstancePersistence';
 import '@/persistence/serviceInstancePersistence';
 import '@/persistence/userPersistence';
+import '@/persistence/pushSubscriptionPersistence';
 import '@/persistence/allowedEntitiesPersistence';
 import '@/persistence/nodePersistence';
 import '@/persistence/desiredDeploymentPersistence';

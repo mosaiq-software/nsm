@@ -17,10 +17,10 @@ import { getDotenvForProject } from './secretController';
 import { getProject, syncProjectToRepoData } from './projectController';
 import { stringifyDynamicVariablePath } from '@mosaiq/nsm-common/secretUtil';
 import { buildNginxConfigForProject } from '@/utils/nginxUtils';
-import { appendToDeploymentLog, createProjectInstanceModel, getProjectInstancesByProjectIdModel, updateProjectInstanceModel } from '@/persistence/projectInstancePersistence';
+import { appendToDeploymentLog, createProjectInstanceModel, getProjectInstanceByIdModel, getProjectInstancesByProjectIdModel, updateProjectInstanceModel } from '@/persistence/projectInstancePersistence';
 import { DockerCompose } from '@mosaiq/nsm-common/dockerComposeTypes';
 import { createServiceInstanceModel } from '@/persistence/serviceInstancePersistence';
-import { buildDockerComposeString } from '@/utils/repositoryUtils';
+import { buildDockerComposeString, sanitizeComposeForCoexistence } from '@/utils/repositoryUtils';
 import { getDesiredDeploymentModel } from '@/persistence/desiredDeploymentPersistence';
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
 import { cluster } from '@/cluster/node';
@@ -30,6 +30,7 @@ import { ensureDirectories } from '@/reconcile/directories';
 import { config } from '@/config';
 import { DEFAULT_TIMEOUT, NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_PROJECT_ID, NSM_LABEL_PROJECT_INSTANCE_ID, NSM_LABEL_SERVICE_NAME, NSM_LABEL_MANAGED } from '@/constants';
 import { leaderEnsureCerts } from '@/reconcile/certs';
+import { sendDeploymentNotification } from './pushController';
 
 export { NSM_LABEL_SERVICE_INSTANCE_ID };
 
@@ -97,6 +98,8 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
         if (!project.hasDockerCompose) throw new Error('Project does not have a Docker Compose file in the repository root');
         if (!project.workerNodeId) throw new Error('No node assigned to project');
 
+        const zeroDowntime = effectiveZeroDowntime(project);
+
         // Ask the assigned node to allocate ports + ensure directories.
         const proxyCount = countProxies(project);
         const dirRequest = buildDirectoryRequest(project);
@@ -148,6 +151,13 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
             labels[NSM_LABEL_MANAGED] = 'true';
             compose.services[svc].labels = labels;
         }
+
+        // For zero-downtime the two generations coexist, so strip compose footguns that collide
+        // (hardcoded container_name / fixed host ports) and warn about named volumes.
+        if (zeroDowntime) {
+            const { warnings } = sanitizeComposeForCoexistence(compose);
+            for (const w of warnings) await updateDeploymentLog(instanceId!, DeploymentState.DEPLOYING, `[zero-downtime] ${w}\n`);
+        }
         const composeString = buildDockerComposeString(compose);
 
         const prev = await getDesiredDeploymentModel(projectId);
@@ -166,6 +176,13 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
             nginxConf,
             domains,
             services: serviceInstances,
+            zeroDowntime,
+            ports: requestedPorts,
+            // Zero-downtime keeps serving the previously-active generation until the node reports the
+            // new one ready (promoteDeployment flips it). The legacy path cuts over immediately.
+            activeGeneration: zeroDowntime ? prev?.activeGeneration : generation,
+            activeNginxConf: zeroDowntime ? prev?.activeNginxConf : nginxConf,
+            activeDomains: zeroDowntime ? prev?.activeDomains : domains,
         };
         await cluster.propose({ type: OpType.SET_DESIRED_DEPLOYMENT, deployment });
         // Kick off cert issuance for any new domains (leader-side, best effort).
@@ -177,9 +194,48 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
     return instanceId;
 };
 
+const TERMINAL_DEPLOY_STATES = [DeploymentState.DEPLOYED, DeploymentState.HEALTHY, DeploymentState.FAILED];
+
 export const updateDeploymentLog = async (instanceId: string, status: DeploymentState, logText: string) => {
+    // Read the prior state first so we can fire a push notification only on the transition into a
+    // terminal state (updateDeploymentLog is called repeatedly with the same state as logs append).
+    const prev = await getProjectInstanceByIdModel(instanceId);
     await updateProjectInstanceModel(instanceId, { state: status });
     await appendToDeploymentLog(instanceId, logText);
+    if (TERMINAL_DEPLOY_STATES.includes(status) && prev && prev.state !== status) {
+        try {
+            const project = await getProject(prev.projectId);
+            if (project) void sendDeploymentNotification(project, status);
+        } catch (e) {
+            console.error('[push] deployment notification failed', e);
+        }
+    }
+};
+
+// Effective zero-downtime for a project: on by default (node-wide config), unless this node has it
+// turned off globally or the project explicitly opted out.
+const effectiveZeroDowntime = (project: Project): boolean => config.zeroDowntime && project.zeroDowntime !== false;
+
+// Leader-only: a node has reported its new (blue) generation ready. Promote it so nginx renders the
+// new ports on the next reconcile, and deactivate the superseded ProjectInstances. Idempotent and
+// safe against stale reports (a ready for an already-superseded generation is ignored).
+export const promoteDeployment = async (projectId: string, generation: number, _nodeId: string): Promise<void> => {
+    if (!cluster.isLeader()) return;
+    const dep = await getDesiredDeploymentModel(projectId);
+    if (!dep) return;
+    if (dep.generation !== generation) return; // stale: a newer generation has already superseded this
+    if (dep.activeGeneration !== generation) {
+        const promoted: DesiredDeployment = { ...dep, activeGeneration: generation, activeNginxConf: dep.nginxConf, activeDomains: dep.domains };
+        await cluster.propose({ type: OpType.SET_DESIRED_DEPLOYMENT, deployment: promoted });
+    }
+    // The just-promoted generation's instance is dep.logId; deactivate any older active instances so
+    // the UI/observability show a single active deployment.
+    const instances = await getProjectInstancesByProjectIdModel(projectId);
+    for (const inst of instances) {
+        if (inst.active && inst.id !== dep.logId) await updateProjectInstanceModel(inst.id, { active: false });
+    }
+    // New domains may now be served; make sure their certs exist (best effort).
+    void leaderEnsureCerts();
 };
 
 const countProxies = (project: Project): number => {
@@ -206,7 +262,7 @@ const mapPorts = (project: Project, ports: number[] | null): PortPlanEntry[] => 
     for (const server of project.nginxConfig?.servers || []) for (const loc of server.locations) if (loc.type === NginxConfigLocationType.PROXY) proxies.push(loc);
     if (!proxies.length) return [];
     if (!ports || ports.length < proxies.length) throw new Error('Not enough free ports on the assigned node');
-    return proxies.map((p, i) => ({ proxyLocationId: p.locationId, port: ports[i] }));
+    return proxies.map((p, i) => ({ proxyLocationId: p.locationId, port: ports[i], readinessPath: p.readinessPath }));
 };
 
 // Note: the proxy target is the assigned node's STABLE internal hostname (<nodeId>.<domain>),

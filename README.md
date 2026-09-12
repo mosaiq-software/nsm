@@ -150,6 +150,30 @@ cd nsm/frontend && npm ci && npm run dev   # http://localhost:5173
 
 Build-time config is `VITE_`-prefixed (see `.env.sample`): `VITE_GITHUB_OAUTH_CLIENT_ID`, `VITE_GITHUB_OAUTH_CALLBACK_URL`, and optional `VITE_GITHUB_OAUTH_DEFAULT_USER`. The daemon reads these same three vars, so they are defined once; only `GITHUB_OAUTH_CLIENT_SECRET` is server-only.
 
+### Background notifications (Web Push)
+
+The UI can deliver OS-level notifications for deploy events — deploy started, and finished (`deployed`/`healthy`/`failed`) — that fire even when the tab or the whole browser is closed. It uses the Web Push API: a service worker (`frontend/public/sw.js`) plus a VAPID key pair the leader uses to sign push messages. All signed-in users who opt in receive every deploy's notification.
+
+Setup on the leader:
+
+1. Generate a VAPID key pair once:
+
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+
+2. Set the pair (and a contact subject) in the leader's env (`.env` / `/etc/nsm/nsm.env`):
+
+   ```bash
+   NSM_VAPID_PUBLIC_KEY=<public key>
+   NSM_VAPID_PRIVATE_KEY=<private key>
+   NSM_VAPID_SUBJECT=mailto:you@example.com
+   ```
+
+3. Restart the daemon. In the UI, flip the **Notifications** switch in the header and accept the browser permission prompt.
+
+Notes: web push requires the dashboard to be served over **HTTPS** in production (`localhost` is exempt for local dev). When the VAPID vars are unset, push is disabled and the daemon behaves exactly as before. Only the leader stores subscriptions (keyed by browser endpoint) and sends notifications, since all deploy state lives there; expired subscriptions are pruned automatically.
+
 ---
 
 ## How a deployment flows
@@ -171,6 +195,25 @@ sequenceDiagram
 ```
 
 `generation` is a monotonic per-project counter; a node redeploys only when the desired generation differs from the generation marker it has on disk, so reconciliation is restart-safe.
+
+### Zero-downtime (blue-green) deploys
+
+By default (`ZERO_DOWNTIME_DEPLOYS=true`, per-project opt-out via the project's `zeroDowntime` flag) a redeploy does not recreate containers in place. Instead the assigned node brings up the new generation **alongside** the old one under a generation-scoped compose project name (`<projectId>-g<generation>`) in its own working directory (`DEPLOYMENT_PATH/<projectId>/g<generation>`) on freshly allocated ports, then runs a **readiness gate** (per-service Docker healthcheck polling for services that declare one, plus a TCP/HTTP probe of each newly allocated proxy port). Only after the new generation passes does the node report it ready; the leader then promotes it (renders nginx to the new ports and reloads gracefully) and, after `DEPLOY_DRAIN_MS`, the node tears down the old generation. If the readiness gate fails, the leader never promotes, nginx keeps serving the old generation (automatic rollback), and the failed new generation is removed.
+
+```mermaid
+sequenceDiagram
+    participant L as Leader
+    participant N as Assigned node
+    L->>L: SET_DESIRED_DEPLOYMENT (gen N+1, new ports); nginx still serves ACTIVE gen N
+    N->>N: clone into g(N+1); docker compose -p proj-gN+1 up --build -d (new ports)
+    N->>N: readiness gate (healthcheck poll + port/HTTP probe)
+    N->>L: POST /cluster/deploy-ready (gen N+1)
+    L->>L: deactivate prior instance; promote ACTIVE=gen N+1; renderAllNginx + reload
+    L->>N: /node/desired now reports activeGeneration=N+1
+    N->>N: after DEPLOY_DRAIN_MS: docker compose -p proj-gN down; rm g(N)
+```
+
+Zero-downtime deploys require app state to live in bind-mounted (or `external: true`) volumes rather than plain named volumes (generation-scoped project names give named volumes a fresh namespace each deploy), tolerate two app versions briefly running at once (use backward-compatible DB migrations), and avoid hardcoded `container_name`/fixed host ports in the compose (NSM strips these for coexistence). Setting `ZERO_DOWNTIME_DEPLOYS=false`, or a project's opt-out, restores legacy in-place recreation.
 
 ---
 
@@ -244,6 +287,8 @@ Cluster:
 - `CLUSTER_SECRET` — authenticates internal RPCs (register/pull/status/self-update).
 
 Data paths: `DATABASE_DIR`, `DATABASE_NAME`, `REPO_SANDBOX_PATH`, `DEPLOYMENT_PATH`, `PERSISTENT_PATH`, `NGINX_CONF_DIR`, `LETSENCRYPT_LIVE_DIR`, `NSM_WWW_PATH`.
+
+Deploys: `ZERO_DOWNTIME_DEPLOYS` (default `true`; blue-green deploys with a health-gated nginx cutover, per-project opt-out via the project's `zeroDowntime` flag), `DEPLOY_DRAIN_MS` (how long the old generation lingers after cutover), `READINESS_TIMEOUT_MS`, `READINESS_INTERVAL_MS` (bound the new generation's readiness gate).
 
 Git/GitHub: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_PATH`, `GITHUB_APP_INSTALLATION_ID` (repo access via GitHub App), `GIT_SSH_KEY_DIR`, `GIT_SSH_KEY_FILE` (legacy deploy-key fallback), `VITE_GITHUB_OAUTH_CLIENT_ID`, `VITE_GITHUB_OAUTH_CALLBACK_URL`, `VITE_GITHUB_OAUTH_DEFAULT_USER`, `GITHUB_OAUTH_CLIENT_SECRET`, `CERTBOT_DNS_ARGS`, `NSM_REPO_DIR`.
 

@@ -92,6 +92,30 @@ describe('renderAllNginx', () => {
         await expect(fsp.readFile(`${config.nginxConfDir}/pg_regress.conf`, 'utf-8')).rejects.toBeTruthy();
     });
 
+    it('for a zero-downtime deployment, serves the ACTIVE conf and withholds the vhost until promoted', async () => {
+        // Pending (not yet promoted): activeNginxConf undefined -> no vhost even though nginxConf is set.
+        mockDeps.mockResolvedValue([{ ...dep('zd', 'PENDING', ['a.com']), zeroDowntime: true, activeNginxConf: undefined, activeDomains: undefined }]);
+        mockCerts.mockResolvedValue([cert('a.com')]);
+        await renderAllNginx();
+        await expect(fsp.readFile(`${config.nginxConfDir}/zd.conf`, 'utf-8')).rejects.toBeTruthy();
+
+        // Promoted: the ACTIVE conf is rendered, not the pending one.
+        mockDeps.mockResolvedValue([{ ...dep('zd', 'PENDING2', ['a.com']), zeroDowntime: true, activeNginxConf: 'ACTIVE', activeDomains: ['a.com'] }]);
+        await renderAllNginx();
+        expect(await fsp.readFile(`${config.nginxConfDir}/zd.conf`, 'utf-8')).toBe('ACTIVE');
+    });
+
+    it('writes an http-01 challenge vhost for pending domains that lack a cert', async () => {
+        mockDeps.mockResolvedValue([dep('c1', 'server c1', ['x.com'])]);
+        mockCerts.mockResolvedValue([]);
+        await renderAllNginx();
+        const challenge = await fsp.readFile(`${config.nginxConfDir}/_nsm_http_challenge.conf`, 'utf-8');
+        expect(challenge).toContain('listen 80;');
+        expect(challenge).toContain('server_name x.com;');
+        // The real vhost is still deferred until the cert exists.
+        await expect(fsp.readFile(`${config.nginxConfDir}/c1.conf`, 'utf-8')).rejects.toBeTruthy();
+    });
+
     it('strips legacy certbot-installer file references from frozen confs', async () => {
         const legacy = [
             'server {',

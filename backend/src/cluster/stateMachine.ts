@@ -23,6 +23,7 @@ const projectToRow = (p: Project): ProjectModelType => ({
     workerNodeId: p.workerNodeId,
     hasDockerCompose: p.hasDockerCompose,
     hasDotenv: p.hasDotenv,
+    zeroDowntime: p.zeroDowntime,
 });
 
 // Deterministic, idempotent application of an op onto the leader's source-of-truth SQLite DB.

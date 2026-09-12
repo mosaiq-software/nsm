@@ -14,7 +14,10 @@ import { DeploymentState } from '@mosaiq/nsm-common/types';
 const mockGetProject = getProject as unknown as Mock;
 const mockDeploy = deployProject as unknown as Mock;
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
+// Delay the queue inserts between consecutive deploys; tests advance past it with fake timers.
+const INTER_DEPLOY_DELAY_MS = 30_000;
+
+const flush = () => vi.advanceTimersByTimeAsync(0);
 
 // Controllable deploys: each call parks until we resolve it, so we can observe queue state while a
 // deploy is "in flight" and assert that only one runs at a time.
@@ -24,6 +27,7 @@ let activeCount = 0;
 let maxConcurrent = 0;
 
 beforeEach(async () => {
+    vi.useFakeTimers();
     await resetDb();
     started = [];
     resolvers = [];
@@ -48,15 +52,18 @@ beforeEach(async () => {
 afterEach(async () => {
     for (let i = 0; i < 100; i++) {
         while (resolvers.length) resolvers.shift()!();
-        await flush();
+        await vi.advanceTimersByTimeAsync(INTER_DEPLOY_DELAY_MS);
         const state = getDeployQueueState();
         if (!state.active && state.queued.length === 0 && resolvers.length === 0) break;
     }
+    vi.useRealTimers();
 });
 
+// Finish the active deploy and let the queue advance past the inter-deploy delay so the next
+// deploy (if any) starts.
 const resolveNext = async () => {
     resolvers.shift()!();
-    await flush();
+    await vi.advanceTimersByTimeAsync(INTER_DEPLOY_DELAY_MS);
 };
 
 describe('deploy queue serialization', () => {

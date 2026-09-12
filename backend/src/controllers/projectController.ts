@@ -46,6 +46,7 @@ export const getProject = async (projectId: string): Promise<Project | undefined
         workerNodeId: projectData.workerNodeId,
         hasDockerCompose: projectData.hasDockerCompose,
         hasDotenv: projectData.hasDotenv,
+        zeroDowntime: projectData.zeroDowntime,
     };
 };
 

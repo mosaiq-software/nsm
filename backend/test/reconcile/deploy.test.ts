@@ -11,28 +11,42 @@ vi.mock('@/host/exec', () => ({
     }),
     execStream: vi.fn(async () => ({ out: '', code: 0 })),
 }));
-vi.mock('@/reconcile/report', () => ({ reportDeploymentLog: vi.fn() }));
-vi.mock('@/reconcile/state', () => ({ setLocalGeneration: vi.fn() }));
+vi.mock('@/reconcile/report', () => ({ reportDeploymentLog: vi.fn(), reportDeployReady: vi.fn() }));
+vi.mock('@/reconcile/state', () => ({
+    setLocalGeneration: vi.fn(),
+    markGenerationLive: vi.fn(),
+    markGenerationReady: vi.fn(),
+    removeLiveGeneration: vi.fn(),
+}));
+vi.mock('@/reconcile/ports', () => ({ releasePorts: vi.fn(), waitPortReady: vi.fn(async () => true) }));
+vi.mock('@/reconcile/teardown', () => ({ teardownGenerationLocal: vi.fn() }));
 
 import { config } from '@/config';
 import { execStream } from '@/host/exec';
 import { applyDeployment } from '@/reconcile/deploy';
-import { reportDeploymentLog } from '@/reconcile/report';
-import { setLocalGeneration } from '@/reconcile/state';
+import { reportDeploymentLog, reportDeployReady } from '@/reconcile/report';
+import { setLocalGeneration, markGenerationLive, markGenerationReady } from '@/reconcile/state';
+import { waitPortReady } from '@/reconcile/ports';
+import { teardownGenerationLocal } from '@/reconcile/teardown';
 import { DeploymentState } from '@mosaiq/nsm-common/types';
 import { DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 
 const mockStream = execStream as unknown as Mock;
 const mockReport = reportDeploymentLog as unknown as Mock;
+const mockReady = reportDeployReady as unknown as Mock;
 const mockSetGen = setLocalGeneration as unknown as Mock;
+const mockLive = markGenerationLive as unknown as Mock;
+const mockReadyGen = markGenerationReady as unknown as Mock;
+const mockWaitPort = waitPortReady as unknown as Mock;
+const mockGenTeardown = teardownGenerationLocal as unknown as Mock;
 
-const dep = (over: Partial<DesiredDeployment> = {}): DesiredDeployment => ({ projectId: 'proj1', generation: 3, assignedNodeId: 'n1', repoOwner: 'o', repoName: 'r', timeout: 60000, logId: 'log1', dotenv: 'FOO=bar', compose: 'services:\n  web: {}', nginxConf: '# conf', domains: ['a.com'], services: [], ...over });
+const dep = (over: Partial<DesiredDeployment> = {}): DesiredDeployment => ({ projectId: 'proj1', generation: 3, assignedNodeId: 'n1', repoOwner: 'o', repoName: 'r', timeout: 60000, logId: 'log1', dotenv: 'FOO=bar', compose: 'services:\n  web: {}', nginxConf: '# conf', domains: ['a.com'], services: [], zeroDowntime: false, ports: [], ...over });
 
 beforeEach(() => {
     config.production = true;
-    mockStream.mockClear();
-    mockReport.mockClear();
-    mockSetGen.mockClear();
+    vi.clearAllMocks();
+    mockStream.mockResolvedValue({ out: '', code: 0 });
+    mockWaitPort.mockResolvedValue(true);
 });
 afterEach(() => {
     config.production = false;
@@ -40,8 +54,8 @@ afterEach(() => {
 
 const lastReportStates = () => mockReport.mock.calls.map((c) => c[1]);
 
-describe('applyDeployment', () => {
-    it('clones, injects compose+dotenv, runs compose up, writes generation, reports DEPLOYED', async () => {
+describe('applyDeployment (legacy in-place)', () => {
+    it('clones, injects compose+dotenv, runs compose up in place, writes generation, reports DEPLOYED', async () => {
         const d = dep();
         await applyDeployment(d);
         const repoPath = `${config.deploymentPath}/${d.projectId}`;
@@ -49,6 +63,7 @@ describe('applyDeployment', () => {
         expect(await fsp.readFile(`${repoPath}/.env`, 'utf-8')).toContain('FOO=bar');
         expect(mockStream).toHaveBeenCalledWith(expect.stringContaining('docker compose -p proj1 up --build -d'), d.timeout, expect.any(Function));
         expect(mockSetGen).toHaveBeenCalledWith('proj1', 3);
+        expect(mockReady).not.toHaveBeenCalled();
         expect(lastReportStates()).toContain(DeploymentState.DEPLOYED);
         expect(lastReportStates()).not.toContain(DeploymentState.FAILED);
     });
@@ -68,5 +83,35 @@ describe('applyDeployment', () => {
         await expect(fsp.readFile(`${config.deploymentPath}/${d.projectId}/docker-compose.yml`, 'utf-8')).rejects.toBeTruthy();
         expect(mockSetGen).toHaveBeenCalledWith('proj1', 3);
         expect(lastReportStates()).toContain(DeploymentState.DEPLOYED);
+    });
+});
+
+describe('applyDeployment (zero-downtime / blue-green)', () => {
+    it('brings up a generation-scoped stack in a per-generation workdir, gates readiness, and reports ready', async () => {
+        const d = dep({ zeroDowntime: true, ports: [{ proxyLocationId: 'lp', port: 1234 }] });
+        const ok = await applyDeployment(d);
+        expect(ok).toBe(true);
+        const genPath = `${config.deploymentPath}/proj1/g3`;
+        expect(await fsp.readFile(`${genPath}/docker-compose.yml`, 'utf-8')).toContain('services:');
+        // Blue-green project name coexists with the old generation; runs from the per-gen workdir.
+        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining('docker compose -p proj1-g3 up --build -d'), d.timeout, expect.any(Function));
+        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining(genPath), d.timeout, expect.any(Function));
+        expect(mockLive).toHaveBeenCalledWith('proj1', 3);
+        expect(mockWaitPort).toHaveBeenCalledWith(1234, expect.any(Number), undefined);
+        expect(mockReadyGen).toHaveBeenCalledWith('proj1', 3);
+        expect(mockReady).toHaveBeenCalledWith('proj1', 3, expect.any(String));
+        // Legacy single-generation marker is NOT used on the blue-green path.
+        expect(mockSetGen).not.toHaveBeenCalled();
+    });
+
+    it('fails, tears down the blue stack, and does NOT report ready when the readiness gate fails', async () => {
+        mockWaitPort.mockResolvedValue(false);
+        const d = dep({ zeroDowntime: true, ports: [{ proxyLocationId: 'lp', port: 1234 }] });
+        const ok = await applyDeployment(d);
+        expect(ok).toBe(false);
+        expect(mockReady).not.toHaveBeenCalled();
+        expect(mockReadyGen).not.toHaveBeenCalled();
+        expect(mockGenTeardown).toHaveBeenCalledWith('proj1', 3);
+        expect(lastReportStates()).toContain(DeploymentState.FAILED);
     });
 });

@@ -40,8 +40,22 @@ export interface NsmConfig {
     prometheusUrl: string;
     grafanaUrl: string;
     obsLokiPushUrl: string;
+    // Web Push (VAPID) credentials. Only the leader signs and sends push messages; when unset,
+    // push is disabled and the daemon behaves as before.
+    vapidPublicKey: string;
+    vapidPrivateKey: string;
+    vapidSubject: string;
     version: string;
     commit: string;
+    // Zero-downtime (blue-green) deploys: global default (per-project opt-out via Project.zeroDowntime).
+    zeroDowntime: boolean;
+    // How long the old generation is kept running after nginx has been flipped, so in-flight
+    // requests can drain, before it is torn down.
+    deployDrainMs: number;
+    // Upper bound on the readiness gate for a new generation (healthcheck poll + port/HTTP probe).
+    readinessTimeoutMs: number;
+    // Poll interval used while waiting for the readiness gate to pass.
+    readinessIntervalMs: number;
 }
 
 const bool = (v: string | undefined) => v === 'true';
@@ -98,8 +112,16 @@ export const config: NsmConfig = {
     prometheusUrl: process.env.PROMETHEUS_URL || 'http://127.0.0.1:9090',
     grafanaUrl: process.env.GRAFANA_URL || 'http://127.0.0.1:3000',
     obsLokiPushUrl: deriveLokiPush(),
+    vapidPublicKey: process.env.NSM_VAPID_PUBLIC_KEY || '',
+    vapidPrivateKey: process.env.NSM_VAPID_PRIVATE_KEY || '',
+    vapidSubject: process.env.NSM_VAPID_SUBJECT || 'mailto:admin@nsm.local',
     version: readVersion(),
     commit: readGitCommit(),
+    // Default ON: only an explicit ZERO_DOWNTIME_DEPLOYS=false opts the whole node out.
+    zeroDowntime: process.env.ZERO_DOWNTIME_DEPLOYS !== 'false',
+    deployDrainMs: num(process.env.DEPLOY_DRAIN_MS, 10_000),
+    readinessTimeoutMs: num(process.env.READINESS_TIMEOUT_MS, 120_000),
+    readinessIntervalMs: num(process.env.READINESS_INTERVAL_MS, 2_000),
 };
 
 export const gitSshKeyPath = (): string => `${config.gitSshKeyDir}/${config.gitSshKeyFile}`;

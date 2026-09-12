@@ -10,6 +10,7 @@ import { GithubOwner, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
 import { rawApiGetNoHook, useAPI } from '@/utils/api';
+import { disablePush, enablePush, isPushSubscribed, isPushSupported } from '@/utils/push';
 
 const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle }] = useDisclosure();
@@ -18,6 +19,8 @@ const Layout = (props: { children: React.ReactNode }) => {
     const navigate = useNavigate();
     const [modal, setModal] = useState<'create' | null>(null);
     const [creatingProject, setCreatingProject] = useState(false);
+    const [pushOn, setPushOn] = useState(false);
+    const [pushBusy, setPushBusy] = useState(false);
     const [legacyFile, setLegacyFile] = useState<File | null>(null);
     const [newProject, setNewProject] = useState<Project>({
         id: '',
@@ -111,6 +114,43 @@ const Layout = (props: { children: React.ReactNode }) => {
             cancelled = true;
         };
     }, [modal, debouncedOwner, debouncedRepo, token]);
+
+    // Reflect whether this browser already has a push subscription once the user is signed in.
+    useEffect(() => {
+        if (!userCtx.user || !isPushSupported()) return;
+        let cancelled = false;
+        void isPushSubscribed().then((subscribed) => {
+            if (!cancelled) setPushOn(subscribed);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [userCtx.user]);
+
+    const togglePush = async (enabled: boolean) => {
+        if (!token) return;
+        setPushBusy(true);
+        try {
+            if (enabled) {
+                await enablePush(token);
+                setPushOn(true);
+                notifications.show({ title: 'Notifications enabled', message: 'You will be notified about deploy events.', color: 'green' });
+            } else {
+                await disablePush(token);
+                setPushOn(false);
+                notifications.show({ title: 'Notifications disabled', message: 'You will no longer receive deploy notifications.', color: 'gray' });
+            }
+        } catch (error) {
+            setPushOn(false);
+            notifications.show({
+                title: 'Could not enable notifications',
+                message: error instanceof Error ? error.message : 'Failed to update notification settings',
+                color: 'red',
+            });
+        } finally {
+            setPushBusy(false);
+        }
+    };
 
     return (
         <>
@@ -223,31 +263,36 @@ const Layout = (props: { children: React.ReactNode }) => {
                             <span style={{ fontWeight: '900' }}>N</span>ode <span style={{ fontWeight: '900' }}>S</span>erver <span style={{ fontWeight: '900' }}>M</span>anager
                         </Text>
                     </Group>
-                    <Menu>
-                        <Menu.Target>
-                            <Avatar
-                                src={userCtx.user?.avatarUrl || undefined}
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => {
-                                    if (!userCtx.user) {
-                                        userCtx.signIn();
-                                    }
-                                }}
-                            />
-                        </Menu.Target>
-                        {userCtx.user && (
-                            <Menu.Dropdown>
-                                <Menu.Item
-                                    component="a"
-                                    onClick={() => {
-                                        userCtx.signOut();
-                                    }}
-                                >
-                                    Logout
-                                </Menu.Item>
-                            </Menu.Dropdown>
+                    <Group align="center" gap="md">
+                        {userCtx.user && isPushSupported() && (
+                            <Switch label="Notifications" checked={pushOn} disabled={pushBusy} onChange={(e) => togglePush(e.currentTarget.checked)} />
                         )}
-                    </Menu>
+                        <Menu>
+                            <Menu.Target>
+                                <Avatar
+                                    src={userCtx.user?.avatarUrl || undefined}
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => {
+                                        if (!userCtx.user) {
+                                            userCtx.signIn();
+                                        }
+                                    }}
+                                />
+                            </Menu.Target>
+                            {userCtx.user && (
+                                <Menu.Dropdown>
+                                    <Menu.Item
+                                        component="a"
+                                        onClick={() => {
+                                            userCtx.signOut();
+                                        }}
+                                    >
+                                        Logout
+                                    </Menu.Item>
+                                </Menu.Dropdown>
+                            )}
+                        </Menu>
+                    </Group>
                 </AppShell.Header>
 
                 <AppShell.Navbar

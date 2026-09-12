@@ -9,6 +9,7 @@ import { startStatusReporting } from './cluster/statusGossip';
 import { ensureObservabilityStack } from './reconcile/observabilityStack';
 import { ensureSecretSchema } from './persistence/secretPersistence';
 import { recoverDeployQueue } from './controllers/deployQueue';
+import { initWebPush } from './controllers/pushController';
 
 const start = async () => {
     applyGithubFingerprints();
@@ -26,6 +27,7 @@ const start = async () => {
     if (config.role === 'leader') {
         await ensureObservabilityStack();
         await recoverDeployQueue();
+        initWebPush();
     }
 
     // Converge local host toward desired state; report status/IP to the leader.

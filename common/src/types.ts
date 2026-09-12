@@ -20,6 +20,9 @@ export interface Project {
     workerNodeId?: string;
     hasDockerCompose?: boolean;
     hasDotenv?: boolean;
+    // Per-project opt-out for zero-downtime (blue-green) deploys. Undefined inherits the global
+    // default (ZERO_DOWNTIME_DEPLOYS, on by default); set to false to force in-place recreation.
+    zeroDowntime?: boolean;
 }
 
 export interface Secret {
@@ -168,6 +171,9 @@ export interface ProxyConfigLocation {
     timeout?: number;
     maxClientBodySizeMb?: number;
     replications?: number;
+    // Optional HTTP path probed on the newly allocated port during a zero-downtime deploy to decide
+    // the new generation is ready before nginx is flipped to it. When unset, a TCP connect is used.
+    readinessPath?: string;
 }
 export interface RedirectConfigLocation {
     locationId: string;
@@ -277,6 +283,16 @@ export interface User {
     authToken: string;
     created: number;
     signedIn: boolean;
+}
+
+// A browser Web Push subscription, as produced by PushManager.subscribe().toJSON() on the client.
+// Stored per user so the leader can push deploy notifications to every opted-in browser.
+export interface PushSubscriptionJSON {
+    endpoint: string;
+    keys: {
+        p256dh: string;
+        auth: string;
+    };
 }
 
 export enum AllowedEntityType {

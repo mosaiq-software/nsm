@@ -1,4 +1,4 @@
-import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, GithubOwner, LogMessage, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, Secret, User } from './types';
+import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, GithubOwner, LogMessage, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -18,6 +18,7 @@ export enum API_ROUTES {
     GET_GITHUB_OWNERS = '/github/owners',
     GET_GITHUB_REPOS = '/github/repos',
     GET_GITHUB_BRANCHES = '/github/branches',
+    GET_VAPID_PUBLIC_KEY = '/push/vapid-public-key',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -33,6 +34,8 @@ export enum API_ROUTES {
     POST_GITHUB_LOGOUT = '/logout/github/:token',
     POST_SET_ALLOWED_ENTITIES = '/allowed-entities/set',
     POST_LOGGER = '/logger/:logKey',
+    POST_PUSH_SUBSCRIBE = '/push/subscribe',
+    POST_PUSH_UNSUBSCRIBE = '/push/unsubscribe',
 }
 export interface API_PARAMS {
     //GET
@@ -51,6 +54,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_GITHUB_OWNERS]: {};
     [API_ROUTES.GET_GITHUB_REPOS]: {};
     [API_ROUTES.GET_GITHUB_BRANCHES]: {};
+    [API_ROUTES.GET_VAPID_PUBLIC_KEY]: {};
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -66,6 +70,8 @@ export interface API_PARAMS {
     [API_ROUTES.POST_GITHUB_LOGOUT]: { token: string };
     [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: {};
     [API_ROUTES.POST_LOGGER]: { logKey: string };
+    [API_ROUTES.POST_PUSH_SUBSCRIBE]: {};
+    [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: {};
 }
 export interface API_BODY {
     // Only POST
@@ -85,6 +91,7 @@ export interface API_BODY {
     [API_ROUTES.GET_GITHUB_OWNERS]: undefined;
     [API_ROUTES.GET_GITHUB_REPOS]: undefined;
     [API_ROUTES.GET_GITHUB_BRANCHES]: undefined;
+    [API_ROUTES.GET_VAPID_PUBLIC_KEY]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -100,6 +107,8 @@ export interface API_BODY {
     [API_ROUTES.POST_GITHUB_LOGOUT]: {};
     [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: { entities: AllowedGithubEntity[] };
     [API_ROUTES.POST_LOGGER]: LogMessage;
+    [API_ROUTES.POST_PUSH_SUBSCRIBE]: PushSubscriptionJSON;
+    [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: { endpoint: string };
 }
 export interface API_RETURN {
     //GET
@@ -118,6 +127,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_GITHUB_OWNERS]: GithubOwner[];
     [API_ROUTES.GET_GITHUB_REPOS]: string[];
     [API_ROUTES.GET_GITHUB_BRANCHES]: string[];
+    [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -133,6 +143,8 @@ export interface API_RETURN {
     [API_ROUTES.POST_GITHUB_LOGOUT]: undefined;
     [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: undefined;
     [API_ROUTES.POST_LOGGER]: undefined;
+    [API_ROUTES.POST_PUSH_SUBSCRIBE]: undefined;
+    [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: undefined;
 }
 
 export interface API_AUTH {
@@ -153,6 +165,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_GITHUB_OWNERS]: string;
     [API_ROUTES.GET_GITHUB_REPOS]: string;
     [API_ROUTES.GET_GITHUB_BRANCHES]: string;
+    [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;
@@ -168,4 +181,6 @@ export interface API_AUTH {
     [API_ROUTES.POST_GITHUB_LOGOUT]: string;
     [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: string;
     [API_ROUTES.POST_LOGGER]: undefined;
+    [API_ROUTES.POST_PUSH_SUBSCRIBE]: string;
+    [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: string;
 }

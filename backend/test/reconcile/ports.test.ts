@@ -4,7 +4,7 @@ vi.mock('@/host/exec', () => ({ execSafe: vi.fn(), execStream: vi.fn() }));
 
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
-import { getOccupiedPorts, getNextFreePorts, doubleCheckPortFree, getReservedPorts } from '@/reconcile/ports';
+import { getOccupiedPorts, getNextFreePorts, doubleCheckPortFree, getReservedPorts, releasePorts, getLedgerPorts, waitPortReady } from '@/reconcile/ports';
 
 const mockExec = execSafe as unknown as Mock;
 
@@ -12,6 +12,7 @@ const NETSTAT = ['Active Internet connections', 'Proto Recv-Q Send-Q Local Addre
 
 beforeEach(() => {
     config.production = true;
+    releasePorts(getLedgerPorts()); // the ledger is module-level; reset it between tests
     mockExec.mockReset();
     mockExec.mockImplementation(async (cmd: string) => {
         if (cmd.includes('netstat')) return { out: NETSTAT, code: 0 };
@@ -66,6 +67,44 @@ describe('ports (production)', () => {
         expect(await doubleCheckPortFree(5000)).toBe(true);
         mockExec.mockResolvedValueOnce({ out: 'IN USE', code: 0 });
         expect(await doubleCheckPortFree(5000)).toBe(false);
+    });
+
+    it('reserves allocated ports so a subsequent plan cannot reuse an allocated-but-unbound port', async () => {
+        const first = await getNextFreePorts(2);
+        expect(first).toEqual([1025, 1026]);
+        // Ledger now holds 1025/1026 even though nc reports them free (not yet bound).
+        const second = await getNextFreePorts(2);
+        expect(second).toEqual([1027, 1028]);
+        // Releasing frees them for reuse.
+        releasePorts([1025, 1026]);
+        const third = await getNextFreePorts(1);
+        expect(third).toEqual([1025]);
+    });
+
+    it('waitPortReady resolves true once the port is listening (nc reports IN USE)', async () => {
+        mockExec.mockImplementation(async (cmd: string) => (cmd.startsWith('nc ') ? { out: 'IN USE', code: 0 } : { out: '', code: 0 }));
+        expect(await waitPortReady(6000, 1000)).toBe(true);
+    });
+
+    it('waitPortReady resolves false when the port never starts listening before the deadline', async () => {
+        mockExec.mockImplementation(async (cmd: string) => (cmd.startsWith('nc ') ? { out: 'FREE', code: 0 } : { out: '', code: 0 }));
+        expect(await waitPortReady(6000, 30)).toBe(false);
+    });
+
+    it('waitPortReady also requires a non-5xx HTTP response when a readiness path is given', async () => {
+        mockExec.mockImplementation(async (cmd: string) => {
+            if (cmd.startsWith('nc ')) return { out: 'IN USE', code: 0 };
+            if (cmd.includes('curl')) return { out: '200', code: 0 };
+            return { out: '', code: 0 };
+        });
+        expect(await waitPortReady(6000, 1000, '/healthz')).toBe(true);
+
+        mockExec.mockImplementation(async (cmd: string) => {
+            if (cmd.startsWith('nc ')) return { out: 'IN USE', code: 0 };
+            if (cmd.includes('curl')) return { out: '503', code: 0 };
+            return { out: '', code: 0 };
+        });
+        expect(await waitPortReady(6000, 30, '/healthz')).toBe(false);
     });
 });
 

@@ -8,23 +8,32 @@ vi.mock('@/persistence/desiredDeploymentPersistence', () => ({
     deleteDesiredDeploymentModel: vi.fn(),
 }));
 vi.mock('@/reconcile/deploy', () => ({ applyDeployment: vi.fn() }));
-vi.mock('@/reconcile/teardown', () => ({ teardownProjectLocal: vi.fn() }));
+vi.mock('@/reconcile/teardown', () => ({ teardownProjectLocal: vi.fn(), teardownGenerationLocal: vi.fn() }));
 vi.mock('@/reconcile/nginxRender', () => ({ renderAllNginx: vi.fn(async () => ({ changed: false })) }));
 vi.mock('@/reconcile/certs', () => ({ leaderEnsureCerts: vi.fn() }));
 vi.mock('@/reconcile/internalDns', () => ({ refreshInternalHosts: vi.fn() }));
 vi.mock('@/reconcile/promTargets', () => ({ regeneratePromTargets: vi.fn() }));
-vi.mock('@/reconcile/state', () => ({ getLocalGeneration: vi.fn(), listLocalProjects: vi.fn(), clearLocalGeneration: vi.fn(), setLocalGeneration: vi.fn() }));
+vi.mock('@/reconcile/state', () => ({
+    getLocalGeneration: vi.fn(),
+    getReadyGeneration: vi.fn(),
+    getLiveGenerations: vi.fn(async () => []),
+    removeLiveGeneration: vi.fn(),
+    listLocalProjects: vi.fn(),
+    clearLocalGeneration: vi.fn(),
+    setLocalGeneration: vi.fn(),
+}));
 
+import { config } from '@/config';
 import { cluster } from '@/cluster/node';
 import { postToLeader } from '@/cluster/leaderClient';
 import { getDesiredDeploymentsAssignedToModel, upsertDesiredDeploymentModel, deleteDesiredDeploymentModel } from '@/persistence/desiredDeploymentPersistence';
 import { applyDeployment } from '@/reconcile/deploy';
-import { teardownProjectLocal } from '@/reconcile/teardown';
+import { teardownProjectLocal, teardownGenerationLocal } from '@/reconcile/teardown';
 import { renderAllNginx } from '@/reconcile/nginxRender';
 import { leaderEnsureCerts } from '@/reconcile/certs';
 import { refreshInternalHosts } from '@/reconcile/internalDns';
 import { regeneratePromTargets } from '@/reconcile/promTargets';
-import { getLocalGeneration, listLocalProjects, clearLocalGeneration } from '@/reconcile/state';
+import { getLocalGeneration, getReadyGeneration, getLiveGenerations, removeLiveGeneration, listLocalProjects, clearLocalGeneration } from '@/reconcile/state';
 import { reconcileTick } from '@/reconcile/reconciler';
 
 const mIsLeader = cluster.isLeader as unknown as Mock;
@@ -39,14 +48,19 @@ const mCerts = leaderEnsureCerts as unknown as Mock;
 const mHosts = refreshInternalHosts as unknown as Mock;
 const mProm = regeneratePromTargets as unknown as Mock;
 const mGetGen = getLocalGeneration as unknown as Mock;
+const mGetReady = getReadyGeneration as unknown as Mock;
+const mGetLive = getLiveGenerations as unknown as Mock;
+const mRemoveLive = removeLiveGeneration as unknown as Mock;
 const mList = listLocalProjects as unknown as Mock;
 const mClear = clearLocalGeneration as unknown as Mock;
+const mGenTeardown = teardownGenerationLocal as unknown as Mock;
 
-const dep = (projectId: string, generation: number) => ({ projectId, generation, assignedNodeId: 'test-node', repoOwner: 'o', repoName: 'r', timeout: 1, logId: 'l', dotenv: '', compose: '', nginxConf: '', domains: [], services: [] });
+const dep = (projectId: string, generation: number, over: Record<string, unknown> = {}) => ({ projectId, generation, assignedNodeId: 'test-node', repoOwner: 'o', repoName: 'r', timeout: 1, logId: 'l', dotenv: '', compose: '', nginxConf: '', domains: [], services: [], zeroDowntime: false, ports: [], ...over });
 
 beforeEach(() => {
     vi.clearAllMocks();
     mIsLeader.mockReturnValue(true);
+    mGetLive.mockResolvedValue([]);
 });
 
 describe('reconcileTick (leader)', () => {
@@ -68,6 +82,50 @@ describe('reconcileTick (leader)', () => {
         expect(mProm).toHaveBeenCalledTimes(1);
         // Leader never pulls.
         expect(mPull).not.toHaveBeenCalled();
+    });
+});
+
+describe('reconcileTick (zero-downtime / blue-green)', () => {
+    it('deploys when the READY generation has not caught up to the desired generation', async () => {
+        mAssigned.mockResolvedValue([dep('zd1', 3, { zeroDowntime: true, activeGeneration: 2 })]);
+        mGetReady.mockResolvedValue(2); // ready trails desired -> redeploy the new (blue) generation
+        mList.mockResolvedValue([]);
+
+        await reconcileTick();
+
+        expect(mApply).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'zd1', generation: 3 }));
+        // Legacy single-generation drift check is not used on the blue-green path.
+        expect(mGetGen).not.toHaveBeenCalled();
+    });
+
+    it('does not redeploy once the READY generation equals the desired generation', async () => {
+        mAssigned.mockResolvedValue([dep('zd2', 3, { zeroDowntime: true, activeGeneration: 3 })]);
+        mGetReady.mockResolvedValue(3);
+        mList.mockResolvedValue([]);
+
+        await reconcileTick();
+
+        expect(mApply).not.toHaveBeenCalled();
+    });
+
+    it('drains generations older than the promoted active generation after the grace period', async () => {
+        const originalDrain = config.deployDrainMs;
+        config.deployDrainMs = 0;
+        try {
+            mAssigned.mockResolvedValue([dep('zd3', 3, { zeroDowntime: true, activeGeneration: 3 })]);
+            mGetReady.mockResolvedValue(3);
+            mGetLive.mockResolvedValue([2, 3]); // gen 2 is stale now that 3 is active
+            mList.mockResolvedValue([]);
+
+            await reconcileTick();
+            await new Promise((r) => setTimeout(r, 10)); // let the scheduled drain fire
+
+            expect(mGenTeardown).toHaveBeenCalledWith('zd3', 2);
+            expect(mRemoveLive).toHaveBeenCalledWith('zd3', 2);
+            expect(mGenTeardown).not.toHaveBeenCalledWith('zd3', 3); // never tears down the active gen
+        } finally {
+            config.deployDrainMs = originalDrain;
+        }
     });
 });
 

@@ -33,12 +33,31 @@ export const getReservedPorts = (): Set<number> => {
     ]);
 };
 
+// Node-local ledger of ports allocated to a deployment but not yet bound by its containers. With
+// zero-downtime deploys a new generation is allocated ports, then spends a whole build + readiness
+// window before it actually listens on them. Socket-based detection (netstat/nc) can't see an
+// allocated-but-unbound port, so without this ledger a subsequent deploy on the same node could be
+// handed the same port. Reserve at plan time; release on teardown/failure once the port is bound
+// (or the generation is gone).
+const reservedLedger = new Set<number>();
+
+export const reservePorts = (ports: number[]): void => {
+    for (const p of ports) reservedLedger.add(p);
+};
+
+export const releasePorts = (ports: number[]): void => {
+    for (const p of ports) reservedLedger.delete(p);
+};
+
+export const getLedgerPorts = (): number[] => Array.from(reservedLedger);
+
 export const getNextFreePorts = async (count: number): Promise<number[] | null> => {
     const reservedPorts = getReservedPorts();
     const occupiedPorts = await getOccupiedPorts();
     const freePorts: number[] = [];
     for (let port = MIN_PORT; port <= MAX_PORT; port++) {
         if (reservedPorts.has(port)) continue;
+        if (reservedLedger.has(port)) continue; // allocated to an in-flight deploy, not yet bound
         if (!occupiedPorts.includes(port)) {
             const isFree = await doubleCheckPortFree(port);
             if (!isFree) {
@@ -49,7 +68,41 @@ export const getNextFreePorts = async (count: number): Promise<number[] | null> 
             if (freePorts.length === count) break;
         }
     }
-    return freePorts.length === count ? freePorts : null;
+    if (freePorts.length !== count) return null;
+    // Hold these until the caller binds them, so a concurrent/subsequent plan can't reuse them.
+    reservePorts(freePorts);
+    return freePorts;
+};
+
+// Readiness probe: resolves true once something is listening on the port (optionally answering an
+// HTTP path with a non-5xx status), or false if the deadline passes. Inverse of doubleCheckPortFree.
+export const waitPortReady = async (port: number, deadlineMs: number, httpPath?: string): Promise<boolean> => {
+    if (!config.production) return true;
+    const end = Date.now() + deadlineMs;
+    while (Date.now() < end) {
+        const listening = !(await doubleCheckPortFree(port));
+        if (listening) {
+            if (!httpPath) return true;
+            if (await httpProbeOk(port, httpPath)) return true;
+        }
+        await new Promise((r) => setTimeout(r, Math.min(config.readinessIntervalMs, Math.max(0, end - Date.now()))));
+    }
+    return false;
+};
+
+// Best-effort HTTP readiness check against 127.0.0.1:<port><path>. Any non-5xx response (including
+// 3xx/4xx) counts as "the app is up and answering"; only 5xx or a connection error is "not ready".
+const httpProbeOk = async (port: number, httpPath: string): Promise<boolean> => {
+    const path = httpPath.startsWith('/') ? httpPath : `/${httpPath}`;
+    const url = `http://127.0.0.1:${port}${path}`;
+    const cmd = `curl -s -o /dev/null -w "%{http_code}" --max-time 3 ${url}`;
+    try {
+        const { out } = await execSafe(cmd, 5000);
+        const code = parseInt(out.trim().split(/\s+/).pop() || '0', 10);
+        return code > 0 && code < 500;
+    } catch {
+        return false;
+    }
 };
 
 export const doubleCheckPortFree = async (port: number): Promise<boolean> => {

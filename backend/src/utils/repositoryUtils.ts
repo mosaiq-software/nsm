@@ -68,6 +68,71 @@ export const buildDockerComposeString = (compose: DockerCompose): string => {
     return YAML.stringify(compose);
 };
 
+// True when a compose `ports` short-syntax string pins a literal host port (e.g. "8080:3000" or
+// "127.0.0.1:8080:3000"), which would collide between two coexisting generations. A published side
+// driven by an env var (e.g. "${PORT}:3000") or a container-only spec (e.g. "3000") does not.
+const stringPortPinsHostPort = (spec: string): boolean => {
+    const body = spec.trim().replace(/\/(tcp|udp)$/i, '');
+    const parts = body.split(':');
+    if (parts.length < 2) return false; // container-only, ephemeral host port
+    const published = parts.slice(0, -1).join(':');
+    if (published.includes('${')) return false; // NSM-injected/env-driven host port
+    return /\d/.test(published);
+};
+
+const looksLikeNamedVolume = (source: string): boolean => {
+    const s = source.trim();
+    if (!s) return false;
+    if (s.includes('${')) return false; // resolved from a dynamic var (NSM bind path)
+    return !/^(\/|\.\/|\.\.\/|~)/.test(s); // absolute or relative path => bind mount, else named
+};
+
+// Rewrites a managed compose so two generations can run side by side during a zero-downtime deploy.
+// Generation-scoped compose project names rename default containers/networks/volumes, but a compose
+// that pins `container_name` or a fixed host port would still collide; strip those. Named volumes
+// only get a warning: the generation-scoped project name gives them a fresh namespace, so state must
+// live in bind-mounted/external volumes instead. Mutates and returns `compose`, plus human-readable
+// warnings to surface in the deploy log.
+export const sanitizeComposeForCoexistence = (compose: DockerCompose): { compose: DockerCompose; warnings: string[] } => {
+    const warnings: string[] = [];
+    for (const [name, svc] of Object.entries(compose.services || {})) {
+        if (!svc) continue;
+        if (svc.container_name) {
+            warnings.push(`service "${name}": removed hardcoded container_name "${svc.container_name}" (collides across generations under zero-downtime).`);
+            delete svc.container_name;
+        }
+        if (Array.isArray(svc.ports) && svc.ports.length) {
+            const kept: typeof svc.ports = [] as any;
+            for (const p of svc.ports) {
+                if (typeof p === 'string') {
+                    if (stringPortPinsHostPort(p)) {
+                        warnings.push(`service "${name}": dropped fixed host port mapping "${p}" (would collide across generations); publish via the NSM-injected port variable instead.`);
+                        continue;
+                    }
+                    (kept as string[]).push(p);
+                } else if (p && typeof p === 'object') {
+                    const published = p.published ? String(p.published) : '';
+                    if (published && !published.includes('${') && /\d/.test(published)) {
+                        warnings.push(`service "${name}": dropped fixed host port mapping "${published}" (would collide across generations); publish via the NSM-injected port variable instead.`);
+                        continue;
+                    }
+                    (kept as any[]).push(p);
+                }
+            }
+            svc.ports = kept.length ? kept : undefined;
+        }
+        const vols = svc.volumes;
+        const volList = Array.isArray(vols) ? vols : vols ? [vols] : [];
+        for (const v of volList) {
+            const source = typeof v === 'string' ? v.split(':')[0] : (v as any)?.type === 'volume' ? (v as any).source : '';
+            if (source && looksLikeNamedVolume(source)) {
+                warnings.push(`service "${name}": named volume "${source}" starts empty each deploy under zero-downtime; use a bind-mounted or external volume for persistent state.`);
+            }
+        }
+    }
+    return { compose, warnings };
+};
+
 const getJsProcessEnvVarsFromDir = async (dir: string): Promise<string[]> => {
     const jsFileExtensions = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.cts', '.tsx'];
     const ignoreDirs = ['node_modules', '.git', '.github', '.vscode'];

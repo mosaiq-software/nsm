@@ -2,6 +2,7 @@ import { DeploymentState, DeployQueueEntry, DeployQueueState } from '@mosaiq/nsm
 import { cluster } from '@/cluster/node';
 import { getProject } from './projectController';
 import { deployProject, updateDeploymentLog } from './deployController';
+import { sendDeploymentNotification } from './pushController';
 import { createProjectInstanceModel, getAllActiveProjectInstancesModel } from '@/persistence/projectInstancePersistence';
 
 // Leader-local serial deploy queue. Only the leader deploys, and only one deploy runs at a time:
@@ -12,6 +13,11 @@ import { createProjectInstanceModel, getAllActiveProjectInstancesModel } from '@
 let queue: DeployQueueEntry[] = [];
 let active: (DeployQueueEntry & { startedAt: number }) | null = null;
 let draining = false;
+
+// Delay inserted between consecutive deploys to space out queue processing.
+const INTER_DEPLOY_DELAY_MS = 30_000;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Enqueue a project for deployment. Deduplicates: a project that is already deploying or already
 // queued keeps its existing instance (so re-triggering a webhook/click doesn't stack duplicates).
@@ -39,6 +45,7 @@ export const enqueueDeploy = async (projectId: string): Promise<string | undefin
     });
 
     queue.push({ projectId, instanceId, enqueuedAt: Date.now() });
+    void sendDeploymentNotification(project, DeploymentState.QUEUED);
     void drainQueue();
     return instanceId;
 };
@@ -47,7 +54,10 @@ const drainQueue = async (): Promise<void> => {
     if (draining) return;
     draining = true;
     try {
+        let first = true;
         while (queue.length > 0) {
+            if (!first) await delay(INTER_DEPLOY_DELAY_MS);
+            first = false;
             const entry = queue.shift()!;
             active = { ...entry, startedAt: Date.now() };
             try {

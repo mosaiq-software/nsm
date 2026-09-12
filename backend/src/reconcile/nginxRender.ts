@@ -19,6 +19,17 @@ const stripLegacySslIncludes = (conf: string): string =>
         .filter((l) => !l.includes('/etc/letsencrypt/options-ssl-nginx.conf') && !l.includes('/etc/letsencrypt/ssl-dhparams.pem'))
         .join('\n');
 
+export const HTTP_CHALLENGE_CONF_NAME = '_nsm_http_challenge.conf';
+
+// A minimal :80 vhost for domains that don't yet have a cert. It exists purely so certbot's --nginx
+// (http-01) authenticator has a server block matching the domain to inject its challenge location
+// into; all other requests 404. Once a domain is certified it is served by its real vhost and drops
+// out of this conf.
+const buildHttpChallengeConf = (domains: string[]): string => {
+    const names = domains.join(' ');
+    return ['server {', '    listen 80;', '    listen [::]:80;', `    server_name ${names};`, '    location / { return 404; }', '}', ''].join('\n');
+};
+
 export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
     await fs.mkdir(config.nginxConfDir, { recursive: true });
     const deployments = await getAllDesiredDeploymentsModel();
@@ -30,16 +41,35 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
     const certDomains = new Set(certs.map((c) => c.domain));
 
     const desiredFiles = new Map<string, string>();
+    // Domains that still need a cert: they get a plain :80 challenge vhost so certbot --nginx (http-01)
+    // always has a server block to answer on, even before the project's real (gated) vhost exists.
+    const challengeDomains = new Set<string>();
     for (const dep of deployments) {
-        if (!dep.nginxConf || !dep.nginxConf.trim().length) continue;
-        const missing = (dep.domains || []).filter((d) => !certDomains.has(d));
+        // Serve the ACTIVE generation's conf/domains (what has passed its readiness gate), not the
+        // pending one. For zero-downtime this trails until cutover; legacy deployments set the active
+        // fields to the pending values immediately. Fall back to the legacy `nginxConf`/`domains` for
+        // rows written before this field existed.
+        const serveConf = dep.zeroDowntime ? dep.activeNginxConf : dep.activeNginxConf ?? dep.nginxConf;
+        const serveDomains = dep.zeroDowntime ? dep.activeDomains ?? [] : dep.activeDomains ?? dep.domains ?? [];
+
+        // Any pending domain without a cert needs the http-01 challenge vhost.
+        for (const d of dep.domains || []) if (!certDomains.has(d)) challengeDomains.add(d);
+
+        if (!serveConf || !serveConf.trim().length) continue;
+        const missing = (serveDomains || []).filter((d) => !certDomains.has(d));
         if (missing.length) {
-            // Defer this project's vhost until all its domains have certs. The stale-file cleanup
-            // below then removes any previously-written (now cert-less) conf so nginx stays valid.
+            // Defer this project's vhost until all its (active) domains have certs. The stale-file
+            // cleanup below then removes any previously-written (now cert-less) conf so nginx stays valid.
             console.warn(`[nginx] deferring ${dep.projectId}.conf until certs are issued for: ${missing.join(', ')}`);
             continue;
         }
-        desiredFiles.set(`${dep.projectId}.conf`, stripLegacySslIncludes(dep.nginxConf));
+        desiredFiles.set(`${dep.projectId}.conf`, stripLegacySslIncludes(serveConf));
+    }
+
+    // A single :80 challenge vhost for all not-yet-certified domains. Domains that already have a
+    // cert are served by their real vhost (above), so there is no server_name overlap.
+    if (challengeDomains.size) {
+        desiredFiles.set(HTTP_CHALLENGE_CONF_NAME, buildHttpChallengeConf(Array.from(challengeDomains)));
     }
 
     // Front the management dashboard over TLS once its cert exists (same gating rationale).

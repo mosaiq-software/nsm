@@ -5,7 +5,7 @@ import { spawn } from 'child_process';
 import { API_BODY, API_PARAMS, API_RETURN, API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeStatusReport } from '@mosaiq/nsm-common/types';
 import { createProject, deleteProject, getAllProjects, getProject, resetDeploymentKey, setProjectAssignment, syncProjectToRepoData, updateProject, verifyDeploymentKey } from '@/controllers/projectController';
-import { planLocally, teardownProject, updateDeploymentLog } from '@/controllers/deployController';
+import { planLocally, teardownProject, updateDeploymentLog, promoteDeployment } from '@/controllers/deployController';
 import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
@@ -14,6 +14,7 @@ import { queryLogs, queryMetric, MetricKind } from '@/controllers/observabilityC
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
+import { getVapidPublicKey, subscribe, unsubscribe } from '@/controllers/pushController';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { mintInstallationToken, listInstallationOwners, listInstallationRepos, listRepoBranches } from '@/utils/githubApp';
@@ -424,6 +425,41 @@ privateRouter.post(API_ROUTES.POST_GITHUB_LOGOUT, async (req, res) => {
     }
 });
 
+// === Web Push ===
+// The VAPID public key the browser needs to create a subscription. Reads server config only.
+privateRouter.get(API_ROUTES.GET_VAPID_PUBLIC_KEY, async (_req, res) => {
+    res.status(200).json(getVapidPublicKey());
+});
+
+// Store a browser push subscription for the signed-in user. Writes replicated user-scoped state,
+// so it must land on the leader.
+privateRouter.post(API_ROUTES.POST_PUSH_SUBSCRIBE, async (req, res) => {
+    try {
+        if (!requireLeader(req, res)) return;
+        const token = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
+        const body = req.body as API_BODY[API_ROUTES.POST_PUSH_SUBSCRIBE];
+        const ok = await subscribe(token, body);
+        if (!ok) return void res.status(400).send('Invalid subscription');
+        res.status(200).json(undefined);
+    } catch (e) {
+        console.error('Error saving push subscription', e);
+        res.status(500).send();
+    }
+});
+
+// Remove a browser push subscription (opt-out / sign-out cleanup).
+privateRouter.post(API_ROUTES.POST_PUSH_UNSUBSCRIBE, async (req, res) => {
+    try {
+        if (!requireLeader(req, res)) return;
+        const body = req.body as API_BODY[API_ROUTES.POST_PUSH_UNSUBSCRIBE];
+        await unsubscribe(body?.endpoint);
+        res.status(200).json(undefined);
+    } catch (e) {
+        console.error('Error removing push subscription', e);
+        res.status(500).send();
+    }
+});
+
 // === Internal cluster routes (cluster-secret authenticated) ===
 // A node announces itself (and its current IP) to the leader; returns the registry snapshot.
 internalRouter.post('/cluster/register', requireClusterSecret, async (req, res) => {
@@ -503,6 +539,16 @@ internalRouter.post('/cluster/log', requireClusterSecret, async (req, res) => {
     if (!requireLeader(req, res)) return;
     const { logId, status, log } = req.body || {};
     if (logId) await updateDeploymentLog(logId, status, log || '');
+    res.status(200).json(undefined);
+});
+
+// A node reports its new (blue) generation ready -> leader promotes it (flips nginx to the new
+// ports) and deactivates superseded instances.
+internalRouter.post('/cluster/deploy-ready', requireClusterSecret, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    const { projectId, generation, nodeId } = req.body || {};
+    if (!projectId || typeof generation !== 'number') return void res.status(400).send('projectId + generation required');
+    await promoteDeployment(String(projectId), generation, String(nodeId || ''));
     res.status(200).json(undefined);
 });
 

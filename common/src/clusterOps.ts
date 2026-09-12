@@ -10,6 +10,9 @@ export interface NodeInfo {
 export interface PortPlanEntry {
     proxyLocationId: string;
     port: number;
+    // Optional HTTP path to probe on `port` during the zero-downtime readiness gate (from the proxy
+    // location's readinessPath). When unset the node uses a bare TCP connect.
+    readinessPath?: string;
 }
 
 // A fully-rendered, self-contained description of what a node must run for a project.
@@ -25,9 +28,26 @@ export interface DesiredDeployment {
     logId: string;
     dotenv: string;
     compose: string;
+    // The pending generation's nginx conf + domains (what nginx should serve AFTER the new stack
+    // passes its readiness gate and the leader promotes it).
     nginxConf: string;
     domains: string[];
     services: ProjectServiceInstance[];
+    // Whether this deployment uses the zero-downtime (blue-green) lifecycle. Stamped by the leader
+    // from the global config AND the project's opt-out. When false, the node recreates in place and
+    // the leader flips nginx immediately (legacy behavior).
+    zeroDowntime: boolean;
+    // Per-proxy host ports allocated for THIS generation, so the owning node can probe them as part
+    // of the readiness gate before reporting the generation ready.
+    ports: PortPlanEntry[];
+    // The generation nginx should currently serve. For zero-downtime this trails `generation` until
+    // the node reports the new generation ready and the leader promotes it. For the legacy path it
+    // equals `generation` immediately. Undefined before the first successful cutover.
+    activeGeneration?: number;
+    // The nginx conf + domains for `activeGeneration` (what the leader actually renders). Kept
+    // separate from the pending `nginxConf`/`domains` so old ports keep serving until cutover.
+    activeNginxConf?: string;
+    activeDomains?: string[];
 }
 
 export interface CertRecord {
