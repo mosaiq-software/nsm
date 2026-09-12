@@ -4,7 +4,7 @@ vi.mock('@/host/exec', () => ({ execSafe: vi.fn(), execStream: vi.fn() }));
 
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
-import { getOccupiedPorts, getNextFreePorts, doubleCheckPortFree } from '@/reconcile/ports';
+import { getOccupiedPorts, getNextFreePorts, doubleCheckPortFree, getReservedPorts } from '@/reconcile/ports';
 
 const mockExec = execSafe as unknown as Mock;
 
@@ -32,6 +32,33 @@ describe('ports (production)', () => {
     it('returns the first N free ports not in the occupied set', async () => {
         const free = await getNextFreePorts(2);
         expect(free).toEqual([1025, 1026]);
+    });
+
+    it('never allocates the reserved API port even when it is otherwise free', async () => {
+        const original = config.apiPort;
+        config.apiPort = 1025; // pin the control-plane port into the allocatable range
+        try {
+            const free = await getNextFreePorts(2);
+            expect(free).toEqual([1026, 1027]);
+        } finally {
+            config.apiPort = original;
+        }
+    });
+
+    it('never hands out reserved control-plane or observability ports', async () => {
+        const reserved = getReservedPorts();
+        expect(reserved.has(config.apiPort)).toBe(true);
+        expect(reserved.has(3000)).toBe(true);
+        expect(reserved.has(3100)).toBe(true);
+        expect(reserved.has(9090)).toBe(true);
+        expect(reserved.has(8080)).toBe(true);
+
+        // Even when nc claims every port is free, the allocator must skip reserved ports.
+        const free = await getNextFreePorts(50);
+        expect(free).not.toBeNull();
+        for (const port of free!) {
+            expect(reserved.has(port)).toBe(false);
+        }
     });
 
     it('doubleCheckPortFree reflects the nc probe result', async () => {

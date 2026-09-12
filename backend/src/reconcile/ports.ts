@@ -4,10 +4,41 @@ import { execSafe } from '@/host/exec';
 const MIN_PORT = 1025;
 const MAX_PORT = 9999;
 
+// Extracts a port from a URL like http://127.0.0.1:3100, defaulting when absent/unparseable.
+const portFromUrl = (url: string, fallback: number): number => {
+    try {
+        const parsed = new URL(url);
+        if (parsed.port) return parseInt(parsed.port, 10);
+        return parsed.protocol === 'https:' ? 443 : 80;
+    } catch {
+        return fallback;
+    }
+};
+
+// Ports NSM's own control plane and observability stack own on a node. These must never be handed
+// out to a deployed app: an app that publishes one of these host ports would shadow the daemon (via
+// Docker's published-port DNAT) or an infra service, and the collision gets frozen into the app's
+// desired deployment. Runtime detection (netstat/nc) is best-effort and racy, so this is a hard,
+// static guard on top of it.
+export const getReservedPorts = (): Set<number> => {
+    return new Set<number>([
+        config.apiPort, // nsmd API + dashboard proxy target
+        80, // nginx http
+        443, // nginx https
+        22, // ssh
+        8080, // cadvisor
+        portFromUrl(config.lokiUrl, 3100),
+        portFromUrl(config.prometheusUrl, 9090),
+        portFromUrl(config.grafanaUrl, 3000),
+    ]);
+};
+
 export const getNextFreePorts = async (count: number): Promise<number[] | null> => {
+    const reservedPorts = getReservedPorts();
     const occupiedPorts = await getOccupiedPorts();
     const freePorts: number[] = [];
     for (let port = MIN_PORT; port <= MAX_PORT; port++) {
+        if (reservedPorts.has(port)) continue;
         if (!occupiedPorts.includes(port)) {
             const isFree = await doubleCheckPortFree(port);
             if (!isFree) {
