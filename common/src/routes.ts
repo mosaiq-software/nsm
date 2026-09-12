@@ -36,6 +36,7 @@ export enum API_ROUTES {
     POST_LOGGER = '/logger/:logKey',
     POST_PUSH_SUBSCRIBE = '/push/subscribe',
     POST_PUSH_UNSUBSCRIBE = '/push/unsubscribe',
+    POST_REGENERATE_VAPID = '/push/vapid/regenerate',
 }
 export interface API_PARAMS {
     //GET
@@ -72,6 +73,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_LOGGER]: { logKey: string };
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: {};
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: {};
+    [API_ROUTES.POST_REGENERATE_VAPID]: {};
 }
 export interface API_BODY {
     // Only POST
@@ -109,6 +111,7 @@ export interface API_BODY {
     [API_ROUTES.POST_LOGGER]: LogMessage;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: PushSubscriptionJSON;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: { endpoint: string };
+    [API_ROUTES.POST_REGENERATE_VAPID]: {};
 }
 export interface API_RETURN {
     //GET
@@ -145,6 +148,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_LOGGER]: undefined;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: undefined;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: undefined;
+    [API_ROUTES.POST_REGENERATE_VAPID]: { ok: boolean; reason?: string };
 }
 
 export interface API_AUTH {
@@ -183,4 +187,5 @@ export interface API_AUTH {
     [API_ROUTES.POST_LOGGER]: undefined;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: string;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: string;
+    [API_ROUTES.POST_REGENERATE_VAPID]: string;
 }

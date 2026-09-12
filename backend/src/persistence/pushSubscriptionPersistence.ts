@@ -49,3 +49,9 @@ export const getAllPushSubscriptionsModel = async (): Promise<StoredPushSubscrip
 export const deletePushSubscriptionByEndpointModel = async (endpoint: string): Promise<void> => {
     await PushSubscriptionModel.destroy({ where: { endpoint } });
 };
+
+// Drop every stored subscription. Used when the VAPID key pair is regenerated: existing
+// subscriptions were created against the old key and can no longer receive pushes.
+export const deleteAllPushSubscriptionsModel = async (): Promise<void> => {
+    await PushSubscriptionModel.destroy({ where: {} });
+};

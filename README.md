@@ -154,25 +154,12 @@ Build-time config is `VITE_`-prefixed (see `.env.sample`): `VITE_GITHUB_OAUTH_CL
 
 The UI can deliver OS-level notifications for deploy events — deploy started, and finished (`deployed`/`healthy`/`failed`) — that fire even when the tab or the whole browser is closed. It uses the Web Push API: a service worker (`frontend/public/sw.js`) plus a VAPID key pair the leader uses to sign push messages. All signed-in users who opt in receive every deploy's notification.
 
-Setup on the leader:
+**No setup required.** On first run the leader **auto-generates** a VAPID key pair and persists it in cluster metadata (reused across restarts). Just flip the **Notifications** switch in the UI header and accept the browser permission prompt.
 
-1. Generate a VAPID key pair once:
+- **Regenerate.** The avatar menu has a **Regenerate push keys** action. Regenerating clears all stored subscriptions (every browser must re-enable notifications) and this browser re-subscribes automatically.
+- **Pinning keys (optional).** To use a fixed pair (e.g. shared across environments), generate one with `npx web-push generate-vapid-keys` and set `NSM_VAPID_PUBLIC_KEY` / `NSM_VAPID_PRIVATE_KEY` / `NSM_VAPID_SUBJECT` in the leader's env. Pinned keys are authoritative — they are never auto-generated over and cannot be regenerated from the UI.
 
-   ```bash
-   npx web-push generate-vapid-keys
-   ```
-
-2. Set the pair (and a contact subject) in the leader's env (`.env` / `/etc/nsm/nsm.env`):
-
-   ```bash
-   NSM_VAPID_PUBLIC_KEY=<public key>
-   NSM_VAPID_PRIVATE_KEY=<private key>
-   NSM_VAPID_SUBJECT=mailto:you@example.com
-   ```
-
-3. Restart the daemon. In the UI, flip the **Notifications** switch in the header and accept the browser permission prompt.
-
-Notes: web push requires the dashboard to be served over **HTTPS** in production (`localhost` is exempt for local dev). When the VAPID vars are unset, push is disabled and the daemon behaves exactly as before. Only the leader stores subscriptions (keyed by browser endpoint) and sends notifications, since all deploy state lives there; expired subscriptions are pruned automatically.
+Notes: web push requires the dashboard to be served over **HTTPS** in production (`localhost` is exempt for local dev). Only the leader stores subscriptions (keyed by browser endpoint) and sends notifications, since all deploy state lives there; expired subscriptions are pruned automatically.
 
 ---
 

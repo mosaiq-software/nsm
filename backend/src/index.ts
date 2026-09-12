@@ -27,7 +27,7 @@ const start = async () => {
     if (config.role === 'leader') {
         await ensureObservabilityStack();
         await recoverDeployQueue();
-        initWebPush();
+        await initWebPush();
     }
 
     // Converge local host toward desired state; report status/IP to the leader.

@@ -71,3 +71,24 @@ export const disablePush = async (token: string): Promise<void> => {
     await rawApiPostNoHook(API_ROUTES.POST_PUSH_UNSUBSCRIBE, {}, { endpoint: sub.endpoint }, token);
     await sub.unsubscribe().catch(() => {});
 };
+
+// Regenerate the server-side VAPID key pair. This invalidates every existing subscription (all
+// browsers must re-subscribe), so if this browser was subscribed we drop the now-stale local
+// subscription and re-subscribe against the new key. Returns the server result.
+export const regeneratePushKeys = async (token: string): Promise<{ ok: boolean; reason?: string }> => {
+    const result = await rawApiPostNoHook(API_ROUTES.POST_REGENERATE_VAPID, {}, {}, token);
+    if (!result || !result.ok) {
+        return { ok: false, reason: result?.reason || 'Failed to regenerate push keys' };
+    }
+
+    if (isPushSupported()) {
+        const reg = await navigator.serviceWorker.ready;
+        const existing = await reg.pushManager.getSubscription();
+        if (existing) {
+            // The old subscription can no longer receive pushes; replace it with a fresh one.
+            await existing.unsubscribe().catch(() => {});
+            await enablePush(token).catch(() => {});
+        }
+    }
+    return { ok: true };
+};

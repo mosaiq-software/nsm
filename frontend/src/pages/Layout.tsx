@@ -10,7 +10,7 @@ import { GithubOwner, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
 import { rawApiGetNoHook, useAPI } from '@/utils/api';
-import { disablePush, enablePush, isPushSubscribed, isPushSupported } from '@/utils/push';
+import { disablePush, enablePush, isPushSubscribed, isPushSupported, regeneratePushKeys } from '@/utils/push';
 
 const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle }] = useDisclosure();
@@ -152,6 +152,26 @@ const Layout = (props: { children: React.ReactNode }) => {
         }
     };
 
+    const regeneratePush = async () => {
+        if (!token) return;
+        if (!window.confirm('Regenerate push notification keys? Every browser (including this one) will need to re-enable notifications.')) return;
+        setPushBusy(true);
+        try {
+            const result = await regeneratePushKeys(token);
+            if (!result.ok) throw new Error(result.reason);
+            setPushOn(await isPushSubscribed());
+            notifications.show({ title: 'Push keys regenerated', message: 'A new key pair was generated. Existing subscriptions were reset.', color: 'green' });
+        } catch (error) {
+            notifications.show({
+                title: 'Could not regenerate push keys',
+                message: error instanceof Error ? error.message : 'Failed to regenerate push keys',
+                color: 'red',
+            });
+        } finally {
+            setPushBusy(false);
+        }
+    };
+
     return (
         <>
             <Modal opened={modal === 'create'} onClose={() => setModal(null)} withCloseButton={false} closeOnClickOutside={!creatingProject}>
@@ -281,6 +301,11 @@ const Layout = (props: { children: React.ReactNode }) => {
                             </Menu.Target>
                             {userCtx.user && (
                                 <Menu.Dropdown>
+                                    {isPushSupported() && (
+                                        <Menu.Item component="a" disabled={pushBusy} onClick={regeneratePush}>
+                                            Regenerate push keys
+                                        </Menu.Item>
+                                    )}
                                     <Menu.Item
                                         component="a"
                                         onClick={() => {

@@ -14,7 +14,7 @@ import { queryLogs, queryMetric, MetricKind } from '@/controllers/observabilityC
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
-import { getVapidPublicKey, subscribe, unsubscribe } from '@/controllers/pushController';
+import { getVapidPublicKey, regenerateVapidKeys, subscribe, unsubscribe } from '@/controllers/pushController';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { mintInstallationToken, listInstallationOwners, listInstallationRepos, listRepoBranches } from '@/utils/githubApp';
@@ -426,9 +426,23 @@ privateRouter.post(API_ROUTES.POST_GITHUB_LOGOUT, async (req, res) => {
 });
 
 // === Web Push ===
-// The VAPID public key the browser needs to create a subscription. Reads server config only.
-privateRouter.get(API_ROUTES.GET_VAPID_PUBLIC_KEY, async (_req, res) => {
+// The VAPID public key the browser needs to create a subscription. Only the leader holds the
+// authoritative key pair, so forward to it.
+privateRouter.get(API_ROUTES.GET_VAPID_PUBLIC_KEY, async (req, res) => {
+    if (!requireLeader(req, res)) return;
     res.status(200).json(getVapidPublicKey());
+});
+
+// Regenerate the VAPID key pair (leader-owned). Clears existing subscriptions; refused when keys
+// are pinned via environment config.
+privateRouter.post(API_ROUTES.POST_REGENERATE_VAPID, async (req, res) => {
+    try {
+        if (!requireLeader(req, res)) return;
+        res.status(200).json(await regenerateVapidKeys());
+    } catch (e) {
+        console.error('Error regenerating VAPID keys', e);
+        res.status(500).send();
+    }
 });
 
 // Store a browser push subscription for the signed-in user. Writes replicated user-scoped state,
