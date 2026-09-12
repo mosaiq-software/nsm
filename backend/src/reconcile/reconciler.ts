@@ -75,8 +75,13 @@ export const reconcileTick = async (): Promise<void> => {
         // C. Ingress + observability wiring: leader only (single TLS entrypoint + registry-driven
         // internal DNS and Prometheus targets).
         if (cluster.isLeader()) {
-            await leaderEnsureCerts();
+            // Render BEFORE issuing certs: rendering only writes SSL vhosts for domains that already
+            // have certs and removes any stale conf referencing a missing cert, so nginx is left in
+            // a valid, reloadable state. certbot (--nginx) then always has a healthy nginx to work
+            // with - this ordering is what lets an already-wedged leader self-heal, instead of a
+            // broken conf blocking certbot (which would otherwise wait out the failure cooldown).
             await renderAllNginx();
+            await leaderEnsureCerts();
             await refreshInternalHosts();
             await regeneratePromTargets();
         }

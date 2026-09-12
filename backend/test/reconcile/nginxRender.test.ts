@@ -3,21 +3,27 @@ import * as fsp from 'fs/promises';
 
 vi.mock('@/host/exec', () => ({ execSafe: vi.fn(async () => ({ out: '', code: 0 })), execStream: vi.fn() }));
 vi.mock('@/persistence/desiredDeploymentPersistence', () => ({ getAllDesiredDeploymentsModel: vi.fn() }));
+vi.mock('@/persistence/certPersistence', () => ({ getAllCertsModel: vi.fn() }));
 
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
+import { getAllCertsModel } from '@/persistence/certPersistence';
 import { renderAllNginx } from '@/reconcile/nginxRender';
 
 const mockExec = execSafe as unknown as Mock;
 const mockDeps = getAllDesiredDeploymentsModel as unknown as Mock;
+const mockCerts = getAllCertsModel as unknown as Mock;
 
-const dep = (projectId: string, nginxConf: string) => ({ projectId, nginxConf, generation: 1, assignedNodeId: 'n', repoOwner: 'o', repoName: 'r', timeout: 1, logId: 'l', dotenv: '', compose: '', domains: [], services: [] });
+const dep = (projectId: string, nginxConf: string, domains: string[] = []) => ({ projectId, nginxConf, generation: 1, assignedNodeId: 'n', repoOwner: 'o', repoName: 'r', timeout: 1, logId: 'l', dotenv: '', compose: '', domains, services: [] });
+const cert = (domain: string) => ({ domain, notAfter: Date.now() + 1e10 });
 
 beforeEach(async () => {
     config.production = true;
     mockExec.mockClear();
     mockDeps.mockReset();
+    mockCerts.mockReset();
+    mockCerts.mockResolvedValue([]);
     await fsp.rm(config.nginxConfDir, { recursive: true, force: true });
 });
 afterEach(() => {
@@ -60,5 +66,46 @@ describe('renderAllNginx', () => {
         const { changed } = await renderAllNginx();
         expect(changed).toBe(false);
         expect(mockExec).not.toHaveBeenCalledWith('sudo -n nginx -s reload', expect.any(Number));
+    });
+
+    it('defers a vhost until every one of its domains has an issued cert', async () => {
+        mockDeps.mockResolvedValue([dep('pg_defer', 'server pg_defer', ['a.com', 'b.com'])]);
+        mockCerts.mockResolvedValue([cert('a.com')]); // b.com not yet issued
+        await renderAllNginx();
+        await expect(fsp.readFile(`${config.nginxConfDir}/pg_defer.conf`, 'utf-8')).rejects.toBeTruthy();
+    });
+
+    it('writes the vhost once all its domains have certs', async () => {
+        mockDeps.mockResolvedValue([dep('pg_write', 'server pg_write', ['a.com', 'b.com'])]);
+        mockCerts.mockResolvedValue([cert('a.com'), cert('b.com')]);
+        await renderAllNginx();
+        expect(await fsp.readFile(`${config.nginxConfDir}/pg_write.conf`, 'utf-8')).toBe('server pg_write');
+    });
+
+    it('removes a previously-written conf when its cert-backed domain regresses', async () => {
+        mockDeps.mockResolvedValue([dep('pg_regress', 'server pg_regress', ['a.com'])]);
+        mockCerts.mockResolvedValue([cert('a.com')]);
+        await renderAllNginx();
+        expect(await fsp.readFile(`${config.nginxConfDir}/pg_regress.conf`, 'utf-8')).toBe('server pg_regress');
+        mockCerts.mockResolvedValue([]); // cert gone
+        await renderAllNginx();
+        await expect(fsp.readFile(`${config.nginxConfDir}/pg_regress.conf`, 'utf-8')).rejects.toBeTruthy();
+    });
+
+    it('strips legacy certbot-installer file references from frozen confs', async () => {
+        const legacy = [
+            'server {',
+            '    ssl_certificate /etc/letsencrypt/live/a.com/fullchain.pem;',
+            '    include /etc/letsencrypt/options-ssl-nginx.conf;',
+            '    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;',
+            '}',
+        ].join('\n');
+        mockDeps.mockResolvedValue([dep('pg_strip', legacy, ['a.com'])]);
+        mockCerts.mockResolvedValue([cert('a.com')]);
+        await renderAllNginx();
+        const written = await fsp.readFile(`${config.nginxConfDir}/pg_strip.conf`, 'utf-8');
+        expect(written).not.toContain('options-ssl-nginx.conf');
+        expect(written).not.toContain('ssl-dhparams.pem');
+        expect(written).toContain('ssl_certificate /etc/letsencrypt/live/a.com/fullchain.pem;');
     });
 });

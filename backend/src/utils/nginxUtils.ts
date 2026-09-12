@@ -99,12 +99,22 @@ export const getServerName = (hostnames: string[]) => {
     return `server_name ${hostnames.join(' ')};`;
 };
 
+// Self-contained SSL settings. We intentionally do NOT `include options-ssl-nginx.conf` or
+// reference `ssl-dhparams.pem`: those files are only created by certbot's *installer* plugin, but
+// the daemon runs `certbot certonly` (authenticator only), so they never exist here - referencing
+// them makes `nginx -t` fail even once the cert is present. The directives below are the same ones
+// certbot's options-ssl-nginx.conf ships (minus the DH params, which TLS1.2 ECDHE / TLS1.3 don't
+// need), inlined so a vhost only ever depends on the cert + key existing.
 export const getSslDirectives = (hostname: string) => {
     return `
     ssl_certificate /etc/letsencrypt/live/${hostname}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${hostname}/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;`;
+    ssl_session_cache shared:le_nginx_SSL:10m;
+    ssl_session_timeout 1440m;
+    ssl_session_tickets off;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";`;
 };
 
 export const get80Server = (hostnames: string[]) => {
