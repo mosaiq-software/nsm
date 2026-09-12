@@ -39,6 +39,13 @@ const start = async () => {
         console.log(`NSM daemon ${config.nodeId} (${config.role}) listening on :${config.apiPort} (version ${config.version})`);
     });
 
+    // Keep the daemon's keep-alive window longer than any fronting proxy's, so a proxy can never
+    // reuse a connection the daemon has already closed - that race surfaces as a 502 ("upstream
+    // prematurely closed connection") on the first request after an idle period. Node's defaults
+    // (keepAliveTimeout 5s) are shorter than typical nginx timeouts, which is the wrong ordering.
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout = 66_000;
+
     handleSignals(server);
     registerCronJobs();
 };
