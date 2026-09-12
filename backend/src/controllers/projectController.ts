@@ -1,7 +1,7 @@
 import { getProjectByIdModel, getAllProjectsModel } from '@/persistence/projectPersistence';
 import { DeploymentState, Project, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
 import { OpType } from '@mosaiq/nsm-common/clusterOps';
-import { applyRepoData, getAllSecretsForProject } from './secretController';
+import { applyLegacyOverlay, applyRepoData, getAllSecretsForProject } from './secretController';
 import { getRepoData } from '@/utils/repositoryUtils';
 import { getProjectInstancesByProjectIdModel } from '@/persistence/projectInstancePersistence';
 import { teardownProject } from './deployController';
@@ -76,7 +76,15 @@ export const createProject = async (input: Project): Promise<Project | undefined
         services: [],
     };
     await proposeProjectUpsert(newProject);
-    return await syncProjectToRepoData(input.id);
+    const synced = await syncProjectToRepoData(input.id);
+
+    // Legacy import: overlay config downloaded from the old server-manager on top of the repo sync.
+    const hasLegacy = !!(input.secrets?.length || input.nginxConfig?.servers?.length || input.services?.length || input.timeout != null);
+    if (synced && hasLegacy) {
+        await applyLegacyOverlay(input.id, input);
+        return await getProject(input.id);
+    }
+    return synced;
 };
 
 export const updateProject = async (id: string, updates: Partial<Project>): Promise<void> => {

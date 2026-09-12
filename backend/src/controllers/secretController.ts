@@ -71,6 +71,45 @@ export const updateEnvironmentVariable = async (projectId: string, sec: Secret):
     await updateProject(projectId, {}); // flips dirtyConfig
 };
 
+// Applies a legacy config imported from the old server-manager on top of a freshly synced project.
+// The repo sync has already discovered the current env-var names and docker services; this restores
+// the user's legacy nginx/domain config, timeout, allowCICD, service expected states, and secret values.
+export const applyLegacyOverlay = async (projectId: string, legacy: Project): Promise<void> => {
+    const project = await getProject(projectId);
+    if (!project) throw new Error('Project not found when applying legacy overlay');
+
+    // Service settings: keep repo-discovered services, restoring legacy state/log settings by name.
+    const legacyServices = legacy.services || [];
+    const mergedServices: ProjectService[] = (project.services || []).map((svc) => {
+        const old = legacyServices.find((s) => s.serviceName === svc.serviceName);
+        if (!old) return svc;
+        return {
+            ...svc,
+            expectedContainerState: old.expectedContainerState,
+            collectContainerLogs: old.collectContainerLogs,
+        };
+    });
+
+    await updateProjectNoDirty(projectId, {
+        ...(legacy.nginxConfig ? { nginxConfig: legacy.nginxConfig } : {}),
+        ...(legacy.timeout != null ? { timeout: legacy.timeout } : {}),
+        ...(legacy.allowCICD != null ? { allowCICD: legacy.allowCICD } : {}),
+        services: mergedServices,
+    });
+
+    // Secret values: keep repo-discovered secret names, restoring legacy values by name.
+    const legacySecrets = legacy.secrets || [];
+    if (legacySecrets.length) {
+        const syncedSecrets = await getAllSecretsForProjectModel(projectId);
+        const mergedSecrets: Secret[] = syncedSecrets.map((sec) => {
+            const old = legacySecrets.find((s) => s.secretName === sec.secretName);
+            if (!old) return sec;
+            return { ...sec, secretValue: old.secretValue, variable: old.variable };
+        });
+        await cluster.propose({ type: OpType.SET_PROJECT_SECRETS, projectId, secrets: mergedSecrets });
+    }
+};
+
 const fillSecret = (secret: Secret, project: Project, requestedPorts: PortPlanEntry[], dirMap: FullDirectoryMap): Secret => {
     if (!secret.variable) return secret;
     try {

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
-import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
+import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, FileInput, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import RouterLink from '@/components/RouterLink';
 import { useProjects } from '@/contexts/project-context';
 import { Link, useNavigate } from 'react-router-dom';
@@ -16,6 +17,7 @@ const Layout = (props: { children: React.ReactNode }) => {
     const navigate = useNavigate();
     const [modal, setModal] = useState<'create' | null>(null);
     const [creatingProject, setCreatingProject] = useState(false);
+    const [legacyFile, setLegacyFile] = useState<File | null>(null);
     const [newProject, setNewProject] = useState<Project>({
         id: '',
         repoOwner: 'mosaiq-software',
@@ -23,6 +25,41 @@ const Layout = (props: { children: React.ReactNode }) => {
         repoBranch: '',
         allowCICD: false,
     });
+
+    const handleLegacyFile = async (file: File | null) => {
+        setLegacyFile(file);
+        if (!file) return;
+        try {
+            const parsed = JSON.parse(await file.text());
+            if (!parsed || parsed.__nsmLegacyConfig !== 1) {
+                throw new Error('Not a valid NSM legacy config file');
+            }
+            setNewProject((prev) => ({
+                ...prev,
+                id: parsed.id ?? prev.id,
+                repoOwner: parsed.repoOwner ?? prev.repoOwner,
+                repoName: parsed.repoName ?? prev.repoName,
+                repoBranch: parsed.repoBranch ?? prev.repoBranch,
+                allowCICD: parsed.allowCICD ?? prev.allowCICD,
+                timeout: parsed.timeout,
+                nginxConfig: parsed.nginxConfig,
+                services: parsed.services,
+                secrets: parsed.secrets,
+            }));
+            notifications.show({
+                title: 'Legacy config loaded',
+                message: `Loaded config from ${file.name}. Values will be applied after the repo sync.`,
+                color: 'green',
+            });
+        } catch (error) {
+            setLegacyFile(null);
+            notifications.show({
+                title: 'Invalid config file',
+                message: error instanceof Error ? error.message : 'Failed to parse the uploaded file',
+                color: 'red',
+            });
+        }
+    };
 
     const { token } = useAPI();
     const [owners, setOwners] = useState<GithubOwner[]>([]);
@@ -87,6 +124,15 @@ const Layout = (props: { children: React.ReactNode }) => {
                 ) : (
                     <Stack>
                         <Title order={3}>Create Project</Title>
+                        <FileInput
+                            label="Upload legacy config (optional)"
+                            description="Import a config downloaded from the legacy server-manager. Fills in the fields below and restores env vars, domains, services, and expected states after the repo sync."
+                            placeholder="Select .nsm-config.json"
+                            accept="application/json,.json"
+                            clearable
+                            value={legacyFile}
+                            onChange={handleLegacyFile}
+                        />
                         <TextInput
                             label="Project ID"
                             placeholder="terrazzo"
@@ -123,7 +169,13 @@ const Layout = (props: { children: React.ReactNode }) => {
                         )}
                         <Switch label="Allow CI/CD" checked={newProject?.allowCICD || false} onChange={(e) => setNewProject({ ...newProject, allowCICD: e.currentTarget.checked })} />
                         <Group justify="space-between">
-                            <Button variant="outline" onClick={() => setModal(null)}>
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    setModal(null);
+                                    setLegacyFile(null);
+                                }}
+                            >
                                 Cancel
                             </Button>
                             <Button
@@ -134,6 +186,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                     await new Promise((resolve) => setTimeout(resolve, 1000));
                                     setCreatingProject(false);
                                     setModal(null);
+                                    setLegacyFile(null);
                                     navigate(`/p/${newProject.id}`);
                                 }}
                             >

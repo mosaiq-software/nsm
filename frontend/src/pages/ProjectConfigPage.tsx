@@ -28,7 +28,7 @@ const ProjectConfigPage = () => {
     const [importingDotenv, setImportingDotenv] = useState('');
 
     useWindowEvent('keydown', (event) => {
-        if (event.ctrlKey && event.key === 's') {
+        if ((event.ctrlKey || event.metaKey) && event.key === 's') {
             event.preventDefault();
             event.stopPropagation();
             if (!same()) {
