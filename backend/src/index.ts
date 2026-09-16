@@ -6,7 +6,7 @@ import { applyGithubFingerprints, ensureBaseDirectories, handleSignals, register
 import { ensureSelfRegistered } from './cluster/registry';
 import { startReconciler } from './reconcile/reconciler';
 import { startStatusReporting } from './cluster/statusGossip';
-import { ensureObservabilityStack } from './reconcile/observabilityStack';
+import { ensureObservabilityStack, ensureAgentStack } from './reconcile/observabilityStack';
 import { runMigrations } from './db/migrator';
 import { recoverDeployQueue } from './controllers/deployQueue';
 import { initWebPush } from './controllers/pushController';
@@ -39,6 +39,11 @@ const start = async () => {
     // Register this node (and its current IP) into the leader-hosted registry.
     await ensureSelfRegistered();
     bootLog.info({ action: 'self_registered' }, 'node registered into cluster registry');
+
+    // Every node: bring up the per-node telemetry agents (Alloy/node_exporter/cadvisor) with a
+    // Loki push URL derived to be reachable from inside the container. Depends on self-registration
+    // only for getPrimaryIp() being meaningful; safe to run before the leader-only stack.
+    await ensureAgentStack();
 
     // Leader only: bring up the self-hosted observability stack (Grafana + Loki + Prometheus) and
     // resume any deploys that were still queued when the leader last stopped.

@@ -211,6 +211,17 @@ install_services() {
     fi
 }
 
+# --- 3a. Persistent journald so nsmd's logs survive reboots and are visible to the Alloy agent ---
+# systemd-journald only persists to /var/log/journal when that directory exists; otherwise it keeps
+# logs in volatile /run/log/journal. The Alloy agent ships nsmd's journal to Loki, so a persistent
+# store makes control-plane logs reliably queryable.
+enable_persistent_journald() {
+    log "Enabling persistent journald..."
+    mkdir -p /var/log/journal
+    systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+    systemctl restart systemd-journald || true
+}
+
 # --- 4. Observability: agents on every node; the stack on the leader ---
 start_observability() {
     # shellcheck disable=SC1090
@@ -261,5 +272,6 @@ create_nsm_user
 chown_dirs
 install_privileged_helpers
 install_services
+enable_persistent_journald
 start_observability
 start_services
