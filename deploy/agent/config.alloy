@@ -7,7 +7,7 @@ logging {
 
 loki.write "leader" {
 	endpoint {
-		url = string.format("%s/loki/api/v1/push", sys.env("OBS_LOKI_PUSH_URL"))
+		url = string.format("%s/loki/api/v1/push", env("OBS_LOKI_PUSH_URL"))
 	}
 }
 
@@ -43,7 +43,7 @@ discovery.relabel "nsm_containers" {
 	}
 	rule {
 		target_label = "nodeId"
-		replacement  = sys.env("NODE_ID")
+		replacement  = env("NODE_ID")
 	}
 	rule {
 		target_label = "source"
@@ -62,7 +62,7 @@ loki.source.docker "containers" {
 loki.source.journal "nsmd" {
 	matches    = "_SYSTEMD_UNIT=nsmd.service"
 	labels     = {
-		nodeId = sys.env("NODE_ID"),
+		nodeId = env("NODE_ID"),
 		unit   = "nsmd",
 		source = "nsmd",
 	}
