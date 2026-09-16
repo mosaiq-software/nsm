@@ -32,12 +32,15 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
     const zeroDowntime = !!dep.zeroDowntime;
     const allocatedPorts = (dep.ports || []).map((p) => p.port);
     try {
-        dlog.info({ generation: dep.generation, zeroDowntime }, 'reconciling deployment');
+        dlog.info({ action: 'deploy_reconcile_started', generation: dep.generation, zeroDowntime }, 'reconciling deployment');
         await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, `Reconciling ${dep.projectId} to generation ${dep.generation}${zeroDowntime ? ' (zero-downtime)' : ''}...\n`);
         await cloneRepository(dep);
+        dlog.info({ action: 'repo_cloned', generation: dep.generation, repoOwner: dep.repoOwner, repoName: dep.repoName }, 'repository cloned');
         await injectCompose(dep);
         await injectDotenv(dep);
+        dlog.info({ action: 'compose_injected', generation: dep.generation }, 'compose and dotenv injected');
         await runDeploymentCommand(dep);
+        dlog.info({ action: 'compose_up', generation: dep.generation, composeProject: composeProjectName(dep) }, 'docker compose up completed');
 
         if (zeroDowntime) {
             // Blue-green bookkeeping runs in dev too (host side effects are individually stubbed), so a
@@ -46,6 +49,7 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
             await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, 'New generation started; waiting for it to become ready...\n');
             const ready = await runReadinessGate(dep);
             if (!ready) throw new Error('New generation failed its readiness gate (healthcheck/port probe) within the timeout');
+            dlog.info({ action: 'readiness_passed', generation: dep.generation, ports: allocatedPorts }, 'readiness gate passed');
             releasePorts(allocatedPorts); // ports are now bound; free the plan-time reservation
             await markGenerationReady(dep.projectId, dep.generation);
             await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYED, 'New generation is ready; requesting traffic cutover.\n');
@@ -56,13 +60,13 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
             await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYED, 'Deployment steps completed successfully.\n');
         }
         deploysTotal.inc({ result: 'success' });
-        dlog.info('deployment completed');
+        dlog.info({ action: 'deploy_completed', generation: dep.generation, zeroDowntime }, 'deployment completed');
         return true;
     } catch (error: any) {
         await reportDeploymentLog(dep.logId, DeploymentState.FAILED, `Failed to deploy project: ${error.message}\n`);
         deploysTotal.inc({ result: 'failure' });
         errorsTotal.inc({ area: 'deploy' });
-        dlog.error({ err: error?.message }, 'deployment failed');
+        dlog.error({ action: 'deploy_failed', generation: dep.generation, err: error?.message }, 'deployment failed');
         // Roll back the failed blue stack so it never lingers holding ports; the old generation is
         // untouched and keeps serving (automatic rollback). teardownGenerationLocal is a no-op in dev.
         if (zeroDowntime) {
@@ -70,7 +74,7 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
                 await teardownGenerationLocal(dep.projectId, dep.generation);
                 await removeLiveGeneration(dep.projectId, dep.generation);
             } catch (e: any) {
-                dlog.error({ err: e?.message }, 'failed to clean up failed blue stack');
+                dlog.error({ action: 'blue_cleanup_failed', generation: dep.generation, err: e?.message }, 'failed to clean up failed blue stack');
             }
         }
         releasePorts(allocatedPorts);

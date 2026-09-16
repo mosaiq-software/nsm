@@ -5,6 +5,9 @@ import { getDesiredNsmVersion } from '@/persistence/clusterMetaPersistence';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
 import { applyOp } from './stateMachine';
 import { getNodeHealthReports } from './statusGossip';
+import { areaLog } from '@/utils/log';
+
+const nodeLog = areaLog('cluster');
 
 // Thin cluster facade. There is no election and no failover: the leader is statically declared
 // via NSM_ROLE and its SQLite DB is the sole source of truth. Followers pull desired state and
@@ -21,7 +24,10 @@ class Cluster {
 
     // Leader-only: apply a state mutation directly to the source-of-truth DB.
     async propose(op: Op): Promise<void> {
-        if (!this.isLeader()) throw new Error('propose() may only run on the leader');
+        if (!this.isLeader()) {
+            nodeLog.error({ action: 'propose_rejected', opType: op.type }, 'propose() called on a non-leader');
+            throw new Error('propose() may only run on the leader');
+        }
         await applyOp(op);
     }
 

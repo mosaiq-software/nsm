@@ -5,6 +5,9 @@ import { OpType, PortPlanEntry } from '@mosaiq/nsm-common/clusterOps';
 import { getServicesForProject, RepoData } from '@/utils/repositoryUtils';
 import { getProject, updateProject, updateProjectNoDirty } from './projectController';
 import { cluster } from '@/cluster/node';
+import { areaLog } from '@/utils/log';
+
+const secretLog = areaLog('secret');
 
 export const getDotenvForProject = async (project: Project, requestedPorts: PortPlanEntry[], dirMap: FullDirectoryMap): Promise<string> => {
     const secrets = (project.secrets || []).map((sec) => fillSecret(sec, project, requestedPorts, dirMap));
@@ -49,6 +52,10 @@ export const applyRepoData = async (repoData: RepoData, projectId: string): Prom
     });
 
     await cluster.propose({ type: OpType.SET_PROJECT_SECRETS, projectId, secrets: updatedProjectSecrets });
+    secretLog.info(
+        { action: 'repo_data_applied', projectId, secretCount: updatedProjectSecrets.length, hasDockerCompose: repoData.compose.exists, hasDotenv: !!repoData.dotenv.trim().length },
+        `applied repo data for ${projectId} (${updatedProjectSecrets.length} secrets)`
+    );
 
     const newServices = getServicesForProject(repoData.compose.parsed);
     const oldServices = project.services || [];
@@ -69,6 +76,7 @@ export const applyRepoData = async (repoData: RepoData, projectId: string): Prom
 export const updateEnvironmentVariable = async (projectId: string, sec: Secret): Promise<void> => {
     await cluster.propose({ type: OpType.UPSERT_SECRET, secret: { ...sec, projectId } });
     await updateProject(projectId, {}); // flips dirtyConfig
+    secretLog.info({ action: 'env_var_updated', projectId, secretName: sec.secretName }, `env var ${sec.secretName} updated for ${projectId}`);
 };
 
 // Applies a legacy config imported from the old server-manager on top of a freshly synced project.
@@ -107,7 +115,9 @@ export const applyLegacyOverlay = async (projectId: string, legacy: Project): Pr
             return { ...sec, secretValue: old.secretValue, variable: old.variable };
         });
         await cluster.propose({ type: OpType.SET_PROJECT_SECRETS, projectId, secrets: mergedSecrets });
+        secretLog.info({ action: 'legacy_secrets_restored', projectId, secretCount: mergedSecrets.length }, `restored ${mergedSecrets.length} legacy secret value(s) for ${projectId}`);
     }
+    secretLog.info({ action: 'legacy_overlay_applied', projectId, legacyServiceCount: legacyServices.length, legacySecretCount: legacySecrets.length }, `applied legacy overlay for ${projectId}`);
 };
 
 const fillSecret = (secret: Secret, project: Project, requestedPorts: PortPlanEntry[], dirMap: FullDirectoryMap): Secret => {
@@ -143,8 +153,8 @@ const fillSecret = (secret: Secret, project: Project, requestedPorts: PortPlanEn
             default:
                 return secret;
         }
-    } catch (error) {
-        console.error(`Error parsing dynamic variable path: ${secret.secretValue}`, error);
+    } catch (error: any) {
+        secretLog.debug({ action: 'dynamic_var_parse_failed', projectId: project.id, secretName: secret.secretName, err: error?.message }, 'failed to resolve dynamic variable');
         return secret;
     }
 };

@@ -1,4 +1,7 @@
 import queryString from 'query-string';
+import { areaLog } from '@/utils/log';
+
+const authLog = areaLog('auth');
 
 export interface GithubUserProfile {
     id: string;
@@ -29,8 +32,10 @@ export const getGithubAuthTokenFromTempCode = async (code: string) => {
         }
         const parsedData = await res.json();
         if (parsedData.error) throw new Error(parsedData.error_description as string);
+        authLog.info({ action: 'oauth_token_exchanged' }, 'exchanged GitHub OAuth code for token');
         return parsedData.access_token as string;
-    } catch (error) {
+    } catch (error: any) {
+        authLog.warn({ action: 'oauth_exchange_failed', err: error?.message }, 'GitHub OAuth token exchange failed');
         return null;
     }
 };
@@ -44,12 +49,14 @@ export async function getPrivateGitHubUserData(access_token: string): Promise<Gi
             },
         });
         if (!res.ok) {
-            console.error(`GitHub user fetch failed with status ${res.status}: ${await res.text()}`);
+            authLog.warn({ action: 'github_user_fetch_failed', status: res.status }, `GitHub user fetch failed with status ${res.status}`);
             return null;
         }
-        return res.json();
-    } catch (error) {
-        console.error('Error fetching GitHub user data:', error);
+        const profile = (await res.json()) as GithubUserProfile;
+        authLog.info({ action: 'github_user_fetched', login: profile.login }, `fetched GitHub user ${profile.login}`);
+        return profile;
+    } catch (error: any) {
+        authLog.error({ action: 'github_user_fetch_error', err: error?.message }, 'error fetching GitHub user data');
         return null;
     }
 }
@@ -83,12 +90,14 @@ export async function getOrgsForUser(access_token: string) {
             throw new Error(`GitHub org fetch failed with status ${res.status}: ${txt}`);
         }
         try {
-            return JSON.parse(txt) as GithubOrgRes[];
+            const orgs = JSON.parse(txt) as GithubOrgRes[];
+            authLog.info({ action: 'github_orgs_fetched', orgCount: orgs.length }, `fetched ${orgs.length} GitHub org(s)`);
+            return orgs;
         } catch (e) {
             throw new Error(`GitHub org fetch returned invalid JSON: ${txt}`);
         }
-    } catch (error) {
-        console.error('Error fetching GitHub organizations:', error);
+    } catch (error: any) {
+        authLog.error({ action: 'github_orgs_fetch_error', err: error?.message }, 'error fetching GitHub organizations');
         return null;
     }
 }
@@ -111,7 +120,8 @@ export const revokeGithubAuth = async (access_token: string) => {
         if (!response.ok) {
             throw new Error('Unable to revoke access token. Status: ' + response.status);
         }
+        authLog.info({ action: 'github_token_revoked', status: response.status }, 'revoked GitHub token');
     } catch (error: any) {
-        console.error('Error revoking GitHub token:', error);
+        authLog.error({ action: 'github_token_revoke_error', err: error?.message }, 'error revoking GitHub token');
     }
 };

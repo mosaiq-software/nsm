@@ -26,6 +26,9 @@ import { getDesiredDeploymentsAssignedToModel } from '@/persistence/desiredDeplo
 import { applyUpdateInstruction, setDesiredNsmVersion } from '@/cluster/selfUpdate';
 import { purgeProjectLocal } from '@/reconcile/teardown';
 import { registry } from '@/utils/metrics';
+import { areaLog } from '@/utils/log';
+
+const routeLog = areaLog('routes');
 
 const publicRouter = express.Router();
 const privateRouter = express.Router();
@@ -95,7 +98,7 @@ publicRouter.get('/install.sh', async (_req, res) => {
     try {
         const base = safePublicUrl();
         if (!base) {
-            console.error(`Refusing to serve install.sh: config.publicUrl is not a valid URL: ${config.publicUrl}`);
+            routeLog.error({ action: 'install_sh_bad_url', publicUrl: config.publicUrl }, 'refusing to serve install.sh: config.publicUrl is not a valid URL');
             return void res.status(500).send('server misconfigured');
         }
         const script = await fs.promises.readFile(path.join(config.nsmRepoDir, 'install.sh'), 'utf-8');
@@ -103,7 +106,7 @@ publicRouter.get('/install.sh', async (_req, res) => {
         res.setHeader('Content-Type', 'text/x-shellscript');
         res.status(200).send(templated);
     } catch (e) {
-        console.error('Error serving install.sh', e);
+        routeLog.error({ action: 'install_sh_error', err: (e as any)?.message }, 'error serving install.sh');
         res.status(500).send();
     }
 });
@@ -126,7 +129,7 @@ publicRouter.get('/auth/github', async (req, res) => {
         }
         res.status(302).redirect(`${process.env.FRONTEND_URL}?token=${token}`);
     } catch (error) {
-        console.error(error);
+        routeLog.error({ action: 'auth_github_error', err: (error as any)?.message }, 'error handling GitHub auth callback');
         res.status(500).send();
     }
 });
@@ -142,7 +145,7 @@ publicRouter.get(API_ROUTES.GET_DEPLOY, async (req, res) => {
         await enqueueDeploy(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
-        console.error('Error deploying (webhook)', e);
+        routeLog.error({ action: 'deploy_webhook_error', err: (e as any)?.message }, 'error deploying (webhook)');
         res.status(500).send();
     }
 });
@@ -156,7 +159,7 @@ publicRouter.post(API_ROUTES.POST_GITHUB_LOGIN, async (req, res) => {
         if (!user) return void res.status(401).send('Unauthorized');
         res.status(200).json(user);
     } catch (e) {
-        console.error('Error with GitHub login', e);
+        routeLog.error({ action: 'github_login_error', err: (e as any)?.message }, 'error with GitHub login');
         res.status(500).send();
     }
 });
@@ -173,7 +176,7 @@ privateRouter.get(API_ROUTES.GET_PROJECTS, async (_req, res) => {
     try {
         res.status(200).json(await getAllProjects());
     } catch (e) {
-        console.error('Error listing projects', e);
+        routeLog.error({ action: 'list_projects_error', err: (e as any)?.message }, 'error listing projects');
         res.status(500).send();
     }
 });
@@ -199,7 +202,7 @@ privateRouter.get(API_ROUTES.GET_WORKER_STATUSES, async (_req, res) => {
 privateRouter.get(API_ROUTES.GET_JOIN_INFO, async (_req, res) => {
     const base = safePublicUrl();
     if (!base) {
-        console.error(`Cannot build join command: config.publicUrl is not a valid URL: ${config.publicUrl}`);
+        routeLog.error({ action: 'join_info_bad_url', publicUrl: config.publicUrl }, 'cannot build join command: config.publicUrl is not a valid URL');
         return void res.status(500).send('server misconfigured');
     }
     const command = `curl -fsSL ${base}/install.sh | sudo bash -s -- --secret ${config.clusterSecret}`;
@@ -263,7 +266,7 @@ privateRouter.get(API_ROUTES.GET_GITHUB_OWNERS, async (req, res) => {
     try {
         res.status(200).json(await listInstallationOwners());
     } catch (e) {
-        console.error('Error listing GitHub App owners', e);
+        routeLog.error({ action: 'list_github_owners_error', err: (e as any)?.message }, 'error listing GitHub App owners');
         res.status(200).json([]);
     }
 });
@@ -276,7 +279,7 @@ privateRouter.get(API_ROUTES.GET_GITHUB_REPOS, async (req, res) => {
     try {
         res.status(200).json(await listInstallationRepos(owner));
     } catch (e) {
-        console.error(`Error listing GitHub repos for ${owner}`, e);
+        routeLog.error({ action: 'list_github_repos_error', owner, err: (e as any)?.message }, `error listing GitHub repos for ${owner}`);
         res.status(200).json([]);
     }
 });
@@ -289,7 +292,7 @@ privateRouter.get(API_ROUTES.GET_GITHUB_BRANCHES, async (req, res) => {
     try {
         res.status(200).json(await listRepoBranches(owner.trim(), repo.trim()));
     } catch (e) {
-        console.error(`Error listing GitHub branches for ${owner}/${repo}`, e);
+        routeLog.error({ action: 'list_github_branches_error', owner, repo, err: (e as any)?.message }, `error listing GitHub branches for ${owner}/${repo}`);
         res.status(200).json([]);
     }
 });
@@ -303,7 +306,7 @@ privateRouter.get(API_ROUTES.GET_DEPLOY_WEB, async (req, res) => {
         const logId = await enqueueDeploy(params.projectId);
         res.status(200).json(logId);
     } catch (e) {
-        console.error('Error deploying (web)', e);
+        routeLog.error({ action: 'deploy_web_error', err: (e as any)?.message }, 'error deploying (web)');
         res.status(500).send();
     }
 });
@@ -316,7 +319,7 @@ privateRouter.post(API_ROUTES.POST_CREATE_PROJECT, async (req, res) => {
         if (!requireLeader(req, res)) return;
         res.status(200).json(await createProject(body));
     } catch (e) {
-        console.error('Error creating project', e);
+        routeLog.error({ action: 'create_project_error', err: (e as any)?.message }, 'error creating project');
         res.status(500).send();
     }
 });
@@ -330,7 +333,7 @@ privateRouter.post(API_ROUTES.POST_UPDATE_PROJECT, async (req, res) => {
         await updateProject(params.projectId, body);
         res.status(200).json(undefined);
     } catch (e) {
-        console.error('Error updating project', e);
+        routeLog.error({ action: 'update_project_error', err: (e as any)?.message }, 'error updating project');
         res.status(500).send();
     }
 });
@@ -343,7 +346,7 @@ privateRouter.post(API_ROUTES.POST_DELETE_PROJECT, async (req, res) => {
         await deleteProject(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
-        console.error('Error deleting project', e);
+        routeLog.error({ action: 'delete_project_error', err: (e as any)?.message }, 'error deleting project');
         res.status(500).send();
     }
 });
@@ -356,7 +359,7 @@ privateRouter.post(API_ROUTES.POST_RESET_DEPLOYMENT_KEY, async (req, res) => {
         if (!newKey) return void res.status(404).send('Project not found');
         res.status(200).json(newKey);
     } catch (e) {
-        console.error('Error resetting deployment key', e);
+        routeLog.error({ action: 'reset_deployment_key_error', err: (e as any)?.message }, 'error resetting deployment key');
         res.status(500).send();
     }
 });
@@ -370,7 +373,7 @@ privateRouter.post(API_ROUTES.POST_UPDATE_ENV_VAR, async (req, res) => {
         await updateEnvironmentVariable(params.projectId, body);
         res.status(200).send('Environment variable updated');
     } catch (e) {
-        console.error('Error updating environment variable', e);
+        routeLog.error({ action: 'update_env_var_error', err: (e as any)?.message }, 'error updating environment variable');
         res.status(500).send();
     }
 });
@@ -384,7 +387,7 @@ privateRouter.post(API_ROUTES.POST_SYNC_TO_REPO, async (req, res) => {
         if (!project) return void res.status(404).send('Project not found');
         res.status(200).json(project);
     } catch (e) {
-        console.error('Error syncing project to repo data', e);
+        routeLog.error({ action: 'sync_to_repo_error', err: (e as any)?.message }, 'error syncing project to repo data');
         res.status(500).send();
     }
 });
@@ -397,7 +400,7 @@ privateRouter.post(API_ROUTES.POST_TEARDOWN_PROJECT, async (req, res) => {
         await teardownProject(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
-        console.error('Error tearing down project', e);
+        routeLog.error({ action: 'teardown_project_error', err: (e as any)?.message }, 'error tearing down project');
         res.status(500).send();
     }
 });
@@ -411,7 +414,7 @@ privateRouter.post(API_ROUTES.POST_SET_PROJECT_ASSIGNMENT, async (req, res) => {
         await setProjectAssignment(params.projectId, body.nodeId);
         res.status(200).json(undefined);
     } catch (e) {
-        console.error('Error assigning project', e);
+        routeLog.error({ action: 'assign_project_error', err: (e as any)?.message }, 'error assigning project');
         res.status(500).send();
     }
 });
@@ -424,7 +427,7 @@ privateRouter.post(API_ROUTES.POST_SET_ALLOWED_ENTITIES, async (req, res) => {
         await setAllowedEntities(body.entities);
         res.status(200).send('Allowed entities set');
     } catch (e) {
-        console.error('Error setting allowed entities', e);
+        routeLog.error({ action: 'set_allowed_entities_error', err: (e as any)?.message }, 'error setting allowed entities');
         res.status(500).send();
     }
 });
@@ -437,7 +440,7 @@ privateRouter.post(API_ROUTES.POST_GITHUB_LOGOUT, async (req, res) => {
         await signOutUser(params.token);
         res.status(200).send('Logged out');
     } catch (e) {
-        console.error('Error with GitHub logout', e);
+        routeLog.error({ action: 'github_logout_error', err: (e as any)?.message }, 'error with GitHub logout');
         res.status(500).send();
     }
 });
@@ -457,7 +460,7 @@ privateRouter.post(API_ROUTES.POST_REGENERATE_VAPID, async (req, res) => {
         if (!requireLeader(req, res)) return;
         res.status(200).json(await regenerateVapidKeys());
     } catch (e) {
-        console.error('Error regenerating VAPID keys', e);
+        routeLog.error({ action: 'regenerate_vapid_error', err: (e as any)?.message }, 'error regenerating VAPID keys');
         res.status(500).send();
     }
 });
@@ -473,7 +476,7 @@ privateRouter.post(API_ROUTES.POST_PUSH_SUBSCRIBE, async (req, res) => {
         if (!ok) return void res.status(400).send('Invalid subscription');
         res.status(200).json(undefined);
     } catch (e) {
-        console.error('Error saving push subscription', e);
+        routeLog.error({ action: 'push_subscribe_error', err: (e as any)?.message }, 'error saving push subscription');
         res.status(500).send();
     }
 });
@@ -486,7 +489,7 @@ privateRouter.post(API_ROUTES.POST_PUSH_UNSUBSCRIBE, async (req, res) => {
         await unsubscribe(body?.endpoint);
         res.status(200).json(undefined);
     } catch (e) {
-        console.error('Error removing push subscription', e);
+        routeLog.error({ action: 'push_unsubscribe_error', err: (e as any)?.message }, 'error removing push subscription');
         res.status(500).send();
     }
 });
@@ -519,9 +522,9 @@ internalRouter.get('/install/bundle.tgz', requireClusterSecret, async (req, res)
     res.setHeader('Content-Disposition', 'attachment; filename="bundle.tgz"');
     const tar = spawn('tar', args);
     tar.stdout.pipe(res);
-    tar.stderr.on('data', (d) => console.error('[bundle] tar:', d.toString()));
+    tar.stderr.on('data', (d) => routeLog.error({ action: 'bundle_tar_stderr', out: d.toString() }, 'bundle tar stderr'));
     tar.on('error', (e) => {
-        console.error('[bundle] failed to spawn tar', e);
+        routeLog.error({ action: 'bundle_tar_spawn_failed', err: (e as any)?.message }, 'failed to spawn tar for bundle');
         if (!res.headersSent) res.status(500);
         res.end();
     });
@@ -538,7 +541,7 @@ internalRouter.post('/cluster/git-token', requireClusterSecret, async (req, res)
     try {
         res.status(200).json(await mintInstallationToken(String(repoOwner), String(repoName)));
     } catch (e: any) {
-        console.error(`Failed to mint git token for ${repoOwner}/${repoName}:`, e?.message || e);
+        routeLog.error({ action: 'git_token_mint_failed', repoOwner, repoName, err: e?.message || String(e) }, `failed to mint git token for ${repoOwner}/${repoName}`);
         res.status(502).send('failed to mint installation token');
     }
 });
@@ -552,7 +555,7 @@ internalRouter.get('/cluster/deploy-key', requireClusterSecret, async (req, res)
         res.setHeader('Content-Type', 'text/plain');
         res.status(200).send(key);
     } catch (e) {
-        console.error('Error reading deploy key', e);
+        routeLog.error({ action: 'read_deploy_key_error', err: (e as any)?.message }, 'error reading deploy key');
         res.status(404).send('deploy key not found');
     }
 });

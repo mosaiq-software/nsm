@@ -7,6 +7,9 @@ import { cluster } from './node';
 import { postToLeader } from './leaderClient';
 import { touchNodeModel } from '@/persistence/nodePersistence';
 import { updateServiceInstanceModel, getServiceInstanceByIdModel } from '@/persistence/serviceInstancePersistence';
+import { areaLog } from '@/utils/log';
+
+const gossipLog = areaLog('gossip');
 
 // Leader-side cache of the latest report from each node.
 const reports = new Map<string, NodeStatusReport>();
@@ -23,11 +26,16 @@ export const ingestReport = async (report: NodeStatusReport): Promise<void> => {
     reports.set(report.nodeId, report);
     const isSelf = report.nodeId === config.nodeId;
     await touchNodeModel(report.nodeId, report.currentAddress, report.apiPort, isSelf && cluster.isLeader());
+    gossipLog.debug({ action: 'report_ingested', nodeId: report.nodeId, currentAddress: report.currentAddress, containerCount: report.containers.length, nsmVersion: report.nsmVersion }, 'gossip report ingested');
     for (const c of report.containers) {
         try {
             const existing = await getServiceInstanceByIdModel(c.serviceInstanceId);
             if (existing && existing.actualContainerState !== c.state) {
                 await updateServiceInstanceModel(c.serviceInstanceId, { actualContainerState: c.state, containerId: c.containerId });
+                gossipLog.info(
+                    { action: 'service_state_changed', serviceInstanceId: c.serviceInstanceId, oldState: existing.actualContainerState, newState: c.state, reportingNodeId: report.nodeId },
+                    `service ${c.serviceInstanceId} ${existing.actualContainerState} -> ${c.state}`
+                );
             }
         } catch {
             /* observed state is best-effort */
@@ -42,8 +50,8 @@ const buildReport = async (): Promise<NodeStatusReport> => {
         containers = list
             .map((c) => ({ serviceInstanceId: c.Labels[NSM_LABEL_SERVICE_INSTANCE_ID], state: c.State as DockerStatus, containerId: c.ID }))
             .filter((c) => !!c.serviceInstanceId);
-    } catch {
-        /* ignore */
+    } catch (e: any) {
+        gossipLog.warn({ action: 'docker_list_failed', err: e?.message }, 'failed to list containers for status report');
     }
     return {
         nodeId: config.nodeId,
@@ -65,14 +73,18 @@ export const startStatusReporting = (): void => {
         if (cluster.isLeader()) {
             await ingestReport(report);
         } else {
-            await postToLeader('/cluster/status-report', report);
+            const res = await postToLeader('/cluster/status-report', report);
+            if (!res) gossipLog.warn({ action: 'status_report_failed', nodeId: config.nodeId, leaderAddress: cluster.leaderAddress() }, 'failed to POST status report to leader');
+            else gossipLog.debug({ action: 'status_report_sent', nodeId: config.nodeId, containerCount: report.containers.length }, 'status report sent to leader');
         }
     };
     timer = setInterval(() => void tick(), 15000);
     void tick();
+    gossipLog.info({ action: 'status_reporting_started', nodeId: config.nodeId, intervalMs: 15000, isLeader: cluster.isLeader() }, 'status reporting started');
 };
 
 export const stopStatusReporting = (): void => {
     if (timer) clearInterval(timer);
     timer = undefined;
+    gossipLog.info({ action: 'status_reporting_stopped', nodeId: config.nodeId }, 'status reporting stopped');
 };

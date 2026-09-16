@@ -1,5 +1,8 @@
 import * as fs from 'fs/promises';
 import { config } from '@/config';
+import { areaLog } from '@/utils/log';
+
+const stateLog = areaLog('state');
 
 // Tracks which generation(s) of each project are deployed on THIS host, so the reconciler can
 // survive restarts without redeploying, detect projects that moved away, and (for zero-downtime
@@ -60,6 +63,7 @@ export const getLiveGenerations = async (projectId: string): Promise<number[]> =
 // Legacy/in-place path: a single generation is deployed, ready, and live at once.
 export const setLocalGeneration = async (projectId: string, generation: number): Promise<void> => {
     await writeMarker(projectId, { deployedGeneration: generation, readyGeneration: generation, liveGenerations: [generation] });
+    stateLog.debug({ action: 'generation_set', projectId, generation }, `local generation set to ${generation}`);
 };
 
 // Zero-downtime: a new generation's containers are up (blue). Record it as deployed + live without
@@ -68,6 +72,7 @@ export const markGenerationLive = async (projectId: string, generation: number):
     const m = await readMarker(projectId);
     const liveGenerations = Array.from(new Set([...m.liveGenerations, generation]));
     await writeMarker(projectId, { ...m, deployedGeneration: generation, liveGenerations });
+    stateLog.debug({ action: 'generation_live', projectId, generation, liveGenerations }, `generation ${generation} marked live`);
 };
 
 export const markGenerationReady = async (projectId: string, generation: number): Promise<void> => {
@@ -77,16 +82,19 @@ export const markGenerationReady = async (projectId: string, generation: number)
         readyGeneration: generation,
         deployedGeneration: Math.max(m.deployedGeneration ?? generation, generation),
     });
+    stateLog.debug({ action: 'generation_ready', projectId, generation }, `generation ${generation} marked ready`);
 };
 
 export const removeLiveGeneration = async (projectId: string, generation: number): Promise<void> => {
     const m = await readMarker(projectId);
     await writeMarker(projectId, { ...m, liveGenerations: m.liveGenerations.filter((g) => g !== generation) });
+    stateLog.debug({ action: 'generation_removed', projectId, generation }, `generation ${generation} removed from live set`);
 };
 
 export const clearLocalGeneration = async (projectId: string): Promise<void> => {
     try {
         await fs.rm(`${genDir()}/${projectId}`, { force: true });
+        stateLog.debug({ action: 'generation_cleared', projectId }, `local generation marker cleared for ${projectId}`);
     } catch {
         /* ignore */
     }

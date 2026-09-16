@@ -10,16 +10,19 @@ import { ensureObservabilityStack } from './reconcile/observabilityStack';
 import { runMigrations } from './db/migrator';
 import { recoverDeployQueue } from './controllers/deployQueue';
 import { initWebPush } from './controllers/pushController';
+import { areaLog } from './utils/log';
+
+const bootLog = areaLog('startup');
 
 // Daemon resilience backstop. A single un-caught async error in a request handler (e.g. a DB query
 // hitting schema drift) must never take down the whole daemon: without this, an unhandled promise
 // rejection crashes the process, systemd restarts it, and the offending request keeps re-killing it
 // - a full outage from one bad query. Log and keep running instead.
 process.on('unhandledRejection', (reason) => {
-    console.error('[fatal-guard] unhandledRejection:', reason);
+    bootLog.error({ action: 'unhandled_rejection', err: reason instanceof Error ? reason.message : String(reason) }, 'unhandledRejection (kept alive)');
 });
 process.on('uncaughtException', (err) => {
-    console.error('[fatal-guard] uncaughtException:', err);
+    bootLog.error({ action: 'uncaught_exception', err: err?.message }, 'uncaughtException (kept alive)');
 });
 
 const start = async () => {
@@ -31,9 +34,11 @@ const start = async () => {
     // column to an existing table).
     await sequelize.sync();
     await runMigrations();
+    bootLog.info({ action: 'db_ready' }, 'database synced and migrations applied');
 
     // Register this node (and its current IP) into the leader-hosted registry.
     await ensureSelfRegistered();
+    bootLog.info({ action: 'self_registered' }, 'node registered into cluster registry');
 
     // Leader only: bring up the self-hosted observability stack (Grafana + Loki + Prometheus) and
     // resume any deploys that were still queued when the leader last stopped.
@@ -41,6 +46,7 @@ const start = async () => {
         await ensureObservabilityStack();
         await recoverDeployQueue();
         await initWebPush();
+        bootLog.info({ action: 'leader_services_ready' }, 'observability stack, deploy queue and web push initialized');
     }
 
     // Converge local host toward desired state; report status/IP to the leader.
@@ -49,7 +55,10 @@ const start = async () => {
 
     const app = await initApp();
     const server = app.listen(config.apiPort, () => {
-        console.log(`NSM daemon ${config.nodeId} (${config.role}) listening on :${config.apiPort} (version ${config.version})`);
+        bootLog.info(
+            { action: 'listening', port: config.apiPort, version: config.version, commit: config.commit },
+            `NSM daemon ${config.nodeId} (${config.role}) listening on :${config.apiPort} (version ${config.version})`
+        );
     });
 
     // Keep the daemon's keep-alive window longer than any fronting proxy's, so a proxy can never
@@ -64,6 +73,6 @@ const start = async () => {
 };
 
 start().catch((e) => {
-    console.error('Fatal startup error:', e);
+    bootLog.fatal({ action: 'startup_failed', err: e?.message }, 'fatal startup error');
     process.exit(1);
 });

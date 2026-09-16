@@ -5,6 +5,12 @@ import { cluster } from '@/cluster/node';
 import { getUserByAuthTokenModel } from '@/persistence/userPersistence';
 import { createPushSubscriptionModel, deleteAllPushSubscriptionsModel, deletePushSubscriptionByEndpointModel, getAllPushSubscriptionsModel } from '@/persistence/pushSubscriptionPersistence';
 import { getMeta, setMeta } from '@/persistence/clusterMetaPersistence';
+import { areaLog } from '@/utils/log';
+
+const pushLog = areaLog('push');
+
+// Subscription endpoints are long URLs; truncate for logs so they stay readable and low-cardinality.
+const truncEndpoint = (endpoint: string): string => (endpoint.length > 40 ? `${endpoint.slice(0, 40)}...` : endpoint);
 
 // Cluster-metadata key under which the generated VAPID key pair is persisted on the leader.
 const VAPID_META_KEY = 'vapidKeys';
@@ -26,7 +32,7 @@ const applyVapidDetails = (): void => {
     try {
         webpush.setVapidDetails(config.vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
     } catch (e: any) {
-        console.error('[push] failed to apply VAPID details:', e?.message || e);
+        pushLog.error({ action: 'vapid_apply_failed', err: e?.message || String(e) }, 'failed to apply VAPID details');
     }
 };
 
@@ -41,6 +47,7 @@ export const ensureVapidKeys = async (): Promise<void> => {
     if (envKeysPinned()) {
         vapidKeys = { publicKey: config.vapidPublicKey, privateKey: config.vapidPrivateKey };
         applyVapidDetails();
+        pushLog.info({ action: 'vapid_loaded', source: 'env' }, 'VAPID keys loaded from environment');
         return;
     }
 
@@ -49,23 +56,25 @@ export const ensureVapidKeys = async (): Promise<void> => {
         try {
             vapidKeys = JSON.parse(stored) as VapidKeys;
             applyVapidDetails();
+            pushLog.info({ action: 'vapid_loaded', source: 'stored' }, 'VAPID keys loaded from cluster metadata');
             return;
         } catch {
-            console.error('[push] stored VAPID keys were unreadable; regenerating');
+            pushLog.warn({ action: 'vapid_unreadable' }, 'stored VAPID keys were unreadable; regenerating');
         }
     }
 
     vapidKeys = webpush.generateVAPIDKeys();
     await setMeta(VAPID_META_KEY, JSON.stringify(vapidKeys));
     applyVapidDetails();
-    console.log('[push] generated a new VAPID key pair');
+    pushLog.info({ action: 'vapid_generated', source: 'generated' }, 'generated a new VAPID key pair');
 };
 
 export const initWebPush = async (): Promise<void> => {
     try {
         await ensureVapidKeys();
+        pushLog.info({ action: 'webpush_initialized' }, 'web push initialized');
     } catch (e: any) {
-        console.error('[push] failed to initialize VAPID keys:', e?.message || e);
+        pushLog.error({ action: 'webpush_init_failed', err: e?.message || String(e) }, 'failed to initialize VAPID keys');
     }
 };
 
@@ -82,7 +91,7 @@ export const regenerateVapidKeys = async (): Promise<{ ok: boolean; reason?: str
     await setMeta(VAPID_META_KEY, JSON.stringify(vapidKeys));
     applyVapidDetails();
     await deleteAllPushSubscriptionsModel();
-    console.log('[push] regenerated VAPID key pair and cleared existing subscriptions');
+    pushLog.info({ action: 'vapid_regenerated', subscriptionsCleared: true }, 'regenerated VAPID key pair and cleared existing subscriptions');
     return { ok: true };
 };
 
@@ -92,12 +101,14 @@ export const subscribe = async (authToken: string, sub: PushSubscriptionJSON): P
     const user = await getUserByAuthTokenModel(authToken);
     if (!user) return false;
     await createPushSubscriptionModel(user.githubId, sub);
+    pushLog.info({ action: 'subscription_added', githubId: user.githubId, endpoint: truncEndpoint(sub.endpoint) }, `push subscription added for ${user.name}`);
     return true;
 };
 
 export const unsubscribe = async (endpoint: string): Promise<void> => {
     if (!endpoint) return;
     await deletePushSubscriptionByEndpointModel(endpoint);
+    pushLog.info({ action: 'subscription_removed', endpoint: truncEndpoint(endpoint) }, 'push subscription removed');
 };
 
 interface NotificationCopy {
@@ -142,21 +153,30 @@ export const sendDeploymentNotification = async (project: Project, state: Deploy
         });
 
         const subs = await getAllPushSubscriptionsModel();
+        let sentCount = 0;
+        let prunedCount = 0;
         await Promise.allSettled(
             subs.map(async (sub) => {
                 try {
                     await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, payload);
+                    sentCount++;
                 } catch (e: any) {
                     const status = e?.statusCode;
                     if (status === 404 || status === 410) {
                         await deletePushSubscriptionByEndpointModel(sub.endpoint).catch(() => {});
+                        prunedCount++;
+                        pushLog.debug({ action: 'subscription_pruned', endpoint: truncEndpoint(sub.endpoint), statusCode: status }, 'pruned stale push subscription');
                     } else {
-                        console.error('[push] failed to send notification:', status || e?.message || e);
+                        pushLog.error({ action: 'notification_send_failed', endpoint: truncEndpoint(sub.endpoint), err: status || e?.message || String(e) }, 'failed to send notification');
                     }
                 }
             })
         );
+        pushLog.info(
+            { action: 'notification_dispatched', projectId: project.id, state, subscriberCount: subs.length, sentCount, prunedCount },
+            `dispatched ${state} notification for ${project.id} to ${sentCount}/${subs.length} subscriber(s)`
+        );
     } catch (e: any) {
-        console.error('[push] failed to send deployment notification:', e?.message || e);
+        pushLog.error({ action: 'notification_dispatch_failed', projectId: project.id, state, err: e?.message || String(e) }, 'failed to send deployment notification');
     }
 };

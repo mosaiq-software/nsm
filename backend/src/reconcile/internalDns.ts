@@ -3,6 +3,9 @@ import { config } from '@/config';
 import { execSafe } from '@/host/exec';
 import { sudo, execWithInput } from '@/host/privilege';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
+import { areaLog } from '@/utils/log';
+
+const dnsLog = areaLog('internalDns');
 
 const BEGIN = '# BEGIN NSM-managed';
 const END = '# END NSM-managed';
@@ -40,9 +43,10 @@ export const refreshInternalHosts = async (): Promise<boolean> => {
         await fs.writeFile(path, next);
     } else {
         const write = await execWithInput(sudo('/usr/local/sbin/nsm-apply-hosts'), next, 10000);
-        if (write.code !== 0) console.error('[internalDns] failed to write /etc/hosts:', write.out);
+        if (write.code !== 0) dnsLog.error({ action: 'hosts_write_failed', out: write.out }, 'failed to write /etc/hosts');
     }
+    dnsLog.info({ action: 'internal_hosts_refreshed', nodeCount: nodes.length }, `rewrote internal hosts block for ${nodes.length} node(s)`);
     const reload = await execSafe(sudo('nginx -s reload'), 10000);
-    if (reload.code !== 0) console.error('[internalDns] nginx reload after hosts change failed:', reload.out);
+    if (reload.code !== 0) dnsLog.error({ action: 'nginx_reload_failed', out: reload.out }, 'nginx reload after hosts change failed');
     return true;
 };

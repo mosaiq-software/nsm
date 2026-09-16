@@ -4,6 +4,9 @@ import { getProject } from './projectController';
 import { deployProject, updateDeploymentLog } from './deployController';
 import { sendDeploymentNotification } from './pushController';
 import { createProjectInstanceModel, getAllActiveProjectInstancesModel } from '@/persistence/projectInstancePersistence';
+import { areaLog } from '@/utils/log';
+
+const queueLog = areaLog('deployQueue');
 
 // Leader-local serial deploy queue. Only the leader deploys, and only one deploy runs at a time:
 // this removes the port-allocation race between concurrent deploys (free ports are detected from
@@ -25,9 +28,15 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 export const enqueueDeploy = async (projectId: string): Promise<string | undefined> => {
     if (!cluster.isLeader()) throw new Error('enqueueDeploy must run on the leader');
 
-    if (active?.projectId === projectId) return active.instanceId;
+    if (active?.projectId === projectId) {
+        queueLog.info({ action: 'deploy_deduplicated', projectId, instanceId: active.instanceId, reason: 'active' }, `deploy for ${projectId} already active`);
+        return active.instanceId;
+    }
     const existing = queue.find((e) => e.projectId === projectId);
-    if (existing) return existing.instanceId;
+    if (existing) {
+        queueLog.info({ action: 'deploy_deduplicated', projectId, instanceId: existing.instanceId, reason: 'queued' }, `deploy for ${projectId} already queued`);
+        return existing.instanceId;
+    }
 
     const project = await getProject(projectId);
     if (!project) throw new Error('Project not found');
@@ -45,6 +54,7 @@ export const enqueueDeploy = async (projectId: string): Promise<string | undefin
     });
 
     queue.push({ projectId, instanceId, enqueuedAt: Date.now() });
+    queueLog.info({ action: 'deploy_enqueued', projectId, instanceId, queueDepth: queue.length }, `enqueued deploy for ${projectId} (depth ${queue.length})`);
     void sendDeploymentNotification(project, DeploymentState.QUEUED);
     void drainQueue();
     return instanceId;
@@ -60,12 +70,14 @@ const drainQueue = async (): Promise<void> => {
             first = false;
             const entry = queue.shift()!;
             active = { ...entry, startedAt: Date.now() };
+            queueLog.info({ action: 'deploy_dequeued', projectId: entry.projectId, instanceId: entry.instanceId, queueDepth: queue.length }, `dequeued deploy for ${entry.projectId}`);
             try {
                 await deployProject(entry.projectId, entry.instanceId);
+                queueLog.info({ action: 'deploy_drain_completed', projectId: entry.projectId, instanceId: entry.instanceId, durationMs: Date.now() - active.startedAt }, `deploy drain completed for ${entry.projectId}`);
             } catch (error: any) {
                 // deployProject already records FAILED on its own errors; this is a backstop for
                 // anything thrown before that (e.g. project vanished between enqueue and drain).
-                console.error('[deployQueue] deploy failed', entry.projectId, error?.message);
+                queueLog.error({ action: 'deploy_drain_failed', projectId: entry.projectId, instanceId: entry.instanceId, err: error?.message }, `deploy drain failed for ${entry.projectId}`);
                 await updateDeploymentLog(entry.instanceId, DeploymentState.FAILED, `Deploy failed: ${error?.message}\n`).catch(() => {});
             } finally {
                 active = null;
@@ -94,7 +106,7 @@ export const recoverDeployQueue = async (): Promise<void> => {
         queue.push({ projectId: inst.projectId, instanceId: inst.id, enqueuedAt: inst.created });
     }
     if (queue.length > 0) {
-        console.log(`[deployQueue] recovered ${queue.length} queued deploy(s)`);
+        queueLog.info({ action: 'queue_recovered', recoveredCount: queue.length, projectIds: queue.map((e) => e.projectId) }, `recovered ${queue.length} queued deploy(s)`);
         void drainQueue();
     }
 };

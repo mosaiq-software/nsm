@@ -5,6 +5,9 @@ import { sudo } from '@/host/privilege';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 import { getAllCertsModel } from '@/persistence/certPersistence';
 import { dashboardDomain, buildDashboardConf, DASHBOARD_CONF_NAME } from './dashboardIngress';
+import { areaLog } from '@/utils/log';
+
+const nginxLog = areaLog('nginx');
 
 // The leader is the single TLS ingress, so only the leader renders nginx. It renders one conf per
 // project (from its authoritative desired-deployment set); each conf's proxy_pass targets a
@@ -60,7 +63,7 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
         if (missing.length) {
             // Defer this project's vhost until all its (active) domains have certs. The stale-file
             // cleanup below then removes any previously-written (now cert-less) conf so nginx stays valid.
-            console.warn(`[nginx] deferring ${dep.projectId}.conf until certs are issued for: ${missing.join(', ')}`);
+            nginxLog.debug({ action: 'vhost_deferred', projectId: dep.projectId, missingDomains: missing }, `deferring ${dep.projectId}.conf until certs issued`);
             continue;
         }
         desiredFiles.set(`${dep.projectId}.conf`, stripLegacySslIncludes(serveConf));
@@ -91,6 +94,7 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
         }
         if (current !== contents) {
             await fs.writeFile(path, contents);
+            nginxLog.info({ action: 'conf_written', fileName: name }, `wrote nginx conf ${name}`);
             changed = true;
         }
     }
@@ -106,6 +110,7 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
         if (!file.endsWith('.conf')) continue;
         if (!desiredFiles.has(file)) {
             await fs.rm(`${config.nginxConfDir}/${file}`, { force: true });
+            nginxLog.info({ action: 'conf_removed', fileName: file }, `removed stale nginx conf ${file}`);
             changed = true;
         }
     }
@@ -113,11 +118,12 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
     if (changed && config.production) {
         const test = await execSafe(sudo('nginx -t'), 10000);
         if (test.code !== 0) {
-            console.error('nginx -t failed, not reloading:', test.out);
+            nginxLog.error({ action: 'nginx_test_failed', out: test.out }, 'nginx -t failed, not reloading');
             return { changed: false };
         }
         const reload = await execSafe(sudo('nginx -s reload'), 10000);
-        if (reload.code !== 0) console.error('nginx reload failed:', reload.out);
+        if (reload.code !== 0) nginxLog.error({ action: 'nginx_reload_failed', out: reload.out }, 'nginx reload failed');
+        else nginxLog.info({ action: 'nginx_reloaded', confCount: desiredFiles.size }, 'nginx reloaded');
     }
 
     return { changed };

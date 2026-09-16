@@ -1,5 +1,8 @@
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
+import { areaLog } from '@/utils/log';
+
+const portLog = areaLog('ports');
 
 const MIN_PORT = 1025;
 const MAX_PORT = 9999;
@@ -43,10 +46,12 @@ const reservedLedger = new Set<number>();
 
 export const reservePorts = (ports: number[]): void => {
     for (const p of ports) reservedLedger.add(p);
+    if (ports.length) portLog.debug({ action: 'ports_reserved', ports }, `reserved ${ports.length} port(s)`);
 };
 
 export const releasePorts = (ports: number[]): void => {
     for (const p of ports) reservedLedger.delete(p);
+    if (ports.length) portLog.debug({ action: 'ports_released', ports }, `released ${ports.length} port(s)`);
 };
 
 export const getLedgerPorts = (): number[] => Array.from(reservedLedger);
@@ -68,9 +73,13 @@ export const getNextFreePorts = async (count: number): Promise<number[] | null> 
             if (freePorts.length === count) break;
         }
     }
-    if (freePorts.length !== count) return null;
+    if (freePorts.length !== count) {
+        portLog.warn({ action: 'port_allocation_failed', requestedCount: count }, `could not allocate ${count} free port(s)`);
+        return null;
+    }
     // Hold these until the caller binds them, so a concurrent/subsequent plan can't reuse them.
     reservePorts(freePorts);
+    portLog.info({ action: 'ports_allocated', requestedCount: count, allocatedPorts: freePorts }, `allocated ${count} free port(s)`);
     return freePorts;
 };
 
@@ -111,8 +120,8 @@ export const doubleCheckPortFree = async (port: number): Promise<boolean> => {
     try {
         const { out } = await execSafe(cmd, 2000);
         return out.includes('FREE');
-    } catch (error) {
-        console.error('Error executing nc command', error);
+    } catch (error: any) {
+        portLog.error({ action: 'nc_probe_failed', port, err: error?.message }, 'error executing nc command');
         return false;
     }
 };
@@ -131,8 +140,8 @@ export const getOccupiedPorts = async (): Promise<number[]> => {
                 if (portMatch) occupiedPorts.add(parseInt(portMatch[1], 10));
             }
         }
-    } catch (error) {
-        console.error(error);
+    } catch (error: any) {
+        portLog.error({ action: 'netstat_failed', err: error?.message }, 'error listing occupied ports');
     }
     return Array.from(occupiedPorts);
 };

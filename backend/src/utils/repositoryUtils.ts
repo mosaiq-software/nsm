@@ -5,6 +5,9 @@ import YAML from 'yaml';
 import { DockerCompose } from '@mosaiq/nsm-common/dockerComposeTypes';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { getCloneToken, withCloneCredentials } from '@/utils/githubApp';
+import { areaLog } from '@/utils/log';
+
+const repoLog = areaLog('repository');
 
 export interface RepoData {
     dotenv: string;
@@ -19,6 +22,10 @@ export const getRepoData = async (projectId: string, repoOwner: string, repoName
     const dockerComposeFile = await getDockerComposeFileFromDir(dir);
     const jsEnvVars = await getJsProcessEnvVarsFromDir(dir);
     await deleteSandboxRepo(projectId);
+    repoLog.info(
+        { action: 'repo_data_fetched', projectId, repoOwner, repoName, repoBranch, hasDotenv: !!envFileContents.trim().length, hasCompose: dockerComposeFile.exists },
+        `fetched repo data for ${projectId}`
+    );
     return {
         dotenv: envFileContents,
         compose: dockerComposeFile,
@@ -31,19 +38,19 @@ const getEnvFileFromDir = async (dir: string): Promise<string> => {
     try {
         const files = await fs.readdir(dir);
         envFile = files.filter((file) => file.startsWith('.env'))[0] || '';
-    } catch (error) {
-        console.error('Error reading directory:', error);
+    } catch (error: any) {
+        repoLog.warn({ action: 'env_dir_read_failed', dir, err: error?.message }, 'error reading repo directory for .env');
         return '';
     }
     if (!envFile) {
-        console.warn('No .env file found in repository');
+        repoLog.debug({ action: 'env_not_found', dir }, 'no .env file found in repository');
         return '';
     }
     try {
         const envFileContents = await fs.readFile(`${dir}/${envFile}`, 'utf-8');
         return envFileContents;
-    } catch (error) {
-        console.error('Error reading .env file:', error, dir, envFile);
+    } catch (error: any) {
+        repoLog.warn({ action: 'env_read_failed', dir, envFile, err: error?.message }, 'error reading .env file');
         return '';
     }
 };
@@ -60,7 +67,7 @@ const getDockerComposeFileFromDir = async (dir: string): Promise<{ exists: boole
             // File not found, continue to next
         }
     }
-    console.warn('No Docker Compose file found in repository');
+    repoLog.debug({ action: 'compose_not_found', dir }, 'no Docker Compose file found in repository');
     return { exists: false, contents: '', parsed: undefined };
 };
 
@@ -164,8 +171,8 @@ const getJsProcessEnvVarsFromDir = async (dir: string): Promise<string[]> => {
                     envVars.add(match[1]);
                 }
             }
-        } catch (error) {
-            console.error('Error reading JS file:', error, file);
+        } catch (error: any) {
+            repoLog.debug({ action: 'js_file_read_failed', file, err: error?.message }, 'error reading JS file for env vars');
         }
     }
     return Array.from(envVars);
@@ -175,7 +182,7 @@ const deleteSandboxRepo = async (projectId: string): Promise<void> => {
     try {
         await fs.rm(`${config.repoSandboxPath}/${projectId}`, { recursive: true, force: true });
     } catch (e: any) {
-        console.error('Error removing directory:', e);
+        repoLog.warn({ action: 'sandbox_delete_failed', projectId, err: e?.message }, 'error removing sandbox repo directory');
         return;
     }
 };
@@ -187,16 +194,15 @@ const cloneRepository = async (projectId: string, repoOwner: string, repoName: s
     await deleteSandboxRepo(projectId);
 
     if (!config.production) {
-        console.log('Not in production mode, handling local repository clone');
         const httpUri = getGitHttpsUri(repoOwner, repoName);
         const cmd = `git clone --progress ${branchFlags} ${httpUri} ${repoPath}`;
-        console.log('Cloning repository with command:', cmd);
+        repoLog.info({ action: 'sandbox_clone_started', projectId, repoOwner, repoName, branch: repoBranch, method: 'local' }, `cloning ${repoOwner}/${repoName} (dev)`);
         const { out: gitOut, code: gitCode } = await execSafe(cmd, 1000 * 60 * 1);
-        console.error('Git clone output:', gitOut);
+        repoLog.debug({ action: 'sandbox_clone_output', projectId, out: gitOut }, 'git clone output');
         if (gitCode !== 0) {
             throw new Error(`Git clone exited with code ${gitCode}`);
         }
-
+        repoLog.info({ action: 'sandbox_clone_completed', projectId, method: 'local' }, `cloned ${repoOwner}/${repoName}`);
         return;
     }
 
@@ -204,14 +210,16 @@ const cloneRepository = async (projectId: string, repoOwner: string, repoName: s
         // Preferred: GitHub App installation token over HTTPS (no machine user, per-repo, short-lived).
         if (isGithubAppConfigured()) {
             const httpsUri = getGitHttpsUri(repoOwner, repoName);
+            repoLog.info({ action: 'sandbox_clone_started', projectId, repoOwner, repoName, branch: repoBranch, method: 'https-app' }, `cloning ${repoOwner}/${repoName}`);
             const { token } = await getCloneToken(repoOwner, repoName);
             const { out: gitOut, code: gitCode } = await withCloneCredentials(token, (envPrefix) =>
                 execSafe(`${envPrefix} git clone --progress ${branchFlags} ${httpsUri} ${repoPath}`, 1000 * 60 * 5)
             );
             if (gitCode !== 0) {
-                console.error('Git clone output:', gitOut);
+                repoLog.debug({ action: 'sandbox_clone_output', projectId, out: gitOut }, 'git clone output');
                 throw new Error(`Git clone exited with code ${gitCode}`);
             }
+            repoLog.info({ action: 'sandbox_clone_completed', projectId, method: 'https-app' }, `cloned ${repoOwner}/${repoName}`);
             return;
         }
 
@@ -219,14 +227,16 @@ const cloneRepository = async (projectId: string, repoOwner: string, repoName: s
         const gitSshUri = getGitSshUri(repoOwner, repoName);
         const sshFlags = `-c core.sshCommand="/usr/bin/ssh -i ${gitSshKeyPath()}"`;
         const cmd = `git clone --progress ${branchFlags} ${sshFlags} ${gitSshUri} ${repoPath}`;
+        repoLog.info({ action: 'sandbox_clone_started', projectId, repoOwner, repoName, branch: repoBranch, method: 'ssh' }, `cloning ${repoOwner}/${repoName}`);
         const { out: gitOut, code: gitCode } = await execSafe(cmd, 1000 * 60 * 5);
         if (gitCode !== 0) {
-            console.error('Git clone output:', gitOut);
+            repoLog.debug({ action: 'sandbox_clone_output', projectId, out: gitOut }, 'git clone output');
             throw new Error(`Git clone exited with code ${gitCode}`);
         }
+        repoLog.info({ action: 'sandbox_clone_completed', projectId, method: 'ssh' }, `cloned ${repoOwner}/${repoName}`);
         return;
     } catch (e: any) {
-        console.error('Error cloning repository:', e);
+        repoLog.error({ action: 'sandbox_clone_failed', projectId, repoOwner, repoName, err: e?.message }, 'error cloning repository');
         throw e;
     }
 };

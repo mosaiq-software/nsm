@@ -12,6 +12,9 @@ import { refreshInternalHosts } from './internalDns';
 import { regeneratePromTargets } from './promTargets';
 import { clearLocalGeneration, getLocalGeneration, getLiveGenerations, getReadyGeneration, listLocalProjects, removeLiveGeneration, setLocalGeneration } from './state';
 import { reconcileDuration, errorsTotal } from '@/utils/metrics';
+import { areaLog } from '@/utils/log';
+
+const reconcileLog = areaLog('reconcile');
 
 const RECONCILE_INTERVAL_MS = 5000;
 
@@ -33,12 +36,14 @@ const scheduleDrain = (projectId: string, activeGeneration: number): void => {
             const key = `${projectId}:${g}`;
             if (drainScheduled.has(key)) continue;
             drainScheduled.add(key);
+            reconcileLog.info({ action: 'drain_scheduled', projectId, generation: g, activeGeneration, drainDelayMs: config.deployDrainMs }, `scheduled drain of ${projectId} generation ${g}`);
             setTimeout(async () => {
                 try {
                     await teardownGenerationLocal(projectId, g);
                     await removeLiveGeneration(projectId, g);
-                } catch (e) {
-                    console.error(`[reconcile] failed to drain ${projectId} generation ${g}:`, e);
+                    reconcileLog.info({ action: 'generation_drained', projectId, generation: g }, `drained ${projectId} generation ${g}`);
+                } catch (e: any) {
+                    reconcileLog.error({ action: 'drain_failed', projectId, generation: g, err: e?.message }, `failed to drain ${projectId} generation ${g}`);
                 } finally {
                     drainScheduled.delete(key);
                 }
@@ -63,6 +68,7 @@ const pullDesiredState = async (): Promise<boolean> => {
     for (const local of await getDesiredDeploymentsAssignedToModel(config.nodeId)) {
         if (!present.has(local.projectId)) await deleteDesiredDeploymentModel(local.projectId);
     }
+    reconcileLog.debug({ action: 'desired_pulled', nodeId: config.nodeId, deploymentCount: resp.deployments.length }, `pulled ${resp.deployments.length} desired deployment(s)`);
     return true;
 };
 
@@ -91,6 +97,7 @@ export const reconcileTick = async (): Promise<void> => {
                 // half-deployed blue is retried on the next tick.
                 const ready = await getReadyGeneration(dep.projectId);
                 if (ready !== dep.generation) {
+                    reconcileLog.info({ action: 'drift_correcting', projectId: dep.projectId, generation: dep.generation, readyGeneration: ready, zeroDowntime: true }, `applying ${dep.projectId} gen ${dep.generation} (zero-downtime)`);
                     await applyDeployment(dep);
                 }
                 // Once the leader has promoted (activeGeneration advanced -> nginx flipped), drain
@@ -101,6 +108,7 @@ export const reconcileTick = async (): Promise<void> => {
             } else {
                 const current = await getLocalGeneration(dep.projectId);
                 if (current !== dep.generation) {
+                    reconcileLog.info({ action: 'drift_correcting', projectId: dep.projectId, generation: dep.generation, currentGeneration: current, zeroDowntime: false }, `applying ${dep.projectId} gen ${dep.generation}`);
                     await applyDeployment(dep);
                 }
             }
@@ -110,7 +118,7 @@ export const reconcileTick = async (): Promise<void> => {
         const localProjects = await listLocalProjects();
         for (const projectId of localProjects) {
             if (!desiredIds.has(projectId)) {
-                console.log(`[reconcile] project ${projectId} no longer assigned here, tearing down`);
+                reconcileLog.info({ action: 'unassigned_teardown', projectId, nodeId: config.nodeId }, `project ${projectId} no longer assigned here, tearing down`);
                 await teardownProjectLocal(projectId);
                 await clearLocalGeneration(projectId);
             }
@@ -129,8 +137,8 @@ export const reconcileTick = async (): Promise<void> => {
             await refreshInternalHosts();
             await regeneratePromTargets();
         }
-    } catch (e) {
-        console.error('[reconcile] tick error:', e);
+    } catch (e: any) {
+        reconcileLog.error({ action: 'tick_error', err: e?.message }, 'reconcile tick error');
         errorsTotal.inc({ area: 'reconcile' });
     } finally {
         endTimer();
@@ -142,7 +150,7 @@ export const startReconciler = (): void => {
     if (timer) return;
     timer = setInterval(() => void reconcileTick(), RECONCILE_INTERVAL_MS);
     void reconcileTick();
-    console.log('[reconcile] loop started');
+    reconcileLog.info({ action: 'reconciler_started', intervalMs: RECONCILE_INTERVAL_MS }, 'reconcile loop started');
 };
 
 export const stopReconciler = (): void => {

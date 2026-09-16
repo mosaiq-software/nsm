@@ -6,6 +6,9 @@ import { config } from '@/config';
 import { cluster } from '@/cluster/node';
 import { leaderEnsureCerts } from '@/reconcile/certs';
 import { runSelfUpdateRolloutIfLeader } from '@/cluster/selfUpdate';
+import { areaLog } from '@/utils/log';
+
+const initLog = areaLog('startup');
 
 const githubPublicFingerprint1 = 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl';
 const githubPublicFingerprint2 = 'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=';
@@ -18,8 +21,9 @@ export const applyGithubFingerprints = () => {
         execSync(`echo "${githubPublicFingerprint1}" >> ~/.ssh/known_hosts`);
         execSync(`echo "${githubPublicFingerprint2}" >> ~/.ssh/known_hosts`);
         execSync(`echo "${githubPublicFingerprint3}" >> ~/.ssh/known_hosts`);
-    } catch (e) {
-        console.error('Error adding GitHub fingerprints to known_hosts:', e);
+        initLog.info({ action: 'github_fingerprints_applied' }, 'applied GitHub SSH fingerprints to known_hosts');
+    } catch (e: any) {
+        initLog.error({ action: 'github_fingerprints_failed', err: e?.message }, 'error adding GitHub fingerprints to known_hosts');
     }
 };
 
@@ -28,10 +32,11 @@ export const ensureBaseDirectories = async () => {
     for (const p of paths) {
         try {
             await fs.mkdir(p, { recursive: true });
-        } catch (e) {
-            console.error(`Error creating path ${p}:`, e);
+        } catch (e: any) {
+            initLog.error({ action: 'base_dir_failed', path: p, err: e?.message }, `error creating path ${p}`);
         }
     }
+    initLog.info({ action: 'base_directories_ensured', pathCount: paths.length }, 'base directories ensured');
 };
 
 export const handleSignals = (server: any) => {
@@ -39,12 +44,12 @@ export const handleSignals = (server: any) => {
     const shutdown = (signal: string) => {
         if (shuttingDown) return;
         shuttingDown = true;
-        console.warn(`Received ${signal}, shutting down gracefully...`);
+        initLog.warn({ action: 'shutdown_started', signal }, `received ${signal}, shutting down gracefully`);
         cluster.stop();
         // Drop idle keep-alive sockets so server.close() isn't held open by the long keepAliveTimeout.
         server.closeIdleConnections?.();
         server.close(() => {
-            console.log('Server closed');
+            initLog.info({ action: 'server_closed' }, 'server closed');
             exit(0);
         });
         // Backstop: never let a lingering connection block a systemd restart.
@@ -57,11 +62,13 @@ export const handleSignals = (server: any) => {
 export const registerCronJobs = () => {
     // Leader-only: renew certs approaching expiry.
     cron.schedule('*/30 * * * *', () => {
+        initLog.debug({ action: 'cron_fired', job: 'cert_renewal', isLeader: cluster.isLeader() }, 'cert renewal cron fired');
         if (cluster.isLeader()) void leaderEnsureCerts();
     });
     // Leader-only: drive rolling self-update toward desiredNsmVersion.
     cron.schedule('* * * * *', () => {
+        initLog.debug({ action: 'cron_fired', job: 'self_update', isLeader: cluster.isLeader() }, 'self-update cron fired');
         if (cluster.isLeader()) void runSelfUpdateRolloutIfLeader();
     });
-    console.log('Cron jobs registered');
+    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*'] }, 'cron jobs registered');
 };

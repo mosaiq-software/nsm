@@ -5,6 +5,9 @@ import { deleteCertModel, getAllCertsModel, upsertCertModel } from '@/persistenc
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 import { dashboardDomain } from './dashboardIngress';
 import { CertRecord } from '@mosaiq/nsm-common/clusterOps';
+import { areaLog } from '@/utils/log';
+
+const certLog = areaLog('certs');
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -24,7 +27,10 @@ export const leaderEnsureCerts = async (): Promise<void> => {
     const existing = await getAllCertsModel();
     for (const domain of domains) {
         const have = existing.find((c) => c.domain === domain);
-        if (have && have.notAfter - Date.now() > THIRTY_DAYS_MS) continue; // still valid
+        if (have && have.notAfter - Date.now() > THIRTY_DAYS_MS) {
+            certLog.debug({ action: 'cert_skipped', domain, notAfter: have.notAfter }, `cert for ${domain} still valid`);
+            continue; // still valid
+        }
         await obtainCert(domain);
     }
 };
@@ -46,10 +52,11 @@ const obtainCert = async (domain: string): Promise<void> => {
     const cmd = sudo(
         `certbot certonly ${method} -d ${domain} --cert-name ${domain} --key-type ecdsa --agree-tos --non-interactive --keep-until-expiring`,
     );
+    certLog.info({ action: 'cert_issuance_started', domain, method: config.certbotDnsArgs ? 'dns' : 'nginx' }, `obtaining cert for ${domain}`);
     const { out, code } = await execStream(cmd, 1000 * 60 * 3);
     if (code !== 0) {
         lastFailedAt.set(domain, Date.now());
-        console.error(`certbot failed for ${domain}: ${out}`);
+        certLog.error({ action: 'cert_issuance_failed', domain, exitCode: code, out }, `certbot failed for ${domain}`);
         return;
     }
     lastFailedAt.delete(domain);
@@ -60,8 +67,9 @@ const obtainCert = async (domain: string): Promise<void> => {
         const notAfter = await readCertNotAfter(`${config.letsencryptLiveDir}/${domain}/fullchain.pem`);
         const cert: CertRecord = { domain, notAfter };
         await upsertCertModel(cert);
-    } catch (e) {
-        console.error(`Failed to record cert for ${domain}:`, e);
+        certLog.info({ action: 'cert_issued', domain, notAfter }, `issued/renewed cert for ${domain}`);
+    } catch (e: any) {
+        certLog.error({ action: 'cert_record_failed', domain, err: e?.message }, `failed to record cert for ${domain}`);
     }
 };
 
@@ -73,12 +81,13 @@ export const removeCertsForDomains = async (domains: string[]): Promise<void> =>
     for (const domain of domains) {
         const cmd = sudo(`certbot delete --cert-name ${domain} --non-interactive`);
         const { out, code } = await execStream(cmd, 1000 * 60);
-        if (code !== 0) console.warn(`certbot delete failed for ${domain}: ${out}`);
+        if (code !== 0) certLog.warn({ action: 'cert_delete_nonzero', domain, exitCode: code, out }, `certbot delete failed for ${domain}`);
+        else certLog.info({ action: 'cert_deleted', domain }, `deleted cert for ${domain}`);
         lastFailedAt.delete(domain);
         try {
             await deleteCertModel(domain);
-        } catch (e) {
-            console.error(`Failed to remove cert record for ${domain}:`, e);
+        } catch (e: any) {
+            certLog.error({ action: 'cert_record_delete_failed', domain, err: e?.message }, `failed to remove cert record for ${domain}`);
         }
     }
 };

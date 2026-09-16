@@ -1,6 +1,9 @@
 import { DirectoryBase, FullDirectoryMap, RelativeDirectoryMap } from '@mosaiq/nsm-common/types';
 import * as fs from 'fs/promises';
 import { config } from '@/config';
+import { areaLog } from '@/utils/log';
+
+const dirLog = areaLog('directories');
 
 // Base path for a requested directory. Static-site resources are deploy-scoped (rebuilt each deploy);
 // the per-project persistence volume (the default) lives under the persistent path.
@@ -19,6 +22,9 @@ export const ensureDirectories = async (map: RelativeDirectoryMap): Promise<Full
     for (const key in map) fullPaths[key] = { fullPath: `${baseFor(map[key].base, config.persistentPath, config.deploymentPath)}/${map[key].relPath.replace(/^\/+/, '')}` };
     for (const key in fullPaths) {
         await fs.mkdir(fullPaths[key].fullPath, { recursive: true });
+    }
+    if (Object.keys(fullPaths).length) {
+        dirLog.info({ action: 'directories_ensured', dirCount: Object.keys(fullPaths).length }, `ensured ${Object.keys(fullPaths).length} directory(ies)`);
     }
     return fullPaths;
 };

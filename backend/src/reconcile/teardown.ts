@@ -1,6 +1,9 @@
 import * as fs from 'fs/promises';
 import { composeChildEnv, config } from '@/config';
 import { execSafe, execStream } from '@/host/exec';
+import { areaLog } from '@/utils/log';
+
+const teardownLog = areaLog('teardown');
 
 const TEARDOWN_TIMEOUT_MS = 3 * 60 * 1000;
 
@@ -16,11 +19,13 @@ export const teardownGenerationLocal = async (projectId: string, generation: num
     if (!config.production) return;
     const dir = genDir(projectId, generation);
     const cmd = `(cd ${dir} 2>/dev/null; docker compose -p ${genProject(projectId, generation)} down)`;
+    teardownLog.info({ action: 'generation_teardown_started', projectId, generation, composeProject: genProject(projectId, generation) }, `tearing down ${genProject(projectId, generation)}`);
     try {
         const { out, code } = await execStream(cmd, TEARDOWN_TIMEOUT_MS, undefined, composeChildEnv());
-        if (code !== 0) console.warn(`Teardown for ${genProject(projectId, generation)} exited with code ${code}: ${out}`);
+        if (code !== 0) teardownLog.warn({ action: 'generation_teardown_nonzero', projectId, generation, exitCode: code, out }, `generation teardown exited with code ${code}`);
+        else teardownLog.info({ action: 'generation_teardown_completed', projectId, generation }, `torn down ${genProject(projectId, generation)}`);
     } catch (e: any) {
-        console.error(`Error running generation teardown for ${genProject(projectId, generation)}: ${e.message}`);
+        teardownLog.error({ action: 'generation_teardown_failed', projectId, generation, err: e?.message }, `error tearing down ${genProject(projectId, generation)}`);
     }
     try {
         await fs.rm(dir, { recursive: true, force: true });
@@ -62,11 +67,13 @@ export const teardownProjectLocal = async (projectId: string): Promise<void> => 
     const names = await listComposeProjectNames(projectId);
     const downs = names.map((name) => `(cd ${dirForProjectName(projectId, name)} 2>/dev/null; docker compose -p ${name} down)`).join(' ; ');
     const cmd = `${downs} ; docker system prune -af`;
+    teardownLog.info({ action: 'project_teardown_started', projectId, composeProjectNames: names }, `tearing down project ${projectId}`);
     try {
         const { out, code } = await execStream(cmd, TEARDOWN_TIMEOUT_MS, undefined, composeChildEnv());
-        if (code !== 0) console.warn(`Teardown for ${projectId} exited with code ${code}: ${out}`);
+        if (code !== 0) teardownLog.warn({ action: 'project_teardown_nonzero', projectId, exitCode: code, out }, `project teardown exited with code ${code}`);
+        else teardownLog.info({ action: 'project_teardown_completed', projectId }, `torn down project ${projectId}`);
     } catch (e: any) {
-        console.error(`Error running teardown command for ${projectId}: ${e.message}`);
+        teardownLog.error({ action: 'project_teardown_failed', projectId, err: e?.message }, `error tearing down project ${projectId}`);
     }
     try {
         await fs.rm(baseDir(projectId), { recursive: true, force: true });

@@ -1,6 +1,9 @@
 import { deleteProjectInstanceModel, getAllActiveProjectInstancesModel, getProjectInstanceByIdModel, getProjectInstancesByProjectIdModel } from '@/persistence/projectInstancePersistence';
 import { deleteServiceInstanceModel, getServiceInstancesByProjectInstanceIdModel } from '@/persistence/serviceInstancePersistence';
 import { ProjectInstance, ProjectServiceInstance } from '@mosaiq/nsm-common/types';
+import { areaLog } from '@/utils/log';
+
+const instanceLog = areaLog('projectInstance');
 
 export const getProjectInstance = async (id: string): Promise<ProjectInstance | undefined> => {
     const instanceModel = await getProjectInstanceByIdModel(id);
@@ -29,11 +32,17 @@ export const deleteProjectInstancesForProject = async (projectId: string): Promi
         await deleteProjectInstanceModel(instance.id);
         await deleteServiceInstancesForProjectInstance(instance.id);
     }
+    if (instances.length) {
+        instanceLog.info({ action: 'project_instances_deleted', projectId, instanceCount: instances.length }, `deleted ${instances.length} instance(s) for ${projectId}`);
+    }
 };
 
 export const deleteServiceInstancesForProjectInstance = async (projectInstanceId: string): Promise<void> => {
     const services = await getServiceInstancesByProjectInstanceIdModel(projectInstanceId);
     for (const service of services) {
         await deleteServiceInstanceModel(service.instanceId);
+    }
+    if (services.length) {
+        instanceLog.info({ action: 'service_instances_deleted', projectInstanceId, serviceCount: services.length }, `deleted ${services.length} service instance(s)`);
     }
 };

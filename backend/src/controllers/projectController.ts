@@ -9,6 +9,9 @@ import { deleteProjectInstancesForProject } from './projectInstanceController';
 import { renderAllNginx } from '@/reconcile/nginxRender';
 import { removeCertsForDomains } from '@/reconcile/certs';
 import { cluster } from '@/cluster/node';
+import { areaLog } from '@/utils/log';
+
+const projectLog = areaLog('project');
 
 // === Reads: served from the local materialized view ===
 export const getProject = async (projectId: string): Promise<Project | undefined> => {
@@ -111,9 +114,11 @@ export const updateProjectNoDirty = async (id: string, updates: Partial<Project>
 export const syncProjectToRepoData = async (projectId: string): Promise<Project | undefined> => {
     const project = await getProjectByIdModel(projectId);
     if (!project) throw new Error('Project not found');
+    projectLog.info({ action: 'repo_sync_started', projectId, repoOwner: project.repoOwner, repoName: project.repoName, repoBranch: project.repoBranch }, `syncing ${projectId} from repo`);
     const repoData = await getRepoData(project.id, project.repoOwner, project.repoName, project.repoBranch);
     if (!repoData) throw new Error('Failed to retrieve repository data');
     await applyRepoData(repoData, project.id);
+    projectLog.info({ action: 'repo_sync_completed', projectId }, `repo sync completed for ${projectId}`);
     return await getProject(projectId);
 };
 
@@ -129,6 +134,7 @@ export const resetDeploymentKey = async (projectId: string): Promise<string | nu
     if (!project) return null;
     const newKey = generate32CharKey();
     await updateProjectNoDirty(projectId, { deploymentKey: newKey });
+    projectLog.info({ action: 'deployment_key_reset', projectId }, `deployment key reset for ${projectId}`);
     return newKey;
 };
 
@@ -140,6 +146,7 @@ export const setProjectAssignment = async (projectId: string, nodeId: string): P
 
 export const deleteProject = async (projectId: string): Promise<boolean> => {
     try {
+        projectLog.info({ action: 'project_delete_started', projectId }, `deleting project ${projectId}`);
         const project = await getProject(projectId);
         const domains = (project?.nginxConfig?.servers || []).map((s) => s.domain).filter(Boolean);
         // Node-side purge: containers + deploy dir removed, persistent dir archived (renamed).
@@ -151,9 +158,10 @@ export const deleteProject = async (projectId: string): Promise<boolean> => {
         // fullchain.pem while nginx reloads.
         await renderAllNginx();
         await removeCertsForDomains(domains);
+        projectLog.info({ action: 'project_deleted', projectId }, `project ${projectId} deleted`);
         return true;
-    } catch (error) {
-        console.error('Error deleting project:', error);
+    } catch (error: any) {
+        projectLog.error({ action: 'project_delete_failed', projectId, err: error?.message }, `failed to delete project ${projectId}`);
         return false;
     }
 };

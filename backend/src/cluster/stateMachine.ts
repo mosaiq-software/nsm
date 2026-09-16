@@ -6,6 +6,37 @@ import { deleteDesiredDeploymentModel, upsertDesiredDeploymentModel } from '@/pe
 import { setDesiredNsmVersion } from '@/persistence/clusterMetaPersistence';
 import { createUserModel } from '@/persistence/userPersistence';
 import { createAllowedEntityModel, deleteAllowedEntitiesModel, getAllAllowedEntitiesModel } from '@/persistence/allowedEntitiesPersistence';
+import { areaLog } from '@/utils/log';
+
+const clusterLog = areaLog('cluster');
+
+// Safe, secret-free summary of an op for the write log. Names/ids only - never secret values,
+// tokens, dotenv, or auth material.
+const opDetails = (op: Op): Record<string, unknown> => {
+    switch (op.type) {
+        case OpType.UPSERT_PROJECT:
+            return { projectId: op.project.id, repoOwner: op.project.repoOwner, repoName: op.project.repoName, workerNodeId: op.project.workerNodeId };
+        case OpType.DELETE_PROJECT:
+        case OpType.CLEAR_DESIRED_DEPLOYMENT:
+            return { projectId: op.projectId };
+        case OpType.SET_PROJECT_SECRETS:
+            return { projectId: op.projectId, secretCount: op.secrets.length };
+        case OpType.UPSERT_SECRET:
+            return { projectId: op.secret.projectId, secretName: op.secret.secretName };
+        case OpType.SET_PROJECT_ASSIGNMENT:
+            return { projectId: op.projectId, nodeId: op.nodeId };
+        case OpType.SET_DESIRED_DEPLOYMENT:
+            return { projectId: op.deployment.projectId, generation: op.deployment.generation, assignedNodeId: op.deployment.assignedNodeId, zeroDowntime: op.deployment.zeroDowntime };
+        case OpType.SET_DESIRED_NSM_VERSION:
+            return { version: op.version, artifactRef: op.artifactRef };
+        case OpType.UPSERT_USER:
+            return { githubId: op.user.githubId, name: op.user.name };
+        case OpType.SET_ALLOWED_ENTITIES:
+            return { entityCount: op.entities.length };
+        default:
+            return {};
+    }
+};
 
 const projectToRow = (p: Project): ProjectModelType => ({
     id: p.id,
@@ -65,6 +96,8 @@ export const applyOp = async (op: Op): Promise<void> => {
             break;
         }
         default:
-            console.warn('[stateMachine] unknown op', (op as any).type);
+            clusterLog.warn({ action: 'op_unknown', opType: (op as any).type }, 'unknown cluster op ignored');
+            return;
     }
+    clusterLog.info({ action: 'op_applied', opType: op.type, ...opDetails(op) }, `cluster op applied: ${op.type}`);
 };

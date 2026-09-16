@@ -1,6 +1,9 @@
 import * as fs from 'fs/promises';
 import { config } from '@/config';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
+import { areaLog } from '@/utils/log';
+
+const promLog = areaLog('promTargets');
 
 // Prometheus file-based service discovery. The leader regenerates one target file per job from
 // the registry, addressing every node by its stable internal hostname (<nodeId>.<internalDomain>)
@@ -12,14 +15,18 @@ interface PromTargetGroup {
     targets: string[];
 }
 
-const writeIfChanged = async (path: string, contents: string): Promise<void> => {
+const writeIfChanged = async (path: string, contents: string): Promise<boolean> => {
     let current = '';
     try {
         current = await fs.readFile(path, 'utf-8');
     } catch {
         /* new file */
     }
-    if (current !== contents) await fs.writeFile(path, contents);
+    if (current !== contents) {
+        await fs.writeFile(path, contents);
+        return true;
+    }
+    return false;
 };
 
 // Exposed for unit testing without touching disk.
@@ -35,8 +42,12 @@ export const regeneratePromTargets = async (): Promise<void> => {
         { file: 'targets_cadvisor.json', port: 8080 }, // cadvisor
         { file: 'targets_nsmd.json', port: config.apiPort }, // nsmd /metrics
     ];
+    const changedFiles: string[] = [];
     for (const job of jobs) {
         const groups = buildTargetGroups(nodes, config.internalDomain, job.port);
-        await writeIfChanged(`${PROM_SD_DIR}/${job.file}`, JSON.stringify(groups, null, 2));
+        if (await writeIfChanged(`${PROM_SD_DIR}/${job.file}`, JSON.stringify(groups, null, 2))) changedFiles.push(job.file);
+    }
+    if (changedFiles.length) {
+        promLog.info({ action: 'prom_targets_regenerated', nodeCount: nodes.length, changedFiles }, `regenerated ${changedFiles.length} prometheus target file(s)`);
     }
 };

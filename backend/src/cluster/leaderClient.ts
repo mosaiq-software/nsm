@@ -1,13 +1,19 @@
 import type { Request, Response } from 'express';
 import { config } from '@/config';
 import { cluster } from './node';
+import { areaLog } from '@/utils/log';
+
+const clientLog = areaLog('leaderClient');
 
 export const CLUSTER_SECRET_HEADER = 'x-nsm-cluster-secret';
 
 // POST a JSON body to an endpoint on the current leader, authenticated with the cluster secret.
 export const postToLeader = async <T = any>(path: string, body: any): Promise<T | null> => {
     const base = cluster.leaderAddress();
-    if (!base) return null;
+    if (!base) {
+        clientLog.warn({ action: 'post_to_leader_no_leader', path }, 'no leader address configured');
+        return null;
+    }
     try {
         const res = await fetch(`${base}${path}`, {
             method: 'POST',
@@ -15,10 +21,15 @@ export const postToLeader = async <T = any>(path: string, body: any): Promise<T 
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(15000),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+            clientLog.warn({ action: 'post_to_leader_failed', path, status: res.status, leaderAddress: base }, `POST ${path} to leader returned ${res.status}`);
+            return null;
+        }
         const text = await res.text();
+        clientLog.debug({ action: 'post_to_leader_ok', path, status: res.status }, `POST ${path} to leader ok`);
         return text ? (JSON.parse(text) as T) : null;
-    } catch (e) {
+    } catch (e: any) {
+        clientLog.warn({ action: 'post_to_leader_error', path, leaderAddress: base, err: e?.message }, `POST ${path} to leader failed`);
         return null;
     }
 };
@@ -32,10 +43,15 @@ export const postToNode = async <T = any>(address: string, apiPort: number, path
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(timeoutMs),
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+            clientLog.warn({ action: 'post_to_node_failed', address, apiPort, path, status: res.status }, `POST ${path} to ${address} returned ${res.status}`);
+            return null;
+        }
         const text = await res.text();
+        clientLog.debug({ action: 'post_to_node_ok', address, apiPort, path }, `POST ${path} to ${address} ok`);
         return text ? (JSON.parse(text) as T) : null;
-    } catch {
+    } catch (e: any) {
+        clientLog.warn({ action: 'post_to_node_error', address, apiPort, path, err: e?.message }, `POST ${path} to ${address} failed`);
         return null;
     }
 };
@@ -44,6 +60,7 @@ export const postToNode = async <T = any>(address: string, apiPort: number, path
 export const forwardToLeader = async (req: Request, res: Response): Promise<void> => {
     const base = cluster.leaderAddress();
     if (!base) {
+        clientLog.warn({ action: 'forward_no_leader', method: req.method, originalUrl: req.originalUrl }, 'cannot forward: no leader');
         res.status(503).send('No leader elected yet');
         return;
     }
@@ -65,7 +82,9 @@ export const forwardToLeader = async (req: Request, res: Response): Promise<void
         const ct = upstream.headers.get('content-type');
         if (ct) res.setHeader('content-type', ct);
         res.send(text);
+        clientLog.debug({ action: 'forward_completed', method, originalUrl: req.originalUrl, upstreamStatus: upstream.status }, `forwarded ${method} ${req.originalUrl} -> ${upstream.status}`);
     } catch (e: any) {
+        clientLog.warn({ action: 'forward_failed', method: req.method, originalUrl: req.originalUrl, err: e?.message }, `failed to forward ${req.method} ${req.originalUrl}`);
         res.status(502).send(`Failed to reach leader: ${e.message}`);
     }
 };

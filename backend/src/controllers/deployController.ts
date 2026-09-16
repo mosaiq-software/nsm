@@ -32,6 +32,9 @@ import { config } from '@/config';
 import { DEFAULT_TIMEOUT, NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_PROJECT_ID, NSM_LABEL_PROJECT_INSTANCE_ID, NSM_LABEL_SERVICE_NAME, NSM_LABEL_MANAGED } from '@/constants';
 import { leaderEnsureCerts } from '@/reconcile/certs';
 import { sendDeploymentNotification } from './pushController';
+import { areaLog } from '@/utils/log';
+
+const deployLog = areaLog('deploy');
 
 export { NSM_LABEL_SERVICE_INSTANCE_ID };
 
@@ -77,6 +80,7 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
     if (!cluster.isLeader()) throw new Error('deployProject must run on the leader');
     let instanceId: string | undefined = existingInstanceId;
     try {
+        deployLog.info({ action: 'deploy_started', projectId, instanceId: existingInstanceId }, `deploy started for ${projectId}`);
         let project = await getProject(projectId);
         if (!project) throw new Error('Project not found');
         if (!project.repoOwner || !project.repoName) throw new Error('Project repository information incomplete');
@@ -121,6 +125,10 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
         const plan = await planOnAssignedNode(project.workerNodeId, proxyCount, dirRequest);
         const requestedPorts = mapPorts(project, plan.ports);
         await updateProjectInstanceModel(instanceId, { directories: plan.dirs });
+        deployLog.info(
+            { action: 'plan_allocated', projectId, instanceId, nodeId: project.workerNodeId, ports: requestedPorts.map((p) => p.port), dirCount: Object.keys(plan.dirs).length },
+            `allocated ${requestedPorts.length} port(s) and ${Object.keys(plan.dirs).length} dir(s) on ${project.workerNodeId}`
+        );
 
         const dotenv = await getDotenvForProject(project, requestedPorts, plan.dirs);
         const { conf: nginxConf, domains } = getNginxConf(project, requestedPorts, plan.dirs, project.workerNodeId);
@@ -144,6 +152,12 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
             serviceNameToInstanceId[service.serviceName] = instance.instanceId;
             serviceInstances.push(instance);
             await createServiceInstanceModel(instance);
+        }
+        if (serviceInstances.length) {
+            deployLog.info(
+                { action: 'service_instances_created', projectId, instanceId, serviceCount: serviceInstances.length, serviceNames: serviceInstances.map((s) => s.serviceName) },
+                `created ${serviceInstances.length} service instance(s)`
+            );
         }
 
         const compose: DockerCompose = project.dockerCompose || { services: {} };
@@ -200,10 +214,14 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
             activeDomains: zeroDowntime ? prev?.activeDomains : domains,
         };
         await cluster.propose({ type: OpType.SET_DESIRED_DEPLOYMENT, deployment });
+        deployLog.info(
+            { action: 'desired_deployment_proposed', projectId, instanceId, generation, zeroDowntime, assignedNodeId: project.workerNodeId, domainCount: domains.length },
+            `proposed desired deployment gen ${generation} for ${projectId}`
+        );
         // Kick off cert issuance for any new domains (leader-side, best effort).
         void leaderEnsureCerts();
     } catch (error: any) {
-        console.error('Error deploying project:', error);
+        deployLog.error({ action: 'deploy_failed', projectId, instanceId, err: error?.message }, `deploy failed for ${projectId}`);
         if (instanceId) await updateDeploymentLog(instanceId, DeploymentState.FAILED, `Error deploying project: ${error.message}\n`);
     }
     return instanceId;
@@ -217,12 +235,15 @@ export const updateDeploymentLog = async (instanceId: string, status: Deployment
     const prev = await getProjectInstanceByIdModel(instanceId);
     await updateProjectInstanceModel(instanceId, { state: status });
     await appendToDeploymentLog(instanceId, logText);
+    if (prev && prev.state !== status) {
+        deployLog.info({ action: 'deploy_state_changed', instanceId, projectId: prev.projectId, prevState: prev.state, newState: status }, `deployment ${instanceId} -> ${status}`);
+    }
     if (TERMINAL_DEPLOY_STATES.includes(status) && prev && prev.state !== status) {
         try {
             const project = await getProject(prev.projectId);
             if (project) void sendDeploymentNotification(project, status);
-        } catch (e) {
-            console.error('[push] deployment notification failed', e);
+        } catch (e: any) {
+            deployLog.error({ action: 'push_notification_failed', instanceId, projectId: prev.projectId, err: e?.message }, 'deployment notification failed');
         }
     }
 };
@@ -242,12 +263,20 @@ export const promoteDeployment = async (projectId: string, generation: number, _
     if (dep.activeGeneration !== generation) {
         const promoted: DesiredDeployment = { ...dep, activeGeneration: generation, activeNginxConf: dep.nginxConf, activeDomains: dep.domains };
         await cluster.propose({ type: OpType.SET_DESIRED_DEPLOYMENT, deployment: promoted });
+        deployLog.info({ action: 'deployment_promoted', projectId, generation, nodeId: _nodeId }, `promoted ${projectId} to generation ${generation}`);
     }
     // The just-promoted generation's instance is dep.logId; deactivate any older active instances so
     // the UI/observability show a single active deployment.
     const instances = await getProjectInstancesByProjectIdModel(projectId);
+    const deactivated: string[] = [];
     for (const inst of instances) {
-        if (inst.active && inst.id !== dep.logId) await updateProjectInstanceModel(inst.id, { active: false });
+        if (inst.active && inst.id !== dep.logId) {
+            await updateProjectInstanceModel(inst.id, { active: false });
+            deactivated.push(inst.id);
+        }
+    }
+    if (deactivated.length) {
+        deployLog.info({ action: 'instances_deactivated', projectId, generation, deactivatedInstanceIds: deactivated }, `deactivated ${deactivated.length} superseded instance(s)`);
     }
     // New domains may now be served; make sure their certs exist (best effort).
     void leaderEnsureCerts();
@@ -317,6 +346,8 @@ export const teardownProject = async (projectId: string): Promise<void> => {
     const project = await getProjectByIdModel(projectId);
     if (!project) return;
     const instances = await getProjectInstancesByProjectIdModel(projectId);
+    const activeCount = instances.filter((i) => i.active).length;
+    deployLog.info({ action: 'teardown_initiated', projectId, activeInstanceCount: activeCount }, `teardown initiated for ${projectId}`);
     for (const inst of instances) {
         if (inst.active) await updateProjectInstanceModel(inst.id, { state: DeploymentState.DESTROYING, active: false });
     }
