@@ -9,9 +9,28 @@ import { NodeInfo } from '@mosaiq/nsm-common/clusterOps';
 // Precedence (highest first): real shell env > root .env.local > root .env > /etc/nsm/nsm.env.
 // dotenv never overwrites an already-set key, so the first file loaded wins among files.
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-dotenv.config({ path: path.join(repoRoot, '.env.local') });
-dotenv.config({ path: path.join(repoRoot, '.env') });
-dotenv.config({ path: '/etc/nsm/nsm.env' });
+const loadedEnvFiles = [
+    dotenv.config({ path: path.join(repoRoot, '.env.local') }),
+    dotenv.config({ path: path.join(repoRoot, '.env') }),
+    dotenv.config({ path: '/etc/nsm/nsm.env' }),
+];
+
+// Every var NSM defines in its own env files. Self-maintaining: adding a var to nsm.env (or a repo
+// .env) automatically keeps it out of deployed containers. `parsed` reflects the file contents even
+// when systemd already set the key in process.env, so systemd-injected vars are captured too.
+export const nsmEnvKeys = new Set<string>(loadedEnvFiles.flatMap((r) => Object.keys(r.parsed ?? {})));
+// Safety net for secrets an operator might inject via systemd `Environment=` instead of the file.
+for (const k of ['CLUSTER_SECRET', 'GITHUB_OAUTH_CLIENT_SECRET', 'GITHUB_APP_PRIVATE_KEY_PATH']) nsmEnvKeys.add(k);
+
+// Environment for host `docker compose` invocations: process.env with NSM's own vars stripped, so
+// the injected workdir `.env` is the single source of truth for Compose interpolation and no NSM
+// secret leaks into deployed containers. Docker/system runtime vars (PATH, HOME, DOCKER_*,
+// XDG_RUNTIME_DIR, BuildKit flags, SSH_AUTH_SOCK) are preserved.
+export const composeChildEnv = (): NodeJS.ProcessEnv => {
+    const e = { ...process.env };
+    for (const k of nsmEnvKeys) delete e[k];
+    return e;
+};
 
 export interface NsmConfig {
     production: boolean;

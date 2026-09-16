@@ -21,11 +21,11 @@ export const getPrimaryIp = async (): Promise<string> => {
     return '127.0.0.1';
 };
 
-export const execSafe = async (command: string, timeoutMs?: number): Promise<{ out: string; code: number }> => {
+export const execSafe = async (command: string, timeoutMs?: number, env?: NodeJS.ProcessEnv): Promise<{ out: string; code: number }> => {
     let out = '';
     let code = 0;
     try {
-        const co = await execAsync(command, { timeout: timeoutMs, maxBuffer: 1024 * 1024 * 64 });
+        const co = await execAsync(command, { timeout: timeoutMs, maxBuffer: 1024 * 1024 * 64, env });
         out += `${co.stdout}\n${co.stderr}\n`;
     } catch (error: any) {
         code = error.code ?? 1;
@@ -35,10 +35,10 @@ export const execSafe = async (command: string, timeoutMs?: number): Promise<{ o
 };
 
 // Streams stdout/stderr to onData as it arrives; enforces a hard timeout via child.kill().
-export const execStream = async (command: string, timeoutMs: number, onData?: (data: string) => void): Promise<{ out: string; code: number }> => {
+export const execStream = async (command: string, timeoutMs: number, onData?: (data: string) => void, env?: NodeJS.ProcessEnv): Promise<{ out: string; code: number }> => {
     return new Promise((resolve) => {
         let out = '';
-        const child = child_process.spawn(command, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = child_process.spawn(command, { shell: true, stdio: ['ignore', 'pipe', 'pipe'], env });
 
         const timer = setTimeout(() => {
             try {

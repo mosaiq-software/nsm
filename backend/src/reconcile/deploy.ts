@@ -3,7 +3,7 @@ import { DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 import { getGitHttpsUri, getGitSshUri } from '@mosaiq/nsm-common/gitUtils';
 import * as fs from 'fs/promises';
 import YAML from 'yaml';
-import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
+import { composeChildEnv, config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { getCloneToken, withCloneCredentials } from '@/utils/githubApp';
 import { execSafe, execStream } from '@/host/exec';
 import { reportDeploymentLog, reportDeployReady } from './report';
@@ -155,9 +155,14 @@ const runDeploymentCommand = async (dep: DesiredDeployment): Promise<void> => {
     if (!config.production) return;
     const runCommand = `docker compose -p ${composeProjectName(dep)} up --build -d`;
     const deploymentCommand = `(cd ${workdirFor(dep)} && ${runCommand})`;
-    const { out, code } = await execStream(deploymentCommand, dep.timeout, (data) => {
-        void reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, data);
-    });
+    const { out, code } = await execStream(
+        deploymentCommand,
+        dep.timeout,
+        (data) => {
+            void reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, data);
+        },
+        composeChildEnv()
+    );
     if (code !== 0) throw new Error(`Deployment command exited with code ${code}: ${out}`);
     await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, 'Deployment command completed successfully.\n');
 };
@@ -225,7 +230,7 @@ const waitForComposeHealthy = async (dep: DesiredDeployment, deadline: number): 
 
 const composeContainerIds = async (project: string, dep: DesiredDeployment): Promise<string[]> => {
     const cmd = `(cd ${workdirFor(dep)} && docker compose -p ${project} ps -q)`;
-    const { out, code } = await execSafe(cmd, 10000);
+    const { out, code } = await execSafe(cmd, 10000, composeChildEnv());
     if (code !== 0) return [];
     return out
         .split('\n')

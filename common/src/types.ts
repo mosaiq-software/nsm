@@ -220,8 +220,9 @@ export interface DynamicEnvVariable {
     placeholder?: string;
 }
 
+export type DirectoryBase = 'persistent' | 'deploy';
 export interface RelativeDirectoryMap {
-    [dynVarPath: string]: { relPath: string };
+    [dynVarPath: string]: { relPath: string; base?: DirectoryBase };
 }
 export interface FullDirectoryMap {
     [dynVarPath: string]: { fullPath: string };

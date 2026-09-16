@@ -47,4 +47,16 @@ describe('config', () => {
         const { config } = await import('@/config');
         expect(config.obsLokiPushUrl).toBe('http://loki.example:3100');
     });
+
+    it('composeChildEnv strips NSM-owned vars but preserves runtime vars', async () => {
+        const { composeChildEnv, nsmEnvKeys } = await import('@/config');
+        // Secrets are always in the strip-set via the safety net; runtime vars are preserved.
+        expect(nsmEnvKeys.has('CLUSTER_SECRET')).toBe(true);
+        const env = composeChildEnv();
+        expect(env.CLUSTER_SECRET).toBeUndefined();
+        expect(env.PATH).toBe(process.env.PATH);
+        // Any key added to the strip-set (e.g. a var from nsm.env) is removed too.
+        nsmEnvKeys.add('NSM_WWW_PATH');
+        expect(composeChildEnv().NSM_WWW_PATH).toBeUndefined();
+    });
 });

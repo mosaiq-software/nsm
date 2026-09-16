@@ -1,5 +1,5 @@
 import * as fs from 'fs/promises';
-import { config } from '@/config';
+import { composeChildEnv, config } from '@/config';
 import { execSafe, execStream } from '@/host/exec';
 
 const TEARDOWN_TIMEOUT_MS = 3 * 60 * 1000;
@@ -16,7 +16,7 @@ export const teardownGenerationLocal = async (projectId: string, generation: num
     const dir = genDir(projectId, generation);
     const cmd = `(cd ${dir} 2>/dev/null; docker compose -p ${genProject(projectId, generation)} down)`;
     try {
-        const { out, code } = await execStream(cmd, TEARDOWN_TIMEOUT_MS);
+        const { out, code } = await execStream(cmd, TEARDOWN_TIMEOUT_MS, undefined, composeChildEnv());
         if (code !== 0) console.warn(`Teardown for ${genProject(projectId, generation)} exited with code ${code}: ${out}`);
     } catch (e: any) {
         console.error(`Error running generation teardown for ${genProject(projectId, generation)}: ${e.message}`);
@@ -62,7 +62,7 @@ export const teardownProjectLocal = async (projectId: string): Promise<void> => 
     const downs = names.map((name) => `(cd ${dirForProjectName(projectId, name)} 2>/dev/null; docker compose -p ${name} down)`).join(' ; ');
     const cmd = `${downs} ; docker system prune -af`;
     try {
-        const { out, code } = await execStream(cmd, TEARDOWN_TIMEOUT_MS);
+        const { out, code } = await execStream(cmd, TEARDOWN_TIMEOUT_MS, undefined, composeChildEnv());
         if (code !== 0) console.warn(`Teardown for ${projectId} exited with code ${code}: ${out}`);
     } catch (e: any) {
         console.error(`Error running teardown command for ${projectId}: ${e.message}`);

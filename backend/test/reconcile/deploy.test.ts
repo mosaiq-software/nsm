@@ -61,11 +61,20 @@ describe('applyDeployment (legacy in-place)', () => {
         const repoPath = `${config.deploymentPath}/${d.projectId}`;
         expect(await fsp.readFile(`${repoPath}/docker-compose.yml`, 'utf-8')).toContain('services:');
         expect(await fsp.readFile(`${repoPath}/.env`, 'utf-8')).toContain('FOO=bar');
-        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining('docker compose -p proj1 up --build -d'), d.timeout, expect.any(Function));
+        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining('docker compose -p proj1 up --build -d'), d.timeout, expect.any(Function), expect.any(Object));
         expect(mockSetGen).toHaveBeenCalledWith('proj1', 3);
         expect(mockReady).not.toHaveBeenCalled();
         expect(lastReportStates()).toContain(DeploymentState.DEPLOYED);
         expect(lastReportStates()).not.toContain(DeploymentState.FAILED);
+    });
+
+    it('runs compose up with an isolated env that omits NSM secrets but keeps PATH', async () => {
+        await applyDeployment(dep());
+        const call = mockStream.mock.calls.find((c) => String(c[0]).includes('up --build'));
+        expect(call).toBeTruthy();
+        const env = call![3] as NodeJS.ProcessEnv;
+        expect(env.CLUSTER_SECRET).toBeUndefined();
+        expect(env.PATH).toBe(process.env.PATH);
     });
 
     it('reports FAILED and skips the generation marker when compose up fails', async () => {
@@ -94,8 +103,8 @@ describe('applyDeployment (zero-downtime / blue-green)', () => {
         const genPath = `${config.deploymentPath}/proj1/g3`;
         expect(await fsp.readFile(`${genPath}/docker-compose.yml`, 'utf-8')).toContain('services:');
         // Blue-green project name coexists with the old generation; runs from the per-gen workdir.
-        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining('docker compose -p proj1-g3 up --build -d'), d.timeout, expect.any(Function));
-        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining(genPath), d.timeout, expect.any(Function));
+        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining('docker compose -p proj1-g3 up --build -d'), d.timeout, expect.any(Function), expect.any(Object));
+        expect(mockStream).toHaveBeenCalledWith(expect.stringContaining(genPath), d.timeout, expect.any(Function), expect.any(Object));
         expect(mockLive).toHaveBeenCalledWith('proj1', 3);
         expect(mockWaitPort).toHaveBeenCalledWith(1234, expect.any(Number), undefined);
         expect(mockReadyGen).toHaveBeenCalledWith('proj1', 3);

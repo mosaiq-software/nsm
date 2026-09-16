@@ -250,7 +250,7 @@ const buildDirectoryRequest = (project: Project): RelativeDirectoryMap => {
     for (const server of project.nginxConfig?.servers || []) {
         for (const location of server.locations) {
             if (location.type === NginxConfigLocationType.STATIC) {
-                dirs[stringifyDynamicVariablePath(project.id, server.serverId, location.locationId, DynamicEnvVariableFields.DIRECTORY)] = { relPath: `/${project.id}/www/${server.serverId}/${location.locationId}` };
+                dirs[stringifyDynamicVariablePath(project.id, server.serverId, location.locationId, DynamicEnvVariableFields.DIRECTORY)] = { relPath: `/${project.id}/www/${server.serverId}/${location.locationId}`, base: 'deploy' };
             }
         }
     }
