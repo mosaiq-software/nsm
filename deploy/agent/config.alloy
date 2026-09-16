@@ -1,5 +1,10 @@
 // NSM per-node Alloy config: ship app container logs + nsmd's own logs to the leader's Loki,
 // tagged with deployment labels so the NSM API/UI can filter logs per deployment.
+//
+// Targets the stdlib of the pinned image grafana/alloy:v1.3.1 (see deploy/agent/docker-compose.yml),
+// which predates the namespaced standard library. Use the flat functions env() and format(), NOT
+// the newer sys.env() / string.format() - those do not exist in v1.3.1 and fail config load. If the
+// image is bumped past the stdlib standardization, switch these to the namespaced forms.
 
 logging {
 	level = "warn"
@@ -7,7 +12,7 @@ logging {
 
 loki.write "leader" {
 	endpoint {
-		url = string.format("%s/loki/api/v1/push", env("OBS_LOKI_PUSH_URL"))
+		url = format("%s/loki/api/v1/push", env("OBS_LOKI_PUSH_URL"))
 	}
 }
 
