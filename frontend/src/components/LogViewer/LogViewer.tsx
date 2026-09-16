@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Card, Group, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Card, Group, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { LogEntry, LogFacet, LogFilter, LogSelector } from '@mosaiq/nsm-common/types';
@@ -13,6 +13,15 @@ import { resolveRange, TimeRange, TimeRangeControl } from './TimeRangeControl';
 
 const PAGE_SIZE = 200;
 const LIVE_INTERVAL_MS = 10_000;
+
+// Minimum pino level options ("this level and above"). Empty value clears the floor.
+const LEVEL_MIN_OPTIONS = [
+    { value: '', label: 'All levels' },
+    { value: '20', label: 'Debug and up' },
+    { value: '30', label: 'Info and up' },
+    { value: '40', label: 'Warn and up' },
+    { value: '50', label: 'Error and up' },
+];
 
 export interface LogViewerProps {
     selector: LogSelector;
@@ -47,6 +56,7 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
     const [searchInput, setSearchInput] = useState('');
     const [debouncedSearch] = useDebouncedValue(searchInput, 300);
     const [selections, setSelections] = useState<Selections>({});
+    const [levelMin, setLevelMin] = useState<number | undefined>(undefined);
     const [entries, setEntries] = useState<LogEntry[]>([]);
     const [nextCursorNs, setNextCursorNs] = useState<string | undefined>();
     const [facets, setFacets] = useState<LogFacet[]>([]);
@@ -77,6 +87,7 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
                     endNs,
                     search: debouncedSearch || undefined,
                     filters,
+                    levelMin,
                     limit: PAGE_SIZE,
                     cursorNs: append ? cursorRef.current : undefined,
                 });
@@ -87,7 +98,7 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
                 append ? setLoadingMore(false) : setLoading(false);
             }
         },
-        [selectorKey, debouncedSearch, selectionsKey, rangeKey] // eslint-disable-line react-hooks/exhaustive-deps
+        [selectorKey, debouncedSearch, selectionsKey, rangeKey, levelMin] // eslint-disable-line react-hooks/exhaustive-deps
     );
 
     const loadFacets = useCallback(
@@ -102,6 +113,7 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
                     endNs,
                     search: debouncedSearch || undefined,
                     filters,
+                    levelMin,
                     fields: facetFields,
                 });
                 setFacets(res?.facets ?? []);
@@ -110,7 +122,7 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
                 setFacetsLoading(false);
             }
         },
-        [selectorKey, debouncedSearch, selectionsKey, rangeKey] // eslint-disable-line react-hooks/exhaustive-deps
+        [selectorKey, debouncedSearch, selectionsKey, rangeKey, levelMin] // eslint-disable-line react-hooks/exhaustive-deps
     );
 
     // Refetch page 1 + facets whenever the query inputs change.
@@ -161,6 +173,17 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
                     }
                 />
                 <Group align="flex-end" gap="md">
+                    {facetFields.includes('level') && (
+                        <Select
+                            label="Level"
+                            data={LEVEL_MIN_OPTIONS}
+                            value={levelMin != null ? String(levelMin) : ''}
+                            onChange={(v) => setLevelMin(v ? Number(v) : undefined)}
+                            w={150}
+                            allowDeselect={false}
+                            comboboxProps={{ withinPortal: true }}
+                        />
+                    )}
                     <TimeRangeControl value={range} onChange={setRange} />
                     <Switch label="Live" checked={live} onChange={(e) => setLive(e.currentTarget.checked)} disabled={range.mode !== 'preset'} />
                     <Tooltip label="Refresh">

@@ -27,10 +27,7 @@ export const leaderEnsureCerts = async (): Promise<void> => {
     const existing = await getAllCertsModel();
     for (const domain of domains) {
         const have = existing.find((c) => c.domain === domain);
-        if (have && have.notAfter - Date.now() > THIRTY_DAYS_MS) {
-            certLog.debug({ action: 'cert_skipped', domain, notAfter: have.notAfter }, `cert for ${domain} still valid`);
-            continue; // still valid
-        }
+        if (have && have.notAfter - Date.now() > THIRTY_DAYS_MS) continue; // still valid
         await obtainCert(domain);
     }
 };
