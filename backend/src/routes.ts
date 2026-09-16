@@ -10,7 +10,7 @@ import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
-import { queryLogs, queryMetric, MetricKind } from '@/controllers/observabilityController';
+import { queryLogs, queryMetric, queryNsmLogs, MetricKind } from '@/controllers/observabilityController';
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
@@ -237,6 +237,17 @@ privateRouter.get(API_ROUTES.GET_OBSERVABILITY_METRICS, async (req, res) => {
     try {
         const { projectInstanceId, serviceInstanceId, projectId, metric, start, end, step } = req.query as Record<string, string>;
         res.status(200).json(await queryMetric({ projectInstanceId, serviceInstanceId, projectId }, (metric as MetricKind) || 'cpu', start, end, step || '30s'));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// nsmd's own control-plane logs (leader-only, where Loki lives). Optionally filtered to one node.
+privateRouter.get(API_ROUTES.GET_NSM_LOGS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const { nodeId, start, end, limit } = req.query as Record<string, string>;
+        res.status(200).json(await queryNsmLogs(nodeId || undefined, start, end, Number(limit) || 500));
     } catch (e: any) {
         res.status(400).send(e.message);
     }

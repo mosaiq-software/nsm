@@ -6,6 +6,7 @@ import ProjectConfigPage from '@/pages/ProjectConfigPage';
 import ProjectLogsPage from '@/pages/ProjectLogsPage';
 import NodesPage from '@/pages/NodesPage';
 import ClusterStatusPage from '@/pages/ClusterStatusPage';
+import NsmLogsPage from '@/pages/NsmLogsPage';
 import LandingPage from '@/pages/LandingPage';
 import AllowedEntitiesPage from '@/pages/AllowedEntitiesPage';
 import { Center, Loader } from '@mantine/core';
@@ -41,6 +42,7 @@ const Router = () => {
                 <Route path="/p/:projectId/logs" element={<ProjectLogsPage />} />
                 <Route path="/nodes" element={<NodesPage />} />
                 <Route path="/status" element={<ClusterStatusPage />} />
+                <Route path="/logs" element={<NsmLogsPage />} />
                 <Route path="/access" element={<AllowedEntitiesPage />} />
                 <Route path="/*" element={<p>404</p>} />
             </Routes>

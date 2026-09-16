@@ -15,6 +15,7 @@ export enum API_ROUTES {
     GET_ALLOWED_ENTITIES = '/allowed-entities',
     GET_OBSERVABILITY_LOGS = '/observability/logs',
     GET_OBSERVABILITY_METRICS = '/observability/metrics',
+    GET_NSM_LOGS = '/observability/nsm-logs',
     GET_GITHUB_OWNERS = '/github/owners',
     GET_GITHUB_REPOS = '/github/repos',
     GET_GITHUB_BRANCHES = '/github/branches',
@@ -52,6 +53,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: {};
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: {};
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: {};
+    [API_ROUTES.GET_NSM_LOGS]: {};
     [API_ROUTES.GET_GITHUB_OWNERS]: {};
     [API_ROUTES.GET_GITHUB_REPOS]: {};
     [API_ROUTES.GET_GITHUB_BRANCHES]: {};
@@ -90,6 +92,7 @@ export interface API_BODY {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: undefined;
+    [API_ROUTES.GET_NSM_LOGS]: undefined;
     [API_ROUTES.GET_GITHUB_OWNERS]: undefined;
     [API_ROUTES.GET_GITHUB_REPOS]: undefined;
     [API_ROUTES.GET_GITHUB_BRANCHES]: undefined;
@@ -127,6 +130,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: AllowedGithubEntity[] | undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: ObservabilityLogsResult | undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: ObservabilityMetricsResult | undefined;
+    [API_ROUTES.GET_NSM_LOGS]: ObservabilityLogsResult | undefined;
     [API_ROUTES.GET_GITHUB_OWNERS]: GithubOwner[];
     [API_ROUTES.GET_GITHUB_REPOS]: string[];
     [API_ROUTES.GET_GITHUB_BRANCHES]: string[];
@@ -166,6 +170,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_ALLOWED_ENTITIES]: string;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: string;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: string;
+    [API_ROUTES.GET_NSM_LOGS]: string;
     [API_ROUTES.GET_GITHUB_OWNERS]: string;
     [API_ROUTES.GET_GITHUB_REPOS]: string;
     [API_ROUTES.GET_GITHUB_BRANCHES]: string;

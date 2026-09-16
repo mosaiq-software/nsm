@@ -330,6 +330,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                     <RouterLink to="/" label="Dashboard" showActive />
                     <RouterLink to="/nodes" label="Nodes" showActive />
                     <RouterLink to="/status" label="Cluster Status" showActive />
+                    <RouterLink to="/logs" label="NSM Logs" showActive />
                     <RouterLink to="/access" label="Access Management" showActive />
                     <Space h="md" />
                     <Divider w="80%" mx="auto" my="sm" />

@@ -8,7 +8,7 @@ vi.mock('@/cluster/leaderClient', () => ({ CLUSTER_SECRET_HEADER: 'x-nsm-cluster
 vi.mock('@/cluster/statusGossip', () => ({ ingestReport: vi.fn() }));
 vi.mock('@/cluster/registry', () => ({ registerNode: vi.fn(async () => undefined), deregisterNode: vi.fn(async () => undefined), getRegistry: vi.fn(async () => ({ nodes: [] })) }));
 vi.mock('@/persistence/desiredDeploymentPersistence', () => ({ getDesiredDeploymentsAssignedToModel: vi.fn(async () => []) }));
-vi.mock('@/controllers/observabilityController', () => ({ queryLogs: vi.fn(async () => ({ lines: [] })), queryMetric: vi.fn(async () => ({ metric: 'cpu', series: [] })) }));
+vi.mock('@/controllers/observabilityController', () => ({ queryLogs: vi.fn(async () => ({ lines: [] })), queryMetric: vi.fn(async () => ({ metric: 'cpu', series: [] })), queryNsmLogs: vi.fn(async () => ({ lines: [] })) }));
 vi.mock('@/cluster/selfUpdate', () => ({ applyUpdateInstruction: vi.fn(), setDesiredNsmVersion: vi.fn() }));
 vi.mock('@/controllers/userController', () => ({ verifyAuthToken: vi.fn(async () => true), signInUser: vi.fn(), signOutUser: vi.fn() }));
 vi.mock('@/controllers/projectController', () => ({ getProject: vi.fn(async () => ({ id: 'p1' })), getAllProjects: vi.fn(async () => []), verifyDeploymentKey: vi.fn(async () => true), createProject: vi.fn(), updateProject: vi.fn(), deleteProject: vi.fn(), resetDeploymentKey: vi.fn(), setProjectAssignment: vi.fn(), syncProjectToRepoData: vi.fn() }));
@@ -30,6 +30,7 @@ import { verifyDeploymentKey } from '@/controllers/projectController';
 import { setAllowedEntities } from '@/controllers/allowedEntityController';
 import { ingestReport } from '@/cluster/statusGossip';
 import { enqueueDeploy } from '@/controllers/deployQueue';
+import { queryNsmLogs } from '@/controllers/observabilityController';
 
 const SECRET = 'x-nsm-cluster-secret';
 const isLeader = cluster.isLeader as unknown as Mock;
@@ -85,6 +86,20 @@ describe('requireLeader forwarding', () => {
         const res = await request(app).post('/allowed-entities/set').set('authorization', 'good').send({ entities: [] });
         expect(res.status).toBe(200);
         expect(setAllowedEntities).toHaveBeenCalledWith([]);
+    });
+});
+
+describe('nsm logs route', () => {
+    it('runs queryNsmLogs on the leader with the node filter and time range', async () => {
+        const res = await request(app).get('/observability/nsm-logs?nodeId=node-a&start=0&end=9&limit=100').set('authorization', 'good');
+        expect(res.status).toBe(200);
+        expect(queryNsmLogs).toHaveBeenCalledWith('node-a', '0', '9', 100);
+    });
+    it('is leader-gated (follower forwards)', async () => {
+        isLeader.mockReturnValue(false);
+        const res = await request(app).get('/observability/nsm-logs').set('authorization', 'good');
+        expect(res.status).toBe(599);
+        expect(mForward).toHaveBeenCalled();
     });
 });
 

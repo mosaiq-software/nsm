@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import * as path from 'path';
 
 // API path prefixes proxied to the running daemon in dev. Keep these disjoint from client-side
-// route paths (/, /p/*, /nodes, /status, /access) so the SPA and the API never collide.
+// route paths (/, /p/*, /nodes, /status, /logs, /access) so the SPA and the API never collide.
 const API_PREFIXES = ['/projects', '/project', '/project-instance', '/cluster', '/observability', '/allowed-entities', '/auth', '/login', '/logout', '/deploy', '/deployweb', '/healthz', '/metrics'];
 
 const daemon = process.env.NSM_API_TARGET || 'http://127.0.0.1:1025';
