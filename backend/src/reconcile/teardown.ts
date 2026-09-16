@@ -7,6 +7,7 @@ const TEARDOWN_TIMEOUT_MS = 3 * 60 * 1000;
 const baseDir = (projectId: string) => `${config.deploymentPath}/${projectId}`;
 const genDir = (projectId: string, generation: number) => `${baseDir(projectId)}/g${generation}`;
 const genProject = (projectId: string, generation: number) => `${projectId}-g${generation}`;
+const persistentDir = (projectId: string) => `${config.persistentPath}/${projectId}`;
 
 // Tears down a SINGLE generation's containers (used to drain the old generation after a zero-downtime
 // cutover, or to clean up a failed blue stack). Deliberately does NOT run a global prune: another
@@ -72,4 +73,26 @@ export const teardownProjectLocal = async (projectId: string): Promise<void> => 
     } catch {
         /* ignore */
     }
+};
+
+// Renames a project's persistent directory to an archived name instead of deleting it, so a
+// deleted project's data survives as `<projectId>-deleted-<uuid>` under the persistent path. Only
+// used on genuine deletion (never on reassignment, which reuses teardownProjectLocal alone).
+export const archivePersistentDirLocal = async (projectId: string): Promise<void> => {
+    if (!config.production) return;
+    const src = persistentDir(projectId);
+    const dst = `${src}-deleted-${crypto.randomUUID()}`;
+    try {
+        await fs.rename(src, dst);
+    } catch {
+        /* ignore: the persistent dir may not exist (project never deployed here) */
+    }
+};
+
+// Deletion-only purge for a project: full container/deploy-dir teardown, then archive (rename) the
+// persistent dir. Distinct from teardownProjectLocal, which is also hit on reassignment and must
+// leave persistent data in place.
+export const purgeProjectLocal = async (projectId: string): Promise<void> => {
+    await teardownProjectLocal(projectId);
+    await archivePersistentDirLocal(projectId);
 };

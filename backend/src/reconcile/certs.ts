@@ -1,7 +1,7 @@
 import { config } from '@/config';
 import { execStream, execSafe } from '@/host/exec';
 import { sudo } from '@/host/privilege';
-import { getAllCertsModel, upsertCertModel } from '@/persistence/certPersistence';
+import { deleteCertModel, getAllCertsModel, upsertCertModel } from '@/persistence/certPersistence';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 import { dashboardDomain } from './dashboardIngress';
 import { CertRecord } from '@mosaiq/nsm-common/clusterOps';
@@ -62,6 +62,24 @@ const obtainCert = async (domain: string): Promise<void> => {
         await upsertCertModel(cert);
     } catch (e) {
         console.error(`Failed to record cert for ${domain}:`, e);
+    }
+};
+
+// === Leader only: remove certs for a deleted project's domains ===
+// Deletes each domain's certbot lineage (its live dir under LETSENCRYPT_LIVE_DIR, which nginx reads)
+// and drops the local expiry record. Best-effort per domain so one failure never blocks the rest.
+export const removeCertsForDomains = async (domains: string[]): Promise<void> => {
+    if (!config.production) return;
+    for (const domain of domains) {
+        const cmd = sudo(`certbot delete --cert-name ${domain} --non-interactive`);
+        const { out, code } = await execStream(cmd, 1000 * 60);
+        if (code !== 0) console.warn(`certbot delete failed for ${domain}: ${out}`);
+        lastFailedAt.delete(domain);
+        try {
+            await deleteCertModel(domain);
+        } catch (e) {
+            console.error(`Failed to remove cert record for ${domain}:`, e);
+        }
     }
 };
 

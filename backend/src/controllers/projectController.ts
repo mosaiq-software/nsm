@@ -4,8 +4,10 @@ import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { applyLegacyOverlay, applyRepoData, getAllSecretsForProject } from './secretController';
 import { getRepoData } from '@/utils/repositoryUtils';
 import { getProjectInstancesByProjectIdModel } from '@/persistence/projectInstancePersistence';
-import { teardownProject } from './deployController';
+import { purgeProjectOnAssignedNode, teardownProject } from './deployController';
 import { deleteProjectInstancesForProject } from './projectInstanceController';
+import { renderAllNginx } from '@/reconcile/nginxRender';
+import { removeCertsForDomains } from '@/reconcile/certs';
 import { cluster } from '@/cluster/node';
 
 // === Reads: served from the local materialized view ===
@@ -138,9 +140,17 @@ export const setProjectAssignment = async (projectId: string, nodeId: string): P
 
 export const deleteProject = async (projectId: string): Promise<boolean> => {
     try {
+        const project = await getProject(projectId);
+        const domains = (project?.nginxConfig?.servers || []).map((s) => s.domain).filter(Boolean);
+        // Node-side purge: containers + deploy dir removed, persistent dir archived (renamed).
+        if (project) await purgeProjectOnAssignedNode(project);
         await teardownProject(projectId);
         await deleteProjectInstancesForProject(projectId);
         await cluster.propose({ type: OpType.DELETE_PROJECT, projectId });
+        // Drop the project's nginx conf before removing its certs, so no conf references a deleted
+        // fullchain.pem while nginx reloads.
+        await renderAllNginx();
+        await removeCertsForDomains(domains);
         return true;
     } catch (error) {
         console.error('Error deleting project:', error);

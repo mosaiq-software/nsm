@@ -29,3 +29,7 @@ export const getCertModel = async (domain: string): Promise<CertRecord | null> =
 export const getAllCertsModel = async (): Promise<CertRecord[]> => {
     return (await CertModel.findAll())?.map((c) => c.toJSON()) as CertRecord[];
 };
+
+export const deleteCertModel = async (domain: string): Promise<void> => {
+    await CertModel.destroy({ where: { domain } });
+};

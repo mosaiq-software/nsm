@@ -24,6 +24,7 @@ import { ingestReport } from '@/cluster/statusGossip';
 import { registerNode, deregisterNode, getRegistry } from '@/cluster/registry';
 import { getDesiredDeploymentsAssignedToModel } from '@/persistence/desiredDeploymentPersistence';
 import { applyUpdateInstruction, setDesiredNsmVersion } from '@/cluster/selfUpdate';
+import { purgeProjectLocal } from '@/reconcile/teardown';
 import { registry } from '@/utils/metrics';
 
 const publicRouter = express.Router();
@@ -593,6 +594,14 @@ internalRouter.post('/cluster/status-report', requireClusterSecret, async (req, 
 internalRouter.post('/node/plan', requireClusterSecret, async (req, res) => {
     const { proxyCount, dirs } = req.body || {};
     res.status(200).json(await planLocally(proxyCount || 0, dirs || {}));
+});
+
+// Leader asks a node to purge a deleted project: tear down containers + deploy dir, then archive
+// (rename) the persistent dir. Fire-and-forget: teardown can take minutes, past the RPC timeout.
+internalRouter.post('/node/purge-project', requireClusterSecret, async (req, res) => {
+    const { projectId } = req.body || {};
+    res.status(200).json(undefined);
+    if (projectId) void purgeProjectLocal(String(projectId));
 });
 
 // CI/CD sets the desired NSM version (leader records it; rollout is orchestrated).

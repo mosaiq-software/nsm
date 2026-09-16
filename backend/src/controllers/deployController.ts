@@ -27,6 +27,7 @@ import { cluster } from '@/cluster/node';
 import { postToNode } from '@/cluster/leaderClient';
 import { getNextFreePorts } from '@/reconcile/ports';
 import { ensureDirectories } from '@/reconcile/directories';
+import { purgeProjectLocal } from '@/reconcile/teardown';
 import { config } from '@/config';
 import { DEFAULT_TIMEOUT, NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_PROJECT_ID, NSM_LABEL_PROJECT_INSTANCE_ID, NSM_LABEL_SERVICE_NAME, NSM_LABEL_MANAGED } from '@/constants';
 import { leaderEnsureCerts } from '@/reconcile/certs';
@@ -53,6 +54,20 @@ const planOnAssignedNode = async (nodeId: string, proxyCount: number, dirs: Rela
     const res = await postToNode<NodePlan>(node.address, node.apiPort, '/node/plan', { proxyCount, dirs });
     if (!res) throw new Error(`Failed to reach node ${nodeId} for deployment planning`);
     return res;
+};
+
+// Deletion-only: ask the project's assigned node to purge it (tear down containers + deploy dir,
+// then archive the persistent dir). Best-effort - a missing/unreachable node never blocks deletion.
+export const purgeProjectOnAssignedNode = async (project: Project): Promise<void> => {
+    const nodeId = project.workerNodeId;
+    if (!nodeId) return;
+    if (nodeId === config.nodeId) {
+        await purgeProjectLocal(project.id);
+        return;
+    }
+    const node = await getNodeByIdModel(nodeId);
+    if (!node) return;
+    await postToNode(node.address, node.apiPort, '/node/purge-project', { projectId: project.id });
 };
 
 // Leader-only: render a project into a self-contained DesiredDeployment and replicate it.
