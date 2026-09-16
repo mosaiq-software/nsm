@@ -35,15 +35,23 @@ export const ensureBaseDirectories = async () => {
 };
 
 export const handleSignals = (server: any) => {
-    process.on('SIGTERM', () => console.warn('Received SIGTERM, ignoring (managed by systemd).'));
-    process.on('SIGINT', () => {
-        console.warn('Received SIGINT');
+    let shuttingDown = false;
+    const shutdown = (signal: string) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.warn(`Received ${signal}, shutting down gracefully...`);
         cluster.stop();
+        // Drop idle keep-alive sockets so server.close() isn't held open by the long keepAliveTimeout.
+        server.closeIdleConnections?.();
         server.close(() => {
             console.log('Server closed');
             exit(0);
         });
-    });
+        // Backstop: never let a lingering connection block a systemd restart.
+        setTimeout(() => exit(0), 8000).unref();
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 };
 
 export const registerCronJobs = () => {

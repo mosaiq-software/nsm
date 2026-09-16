@@ -88,7 +88,11 @@ const resolveInstallationId = async (owner: string, repo: string): Promise<strin
     const cached = installationCache.get(owner);
     if (cached) return cached;
     const res = await ghAppRequest(`/repos/${owner}/${repo}/installation`);
-    if (!res.ok) throw new Error(`Failed to resolve GitHub App installation for ${owner}/${repo}: ${res.status} ${await res.text()}`);
+    if (!res.ok) {
+        const err = new Error(`Failed to resolve GitHub App installation for ${owner}/${repo}: ${res.status} ${await res.text()}`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+    }
     const data = (await res.json()) as { id: number };
     const id = String(data.id);
     installationCache.set(owner, id);
@@ -115,17 +119,43 @@ const mintTokenForInstallation = async (cacheKey: string, installationId: string
         method: 'POST',
         body: repositories ? JSON.stringify({ repositories }) : undefined,
     });
-    if (!res.ok) throw new Error(`Failed to mint installation token for ${cacheKey}: ${res.status} ${await res.text()}`);
+    if (!res.ok) {
+        const err = new Error(`Failed to mint installation token for ${cacheKey}: ${res.status} ${await res.text()}`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+    }
     const data = (await res.json()) as { token: string; expires_at: string };
     const result: CloneToken = { token: data.token, expiresAt: Date.parse(data.expires_at) };
     tokenCache.set(cacheKey, result);
     return result;
 };
 
+// A repo-access failure (422 "not accessible to the parent installation", or 404) means the App is
+// simply not granted this repo. Surface an actionable message instead of a raw GitHub status.
+const isRepoAccessStatus = (status?: number): boolean => status === 422 || status === 404;
+const repoAccessError = (owner: string, repo: string): Error =>
+    new Error(
+        `GitHub App has no access to ${owner}/${repo}. Add the repository to the App installation ` +
+            `(GitHub > Settings > Applications > your NSM App > Configure > Repository access), or verify the repo name.`
+    );
+
 // Leader-only: mint a repo-scoped installation access token (~1h). Cached until it nears expiry.
 export const mintInstallationToken = async (owner: string, repo: string): Promise<CloneToken> => {
-    const installationId = await resolveInstallationId(owner, repo);
-    return mintTokenForInstallation(`${owner}/${repo}`, installationId, [repo]);
+    const attempt = async () => mintTokenForInstallation(`${owner}/${repo}`, await resolveInstallationId(owner, repo), [repo]);
+    try {
+        return await attempt();
+    } catch (e: any) {
+        if (!isRepoAccessStatus(e?.status)) throw e;
+        // Possibly a stale owner->installation mapping (App reinstalled): drop the cache and re-resolve
+        // once. If it still fails on access, the App genuinely lacks this repo.
+        installationCache.delete(owner);
+        try {
+            return await attempt();
+        } catch (e2: any) {
+            if (isRepoAccessStatus(e2?.status)) throw repoAccessError(owner, repo);
+            throw e2;
+        }
+    }
 };
 
 // Leader-only: the owners (users/orgs) that have installed the App, for create-project suggestions.

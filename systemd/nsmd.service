@@ -18,7 +18,8 @@ RestartSec=3
 User=nsm
 Group=nsm
 SupplementaryGroups=docker
-KillSignalRestart=SIGTERM
+# Safety net: if a graceful shutdown ever stalls, don't wait the 90s default before SIGKILL.
+TimeoutStopSec=30
 LimitNOFILE=65536
 
 [Install]

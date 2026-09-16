@@ -46,6 +46,27 @@ describe('signInUser', () => {
         expect(await signInUser('tok')).not.toBeNull();
     });
 
+    it('signs in the default user even when org lookup fails', async () => {
+        process.env.VITE_GITHUB_OAUTH_DEFAULT_USER = 'owner1';
+        mockUser.mockResolvedValue({ id: 'g4', login: 'owner1', avatar_url: '' });
+        mockOrgs.mockResolvedValue(null);
+        expect(await signInUser('tok')).not.toBeNull();
+    });
+
+    it('signs in a user allowed by username even when org lookup fails', async () => {
+        await createAllowedEntityModel({ id: 'octocat', type: AllowedEntityType.USER, avatarUrl: '' });
+        mockUser.mockResolvedValue({ id: 'g5', login: 'octocat', avatar_url: '' });
+        mockOrgs.mockResolvedValue(null);
+        expect(await signInUser('tok')).not.toBeNull();
+    });
+
+    it('denies (without throwing) a non-allowed user when org lookup fails', async () => {
+        await createAllowedEntityModel({ id: 'myorg', type: AllowedEntityType.ORGANIZATION, avatarUrl: '' });
+        mockUser.mockResolvedValue({ id: 'g6', login: 'stranger', avatar_url: '' });
+        mockOrgs.mockResolvedValue(null);
+        expect(await signInUser('tok')).toBeNull();
+    });
+
     it('denies a disallowed user, and signs out an existing session that lost access', async () => {
         // Pre-existing signed-in session.
         await applyOp({ type: OpType.UPSERT_USER, user: { githubId: 'g3', name: 'ex', authToken: 'tok', avatarUrl: '', created: 1, signedIn: true } as User }, ++idx);

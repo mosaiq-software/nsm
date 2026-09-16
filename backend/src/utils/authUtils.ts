@@ -43,8 +43,13 @@ export async function getPrivateGitHubUserData(access_token: string): Promise<Gi
                 Authorization: `token ${access_token}`,
             },
         });
+        if (!res.ok) {
+            console.error(`GitHub user fetch failed with status ${res.status}: ${await res.text()}`);
+            return null;
+        }
         return res.json();
     } catch (error) {
+        console.error('Error fetching GitHub user data:', error);
         return null;
     }
 }
@@ -83,6 +88,7 @@ export async function getOrgsForUser(access_token: string) {
             throw new Error(`GitHub org fetch returned invalid JSON: ${txt}`);
         }
     } catch (error) {
+        console.error('Error fetching GitHub organizations:', error);
         return null;
     }
 }

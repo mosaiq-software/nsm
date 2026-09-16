@@ -24,6 +24,13 @@ const jsonRes = (ok: boolean, body: unknown) => ({
     text: async () => JSON.stringify(body),
 });
 
+const statusRes = (status: number, body: unknown) => ({
+    ok: false,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+});
+
 const futureIso = () => new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
 describe('githubApp', () => {
@@ -82,6 +89,32 @@ describe('githubApp', () => {
         await mintInstallationToken('o', 'r');
         // One resolve + one mint total; the second call is served from cache.
         expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws an actionable error when the App has no access to the repo (422 persists)', async () => {
+        const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+        fetchMock
+            .mockResolvedValueOnce(jsonRes(true, { id: 999 })) // resolve installation
+            .mockResolvedValueOnce(statusRes(422, { message: 'not accessible to the parent installation' })) // mint fails
+            .mockResolvedValueOnce(jsonRes(true, { id: 999 })) // re-resolve after cache clear
+            .mockResolvedValueOnce(statusRes(422, { message: 'not accessible to the parent installation' })); // mint fails again
+
+        const { mintInstallationToken } = await import('@/utils/githubApp');
+        await expect(mintInstallationToken('owner', 'norepo')).rejects.toThrow(/no access to owner\/norepo/i);
+    });
+
+    it('self-heals a reinstalled App by re-resolving the installation id after a 422', async () => {
+        const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+        fetchMock
+            .mockResolvedValueOnce(jsonRes(true, { id: 999 })) // stale resolve
+            .mockResolvedValueOnce(statusRes(422, { message: 'not accessible to the parent installation' })) // mint fails (stale id)
+            .mockResolvedValueOnce(jsonRes(true, { id: 1000 })) // re-resolve -> new installation id
+            .mockResolvedValueOnce(jsonRes(true, { token: 't2', expires_at: futureIso() })); // mint succeeds
+
+        const { mintInstallationToken } = await import('@/utils/githubApp');
+        const out = await mintInstallationToken('owner', 'repo');
+        expect(out.token).toBe('t2');
+        expect(fetchMock.mock.calls[3][0]).toContain('/app/installations/1000/access_tokens');
     });
 
     it('uses the configured installation id when present', async () => {

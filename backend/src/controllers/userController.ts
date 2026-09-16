@@ -13,16 +13,16 @@ export const signInUser = async (authToken: string) => {
             console.error('Failed to fetch GitHub user data');
             throw new Error('Failed to fetch GitHub user data');
         }
-        const usersOrgs = await getOrgsForUser(authToken);
-        if (!usersOrgs) {
-            console.error('Failed to fetch GitHub organizations');
-            throw new Error('Failed to fetch GitHub organizations');
-        }
         const allowedUsers = await getAllowedUsersModel();
-        const allowedOrgs = await getAllowedOrganizationsModel();
         const isUserAllowed = allowedUsers.some((u) => u.id.toLowerCase() === githubUser.login.toLowerCase());
-        const isOrgAllowed = usersOrgs.some((org) => allowedOrgs.some((allowed) => allowed.id.toLowerCase() === org.login.toLowerCase()));
-        if (!isUserAllowed && !isOrgAllowed && process.env.VITE_GITHUB_OAUTH_DEFAULT_USER?.toLocaleLowerCase() !== githubUser.login.toLowerCase()) {
+        const isDefaultUser = process.env.VITE_GITHUB_OAUTH_DEFAULT_USER?.toLocaleLowerCase() === githubUser.login.toLowerCase();
+        // Org membership is only needed for the org-allow path. Fetch it, but a failure (transient GitHub
+        // error, missing org visibility) must not block a user who is already allowed by login / default.
+        const usersOrgs = isUserAllowed || isDefaultUser ? [] : await getOrgsForUser(authToken);
+        if (usersOrgs === null) console.error('Failed to fetch GitHub organizations; treating org-allow as no match');
+        const allowedOrgs = await getAllowedOrganizationsModel();
+        const isOrgAllowed = (usersOrgs || []).some((org) => allowedOrgs.some((allowed) => allowed.id.toLowerCase() === org.login.toLowerCase()));
+        if (!isUserAllowed && !isOrgAllowed && !isDefaultUser) {
             if (existingUser) {
                 // User is no longer allowed, sign them out
                 await signOutUser(authToken);
