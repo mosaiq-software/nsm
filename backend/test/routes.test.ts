@@ -8,7 +8,7 @@ vi.mock('@/cluster/leaderClient', () => ({ CLUSTER_SECRET_HEADER: 'x-nsm-cluster
 vi.mock('@/cluster/statusGossip', () => ({ ingestReport: vi.fn() }));
 vi.mock('@/cluster/registry', () => ({ registerNode: vi.fn(async () => undefined), deregisterNode: vi.fn(async () => undefined), getRegistry: vi.fn(async () => ({ nodes: [] })) }));
 vi.mock('@/persistence/desiredDeploymentPersistence', () => ({ getDesiredDeploymentsAssignedToModel: vi.fn(async () => []) }));
-vi.mock('@/controllers/observabilityController', () => ({ queryLogs: vi.fn(async () => ({ lines: [] })), queryMetric: vi.fn(async () => ({ metric: 'cpu', series: [] })), queryNsmLogs: vi.fn(async () => ({ lines: [] })) }));
+vi.mock('@/controllers/observabilityController', () => ({ queryLogs: vi.fn(async () => ({ lines: [] })), queryMetric: vi.fn(async () => ({ metric: 'cpu', series: [] })), queryNsmLogs: vi.fn(async () => ({ lines: [] })), queryStructuredLogs: vi.fn(async () => ({ entries: [] })), queryLogFacets: vi.fn(async () => ({ facets: [], total: 0 })) }));
 vi.mock('@/cluster/selfUpdate', () => ({ applyUpdateInstruction: vi.fn(), setDesiredNsmVersion: vi.fn() }));
 vi.mock('@/controllers/userController', () => ({ verifyAuthToken: vi.fn(async () => true), signInUser: vi.fn(), signOutUser: vi.fn() }));
 vi.mock('@/controllers/projectController', () => ({ getProject: vi.fn(async () => ({ id: 'p1' })), getAllProjects: vi.fn(async () => []), verifyDeploymentKey: vi.fn(async () => true), createProject: vi.fn(), updateProject: vi.fn(), deleteProject: vi.fn(), resetDeploymentKey: vi.fn(), setProjectAssignment: vi.fn(), syncProjectToRepoData: vi.fn() }));
@@ -98,6 +98,24 @@ describe('nsm logs route', () => {
     it('is leader-gated (follower forwards)', async () => {
         isLeader.mockReturnValue(false);
         const res = await request(app).get('/observability/nsm-logs').set('authorization', 'good');
+        expect(res.status).toBe(599);
+        expect(mForward).toHaveBeenCalled();
+    });
+});
+
+describe('structured log query routes', () => {
+    it('POST /observability/query runs on the leader', async () => {
+        const res = await request(app).post('/observability/query').set('authorization', 'good').send({ selector: { source: 'nsmd' }, startNs: '0', endNs: '9' });
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ entries: [] });
+    });
+    it('POST /observability/query 400s without a selector', async () => {
+        const res = await request(app).post('/observability/query').set('authorization', 'good').send({ startNs: '0', endNs: '9' });
+        expect(res.status).toBe(400);
+    });
+    it('POST /observability/facets is leader-gated (follower forwards)', async () => {
+        isLeader.mockReturnValue(false);
+        const res = await request(app).post('/observability/facets').set('authorization', 'good').send({ selector: { source: 'nsmd' }, startNs: '0', endNs: '9', fields: ['area'] });
         expect(res.status).toBe(599);
         expect(mForward).toHaveBeenCalled();
     });

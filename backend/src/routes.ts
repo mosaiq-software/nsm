@@ -10,7 +10,7 @@ import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
-import { queryLogs, queryMetric, queryNsmLogs, MetricKind } from '@/controllers/observabilityController';
+import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, MetricKind } from '@/controllers/observabilityController';
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
@@ -252,6 +252,31 @@ privateRouter.get(API_ROUTES.GET_NSM_LOGS, async (req, res) => {
     try {
         const { nodeId, start, end, limit } = req.query as Record<string, string>;
         res.status(200).json(await queryNsmLogs(nodeId || undefined, start, end, Number(limit) || 500));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Structured log query (Datadog-style viewer): selector + search + field filters + level + paging.
+// Leader-only, where the Loki stack lives; followers forward.
+privateRouter.post(API_ROUTES.POST_LOG_QUERY, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const body = req.body as API_BODY[API_ROUTES.POST_LOG_QUERY];
+        if (!body?.selector || !body.startNs || !body.endNs) return void res.status(400).send('selector, startNs and endNs are required');
+        res.status(200).json(await queryStructuredLogs(body));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Facet value counts for the same selector/filters, powering the viewer's facet sidebar.
+privateRouter.post(API_ROUTES.POST_LOG_FACETS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const body = req.body as API_BODY[API_ROUTES.POST_LOG_FACETS];
+        if (!body?.selector || !body.startNs || !body.endNs || !Array.isArray(body.fields)) return void res.status(400).send('selector, startNs, endNs and fields are required');
+        res.status(200).json(await queryLogFacets(body));
     } catch (e: any) {
         res.status(400).send(e.message);
     }

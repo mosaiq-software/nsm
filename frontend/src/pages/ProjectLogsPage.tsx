@@ -1,13 +1,14 @@
-import { ActionIcon, Alert, Card, Center, Code, Group, Loader, ScrollArea, SegmentedControl, Select, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Card, Center, Group, Loader, SegmentedControl, Select, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { LineChart } from '@mantine/charts';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance } from '@mosaiq/nsm-common/types';
+import { LogSelector, ObservabilityMetricsResult, Project, ProjectInstance } from '@mosaiq/nsm-common/types';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useAPI } from '@/utils/api';
 import { ProjectHeader } from '@/components/ProjectHeader';
+import { LogViewer } from '@/components/LogViewer/LogViewer';
 import { MdOutlineRefresh } from 'react-icons/md';
 
 type MetricKind = 'cpu' | 'mem' | 'net';
@@ -44,7 +45,6 @@ const ProjectLogsPage = () => {
     const [scope, setScope] = useState<string>(PROJECT_SCOPE);
     const [rangeMs, setRangeMs] = useState<number>(TIME_RANGES[1].ms);
     const [metric, setMetric] = useState<MetricKind>('cpu');
-    const [logs, setLogs] = useState<ObservabilityLogsResult | null>(null);
     const [metrics, setMetrics] = useState<ObservabilityMetricsResult | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -69,7 +69,7 @@ const ProjectLogsPage = () => {
         };
     }, [scope, project]);
 
-    const selector = useMemo((): { projectId?: string; projectInstanceId?: string; serviceInstanceId?: string } => {
+    const selector = useMemo((): LogSelector => {
         if (scope === PROJECT_SCOPE) return { projectId: projectId };
         if (scope.startsWith('service:')) return { serviceInstanceId: scope.slice('service:'.length) };
         return { projectInstanceId: scope };
@@ -81,11 +81,7 @@ const ProjectLogsPage = () => {
         const now = Date.now();
         const start = now - rangeMs;
         try {
-            const [logsRes, metricsRes] = await Promise.all([
-                api.get(API_ROUTES.GET_OBSERVABILITY_LOGS, {}, { ...selector, start: `${start * 1_000_000}`, end: `${now * 1_000_000}`, limit: 500 }),
-                api.get(API_ROUTES.GET_OBSERVABILITY_METRICS, {}, { ...selector, metric, start: `${Math.floor(start / 1000)}`, end: `${Math.floor(now / 1000)}`, step: '30s' }),
-            ]);
-            setLogs(logsRes ?? { lines: [] });
+            const metricsRes = await api.get(API_ROUTES.GET_OBSERVABILITY_METRICS, {}, { ...selector, metric, start: `${Math.floor(start / 1000)}`, end: `${Math.floor(now / 1000)}`, step: '30s' });
             setMetrics(metricsRes ?? { metric, series: [] });
         } finally {
             setLoading(false);
@@ -161,11 +157,11 @@ const ProjectLogsPage = () => {
                 <Group align="flex-end">
                     <Select label="Scope" data={scopeOptions} value={scope} onChange={(v) => setScope(v || PROJECT_SCOPE)} w={320} />
                     <Stack gap={2}>
-                        <Text fz="var(--input-label-size, var(--mantine-font-size-sm))">Time Range</Text>
+                        <Text fz="var(--input-label-size, var(--mantine-font-size-sm))">Metrics range</Text>
                         <SegmentedControl value={String(rangeMs)} onChange={(v) => setRangeMs(Number(v))} data={TIME_RANGES.map((r) => ({ value: String(r.ms), label: r.label }))} />
                     </Stack>
                 </Group>
-                <Tooltip label="Refresh">
+                <Tooltip label="Refresh metrics">
                     <ActionIcon variant="light" size="lg" onClick={refresh} loading={loading}>
                         <MdOutlineRefresh />
                     </ActionIcon>
@@ -194,30 +190,8 @@ const ProjectLogsPage = () => {
                 )}
             </Card>
 
-            <Card withBorder>
-                <Title order={5} mb="sm">
-                    Logs
-                </Title>
-                {!logs ? (
-                    <Center py="xl">
-                        <Loader />
-                    </Center>
-                ) : logs.lines.length === 0 ? (
-                    <Center py="xl">
-                        <Text c="dimmed">No logs for this selection.</Text>
-                    </Center>
-                ) : (
-                    <ScrollArea.Autosize mah={500} type="auto">
-                        <Code block>
-                            {logs.lines
-                                .slice()
-                                .reverse()
-                                .map((line) => `${new Date(Number(line.ts) / 1_000_000).toLocaleString()}  ${line.line}`)
-                                .join('\n')}
-                        </Code>
-                    </ScrollArea.Autosize>
-                )}
-            </Card>
+            <Title order={5}>Logs</Title>
+            <LogViewer selector={selector} facetFields={['serviceName', 'nodeId']} defaultColumns={['ts', 'serviceName', 'msg']} />
         </Stack>
     );
 };

@@ -1,4 +1,4 @@
-import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, GithubOwner, LogMessage, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, User } from './types';
+import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -38,6 +38,8 @@ export enum API_ROUTES {
     POST_PUSH_SUBSCRIBE = '/push/subscribe',
     POST_PUSH_UNSUBSCRIBE = '/push/unsubscribe',
     POST_REGENERATE_VAPID = '/push/vapid/regenerate',
+    POST_LOG_QUERY = '/observability/query',
+    POST_LOG_FACETS = '/observability/facets',
 }
 export interface API_PARAMS {
     //GET
@@ -76,6 +78,8 @@ export interface API_PARAMS {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: {};
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: {};
     [API_ROUTES.POST_REGENERATE_VAPID]: {};
+    [API_ROUTES.POST_LOG_QUERY]: {};
+    [API_ROUTES.POST_LOG_FACETS]: {};
 }
 export interface API_BODY {
     // Only POST
@@ -115,6 +119,8 @@ export interface API_BODY {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: PushSubscriptionJSON;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: { endpoint: string };
     [API_ROUTES.POST_REGENERATE_VAPID]: {};
+    [API_ROUTES.POST_LOG_QUERY]: LogQueryRequest;
+    [API_ROUTES.POST_LOG_FACETS]: LogFacetsRequest;
 }
 export interface API_RETURN {
     //GET
@@ -153,6 +159,8 @@ export interface API_RETURN {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: undefined;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: undefined;
     [API_ROUTES.POST_REGENERATE_VAPID]: { ok: boolean; reason?: string };
+    [API_ROUTES.POST_LOG_QUERY]: LogQueryResult | undefined;
+    [API_ROUTES.POST_LOG_FACETS]: LogFacetsResult | undefined;
 }
 
 export interface API_AUTH {
@@ -193,4 +201,6 @@ export interface API_AUTH {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: string;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: string;
     [API_ROUTES.POST_REGENERATE_VAPID]: string;
+    [API_ROUTES.POST_LOG_QUERY]: string;
+    [API_ROUTES.POST_LOG_FACETS]: string;
 }

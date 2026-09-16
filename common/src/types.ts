@@ -343,3 +343,78 @@ export interface ObservabilityMetricsResult {
     metric: string;
     series: { labels: { [k: string]: string }; values: ObservabilityMetricSample[] }[];
 }
+
+// === Structured log query (Datadog-style viewer) ===
+// Identifies which log stream to query. `source: 'nsmd'` targets the control-plane (pino JSON) logs;
+// the project selectors target a deployment's app-container logs (raw text). Mutually exclusive in
+// practice - the most specific one provided wins (see labelSelector precedence in the backend).
+export interface LogSelector {
+    source?: 'nsmd';
+    projectId?: string;
+    projectInstanceId?: string;
+    serviceInstanceId?: string;
+}
+
+// A structured filter applied to a parsed field after `| json` (e.g. area="reconcile"). `field` is a
+// pino/JSON field name or a Loki label; `op` maps to LogQL label-filter operators.
+export interface LogFilter {
+    field: string;
+    op: 'eq' | 'neq' | 'match' | 'nmatch';
+    value: string;
+}
+
+export interface LogQueryRequest {
+    selector: LogSelector;
+    startNs: string;
+    endNs: string;
+    // Free-text search -> LogQL line filter (|=).
+    search?: string;
+    // Structured field filters -> LogQL label filters after `| json`.
+    filters?: LogFilter[];
+    // Minimum pino numeric level (10 trace, 20 debug, 30 info, 40 warn, 50 error, 60 fatal).
+    levelMin?: number;
+    // Page size.
+    limit?: number;
+    // Backward pagination cursor: return entries strictly older than this nanosecond timestamp.
+    cursorNs?: string;
+}
+
+// A single log entry. `fields` is the parsed JSON object for pino/nsmd logs (absent for raw text).
+export interface LogEntry {
+    ts: string;
+    line: string;
+    labels: { [k: string]: string };
+    fields?: { [k: string]: unknown };
+}
+
+export interface LogQueryResult {
+    entries: LogEntry[];
+    // Cursor to pass as `cursorNs` to fetch the next (older) page; absent when no more entries.
+    nextCursorNs?: string;
+}
+
+export interface LogFacetsRequest {
+    selector: LogSelector;
+    startNs: string;
+    endNs: string;
+    search?: string;
+    filters?: LogFilter[];
+    levelMin?: number;
+    // Fields to compute value counts for (e.g. ['level','area','action','nodeId']).
+    fields: string[];
+}
+
+export interface LogFacetValue {
+    value: string;
+    count: number;
+}
+
+export interface LogFacet {
+    field: string;
+    values: LogFacetValue[];
+}
+
+export interface LogFacetsResult {
+    facets: LogFacet[];
+    total: number;
+}

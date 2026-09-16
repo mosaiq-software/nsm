@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, Mock } from 'vitest';
-import { queryLogs, queryMetric, queryNsmLogs } from '@/controllers/observabilityController';
+import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets } from '@/controllers/observabilityController';
 import { config } from '@/config';
 
 let fetchMock: Mock;
@@ -62,6 +62,56 @@ describe('queryNsmLogs', () => {
     it('throws on a non-ok Loki response', async () => {
         fetchMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
         await expect(queryNsmLogs(undefined, '0', '9')).rejects.toThrow(/loki 503/);
+    });
+});
+
+describe('queryStructuredLogs', () => {
+    it('builds an nsmd query with search, json, field filter and level floor, newest-first', async () => {
+        fetchMock.mockResolvedValue(
+            ok({ data: { result: [{ stream: { source: 'nsmd' }, values: [['100', '{"level":30,"msg":"a"}'], ['300', '{"level":40,"msg":"b"}']] }] } })
+        );
+        const res = await queryStructuredLogs({ selector: { source: 'nsmd' }, startNs: '0', endNs: '9', search: 'oops', filters: [{ field: 'area', op: 'eq', value: 'reconcile' }], levelMin: 40, limit: 200 });
+        const url = decodeURIComponent(fetchMock.mock.calls[0][0] as string);
+        expect(url).toContain('{source="nsmd"} |= "oops" | json | area="reconcile" | level >= 40');
+        expect(res.entries.map((e) => e.ts)).toEqual(['300', '100']);
+        expect(res.entries[0].fields).toEqual({ level: 40, msg: 'b' });
+        expect(res.nextCursorNs).toBeUndefined();
+    });
+
+    it('builds a project query without json, using a label match filter', async () => {
+        fetchMock.mockResolvedValue(ok({ data: { result: [] } }));
+        await queryStructuredLogs({ selector: { serviceInstanceId: 's1' }, startNs: '0', endNs: '9', filters: [{ field: 'serviceName', op: 'match', value: 'web|api' }] });
+        const url = decodeURIComponent(fetchMock.mock.calls[0][0] as string);
+        expect(url).toContain('{serviceInstanceId="s1"} | serviceName=~"web|api"');
+        expect(url).not.toContain('| json');
+    });
+
+    it('escapes double quotes in the search term', async () => {
+        fetchMock.mockResolvedValue(ok({ data: { result: [] } }));
+        await queryStructuredLogs({ selector: { source: 'nsmd' }, startNs: '0', endNs: '9', search: 'say "hi"' });
+        expect(decodeURIComponent(fetchMock.mock.calls[0][0] as string)).toContain('|= "say \\"hi\\""');
+    });
+
+    it('advertises a nextCursorNs one ns before the oldest when the page is full', async () => {
+        fetchMock.mockResolvedValue(ok({ data: { result: [{ stream: {}, values: [['300', '{}'], ['200', '{}']] }] } }));
+        const res = await queryStructuredLogs({ selector: { source: 'nsmd' }, startNs: '0', endNs: '9', limit: 2 });
+        expect(res.nextCursorNs).toBe('199');
+    });
+});
+
+describe('queryLogFacets', () => {
+    it('aggregates facet counts via count_over_time and sorts descending', async () => {
+        fetchMock.mockResolvedValueOnce(ok({ data: { result: [{ metric: { area: 'reconcile' }, value: [0, '5'] }, { metric: { area: 'deploy' }, value: [0, '12'] }] } }));
+        fetchMock.mockResolvedValueOnce(ok({ data: { result: [{ metric: {}, value: [0, '17'] }] } }));
+        const res = await queryLogFacets({ selector: { source: 'nsmd' }, startNs: '0', endNs: '60000000000', fields: ['area'] });
+        const url = decodeURIComponent(fetchMock.mock.calls[0][0] as string);
+        expect(url).toContain('sum by (area) (count_over_time({source="nsmd"} | json [60s]))');
+        expect(res.facets[0].values).toEqual([{ value: 'deploy', count: 12 }, { value: 'reconcile', count: 5 }]);
+        expect(res.total).toBe(17);
+    });
+
+    it('rejects field names that are not identifiers (injection guard)', async () => {
+        await expect(queryLogFacets({ selector: { source: 'nsmd' }, startNs: '0', endNs: '9', fields: ['area; bad'] })).rejects.toThrow(/invalid field/);
     });
 });
 
