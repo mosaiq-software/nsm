@@ -110,6 +110,33 @@ describe('queryLogFacets', () => {
         expect(res.total).toBe(17);
     });
 
+    it("excludes a field's own selections from its facet counts but keeps other groups' filters", async () => {
+        fetchMock.mockResolvedValue(ok({ data: { result: [] } }));
+        await queryLogFacets({
+            selector: { source: 'nsmd' },
+            startNs: '0',
+            endNs: '60000000000',
+            fields: ['level', 'area'],
+            filters: [
+                { field: 'level', op: 'match', value: '20|50' },
+                { field: 'area', op: 'eq', value: 'push' },
+            ],
+            levelMin: 30,
+        });
+        const levelUrl = decodeURIComponent(fetchMock.mock.calls[0][0] as string);
+        const areaUrl = decodeURIComponent(fetchMock.mock.calls[1][0] as string);
+        // The level facet drops the level selection AND the level floor, but keeps the area filter.
+        expect(levelUrl).toContain('sum by (level) (count_over_time({source="nsmd"} | json | area="push" [60s]))');
+        expect(levelUrl).not.toContain('level=~');
+        expect(levelUrl).not.toContain('level >=');
+        // The area facet drops the area selection but keeps the level filters (from other groups).
+        expect(areaUrl).toContain('sum by (area) (count_over_time({source="nsmd"} | json | level=~"20|50" | level >= 30 [60s]))');
+        expect(areaUrl).not.toContain('area=');
+        // Total applies every filter (all groups ANDed).
+        const totalUrl = decodeURIComponent(fetchMock.mock.calls[2][0] as string);
+        expect(totalUrl).toContain('sum (count_over_time({source="nsmd"} | json | level=~"20|50" | area="push" | level >= 30 [60s]))');
+    });
+
     it('rejects field names that are not identifiers (injection guard)', async () => {
         await expect(queryLogFacets({ selector: { source: 'nsmd' }, startNs: '0', endNs: '9', fields: ['area; bad'] })).rejects.toThrow(/invalid field/);
     });

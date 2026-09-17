@@ -155,12 +155,17 @@ const lokiInstantVector = async (expr: string, timeNs: string): Promise<{ metric
 };
 
 export const queryLogFacets = async (req: LogFacetsRequest): Promise<LogFacetsResult> => {
-    const pipeline = buildLogPipeline(req.selector, req.search, req.filters, req.levelMin);
     const range = `${rangeSeconds(req.startNs, req.endNs)}s`;
 
+    // Facet counts for a field must ignore that field's own selections, otherwise picking one value
+    // (e.g. level=debug) collapses the group to that single value and hides the other options the
+    // user would OR against. Filters from *other* groups still apply (AND across groups).
     const facets: LogFacet[] = await Promise.all(
         (req.fields || []).map(async (rawField) => {
             const field = assertField(rawField);
+            const otherFilters = (req.filters || []).filter((f) => f.field !== field);
+            const levelMin = field === 'level' ? undefined : req.levelMin;
+            const pipeline = buildLogPipeline(req.selector, req.search, otherFilters, levelMin);
             const expr = `sum by (${field}) (count_over_time(${pipeline} [${range}]))`;
             const vec = await lokiInstantVector(expr, req.endNs);
             const values = vec
@@ -172,7 +177,9 @@ export const queryLogFacets = async (req: LogFacetsRequest): Promise<LogFacetsRe
         })
     );
 
-    const totalVec = await lokiInstantVector(`sum (count_over_time(${pipeline} [${range}]))`, req.endNs);
+    // Total reflects the fully-filtered result set (all groups ANDed together).
+    const fullPipeline = buildLogPipeline(req.selector, req.search, req.filters, req.levelMin);
+    const totalVec = await lokiInstantVector(`sum (count_over_time(${fullPipeline} [${range}]))`, req.endNs);
     const total = totalVec.length ? totalVec[0].value : 0;
     return { facets, total };
 };
