@@ -34,11 +34,26 @@ export const execSafe = async (command: string, timeoutMs?: number, env?: NodeJS
     return { out, code };
 };
 
-// Streams stdout/stderr to onData as it arrives; enforces a hard timeout via child.kill().
-export const execStream = async (command: string, timeoutMs: number, onData?: (data: string) => void, env?: NodeJS.ProcessEnv): Promise<{ out: string; code: number }> => {
+// Streams stdout/stderr to onData as it arrives; enforces a hard timeout via child.kill(). The
+// optional onSpawn hook hands the caller the spawned child so it can be killed early (e.g. to cancel
+// an in-flight deployment before its timeout elapses).
+export const execStream = async (
+    command: string,
+    timeoutMs: number,
+    onData?: (data: string) => void,
+    env?: NodeJS.ProcessEnv,
+    onSpawn?: (child: child_process.ChildProcess) => void
+): Promise<{ out: string; code: number }> => {
     return new Promise((resolve) => {
         let out = '';
         const child = child_process.spawn(command, { shell: true, stdio: ['ignore', 'pipe', 'pipe'], env });
+        if (onSpawn) {
+            try {
+                onSpawn(child);
+            } catch {
+                /* ignore consumer errors */
+            }
+        }
 
         const timer = setTimeout(() => {
             try {

@@ -1,6 +1,7 @@
 import { DeploymentState } from '@mosaiq/nsm-common/types';
 import { DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 import { getGitHttpsUri, getGitSshUri } from '@mosaiq/nsm-common/gitUtils';
+import type { ChildProcess } from 'child_process';
 import * as fs from 'fs/promises';
 import YAML from 'yaml';
 import { composeChildEnv, config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
@@ -12,6 +13,28 @@ import { releasePorts, waitPortReady } from './ports';
 import { teardownGenerationLocal } from './teardown';
 import { deployLogger } from '@/utils/log';
 import { deploysTotal, deployDuration, errorsTotal } from '@/utils/metrics';
+
+// In-flight `docker compose up` child per project on THIS host, so a build can be killed before its
+// timeout elapses when its deployment is cancelled.
+const inFlightDeployChildren = new Map<string, ChildProcess>();
+// Projects whose in-flight deployment has been asked to cancel. Consulted so applyDeployment's
+// failure path reports CANCELLED (not FAILED) and the readiness gate bails out early.
+const canceledDeployProjects = new Set<string>();
+
+// Cancel a deployment currently being applied on THIS host: flag it (so applyDeployment's failure
+// path reports CANCELLED and the readiness gate stops polling) and SIGKILL the in-flight compose
+// build. The existing failure/rollback path in applyDeployment then tears down the partial stack.
+export const cancelLocalDeployment = (projectId: string): void => {
+    canceledDeployProjects.add(projectId);
+    const child = inFlightDeployChildren.get(projectId);
+    if (child) {
+        try {
+            child.kill('SIGKILL');
+        } catch {
+            /* ignore */
+        }
+    }
+};
 
 // Compose project name for a deployment. Zero-downtime deploys are generation-scoped so the new
 // (blue) generation can run alongside the old (green) one; the legacy in-place path keeps the bare
@@ -63,12 +86,20 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
         dlog.info({ action: 'deploy_completed', generation: dep.generation, zeroDowntime }, 'deployment completed');
         return true;
     } catch (error: any) {
-        await reportDeploymentLog(dep.logId, DeploymentState.FAILED, `Failed to deploy project: ${error.message}\n`);
-        deploysTotal.inc({ result: 'failure' });
-        errorsTotal.inc({ area: 'deploy' });
-        dlog.error({ action: 'deploy_failed', generation: dep.generation, err: error?.message }, 'deployment failed');
-        // Roll back the failed blue stack so it never lingers holding ports; the old generation is
-        // untouched and keeps serving (automatic rollback). teardownGenerationLocal is a no-op in dev.
+        const canceled = canceledDeployProjects.has(dep.projectId);
+        if (canceled) {
+            await reportDeploymentLog(dep.logId, DeploymentState.CANCELLED, 'Deployment cancelled.\n');
+            deploysTotal.inc({ result: 'cancelled' });
+            dlog.info({ action: 'deploy_cancelled', generation: dep.generation }, 'deployment cancelled');
+        } else {
+            await reportDeploymentLog(dep.logId, DeploymentState.FAILED, `Failed to deploy project: ${error.message}\n`);
+            deploysTotal.inc({ result: 'failure' });
+            errorsTotal.inc({ area: 'deploy' });
+            dlog.error({ action: 'deploy_failed', generation: dep.generation, err: error?.message }, 'deployment failed');
+        }
+        // Roll back the failed/cancelled blue stack so it never lingers holding ports; the old
+        // generation is untouched and keeps serving (automatic rollback). teardownGenerationLocal is
+        // a no-op in dev.
         if (zeroDowntime) {
             try {
                 await teardownGenerationLocal(dep.projectId, dep.generation);
@@ -80,6 +111,8 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
         releasePorts(allocatedPorts);
         return false;
     } finally {
+        canceledDeployProjects.delete(dep.projectId);
+        inFlightDeployChildren.delete(dep.projectId);
         endTimer();
     }
 };
@@ -165,8 +198,10 @@ const runDeploymentCommand = async (dep: DesiredDeployment): Promise<void> => {
         (data) => {
             void reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, data);
         },
-        composeChildEnv()
+        composeChildEnv(),
+        (child) => inFlightDeployChildren.set(dep.projectId, child)
     );
+    inFlightDeployChildren.delete(dep.projectId);
     if (code !== 0) throw new Error(`Deployment command exited with code ${code}: ${out}`);
     await reportDeploymentLog(dep.logId, DeploymentState.DEPLOYING, 'Deployment command completed successfully.\n');
 };
@@ -186,6 +221,7 @@ const runReadinessGate = async (dep: DesiredDeployment): Promise<boolean> => {
     }
 
     for (const p of dep.ports || []) {
+        if (canceledDeployProjects.has(dep.projectId)) return false;
         const remaining = deadline - Date.now();
         if (remaining <= 0) return false;
         const ok = await waitPortReady(p.port, remaining, p.readinessPath);
@@ -217,6 +253,7 @@ const waitForComposeHealthy = async (dep: DesiredDeployment, deadline: number): 
     if (!services.length) return true; // nothing to gate on; the port probe is the readiness signal
     const project = composeProjectName(dep);
     while (Date.now() < deadline) {
+        if (canceledDeployProjects.has(dep.projectId)) return false;
         const ids = await composeContainerIds(project, dep);
         if (ids.length) {
             const statuses = await Promise.all(ids.map((id) => containerHealth(id)));

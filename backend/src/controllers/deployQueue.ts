@@ -17,6 +17,15 @@ let queue: DeployQueueEntry[] = [];
 let active: (DeployQueueEntry & { startedAt: number }) | null = null;
 let draining = false;
 
+// Instances flagged for cancellation while still in the leader's queue/planning phase. Consulted by
+// drainQueue (skip a flagged entry before dequeue) and by deployProject (abort before it proposes
+// the desired deployment). The building phase is cancelled on the owning node, not via this set.
+const canceledInstances = new Set<string>();
+export const isInstanceCanceled = (instanceId: string): boolean => canceledInstances.has(instanceId);
+export const clearInstanceCanceled = (instanceId: string): void => {
+    canceledInstances.delete(instanceId);
+};
+
 // Delay inserted between consecutive deploys to space out queue processing.
 const INTER_DEPLOY_DELAY_MS = 30_000;
 
@@ -69,6 +78,11 @@ const drainQueue = async (): Promise<void> => {
             if (!first) await delay(INTER_DEPLOY_DELAY_MS);
             first = false;
             const entry = queue.shift()!;
+            if (canceledInstances.has(entry.instanceId)) {
+                clearInstanceCanceled(entry.instanceId);
+                queueLog.info({ action: 'deploy_skip_canceled', projectId: entry.projectId, instanceId: entry.instanceId }, `skipping canceled deploy for ${entry.projectId}`);
+                continue;
+            }
             active = { ...entry, startedAt: Date.now() };
             queueLog.info({ action: 'deploy_dequeued', projectId: entry.projectId, instanceId: entry.instanceId, queueDepth: queue.length }, `dequeued deploy for ${entry.projectId}`);
             try {
@@ -88,9 +102,31 @@ const drainQueue = async (): Promise<void> => {
     }
 };
 
+// Cancel a deploy that has not yet been handed to its node. Returns which phase it was in:
+//   'queued'   - still waiting: removed from the queue and marked CANCELLED here (fully handled).
+//   'planning' - occupying the leader's planning slot: flagged so deployProject aborts before it
+//                proposes the desired deployment. The caller finishes the cancel.
+//   'none'     - not in the queue or planning slot: it is already building on its node.
+export const cancelQueuedDeploy = async (projectId: string): Promise<'queued' | 'planning' | 'none'> => {
+    const idx = queue.findIndex((e) => e.projectId === projectId);
+    if (idx >= 0) {
+        const [entry] = queue.splice(idx, 1);
+        queueLog.info({ action: 'deploy_cancel_queued', projectId, instanceId: entry.instanceId, queueDepth: queue.length }, `cancelled queued deploy for ${projectId}`);
+        await updateDeploymentLog(entry.instanceId, DeploymentState.CANCELLED, 'Deployment cancelled while queued.\n').catch(() => {});
+        return 'queued';
+    }
+    if (active?.projectId === projectId) {
+        canceledInstances.add(active.instanceId);
+        queueLog.info({ action: 'deploy_cancel_planning', projectId, instanceId: active.instanceId }, `flagged planning deploy for ${projectId} to cancel`);
+        return 'planning';
+    }
+    return 'none';
+};
+
 export const getDeployQueueState = (): DeployQueueState => ({
     active: active ? { ...active } : null,
     queued: queue.map((e) => ({ ...e })),
+    deploying: [],
 });
 
 // On leader startup, re-enqueue any ProjectInstances left in QUEUED (the in-memory queue is lost on

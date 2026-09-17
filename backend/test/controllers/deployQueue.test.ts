@@ -3,16 +3,18 @@ import { resetDb } from '../helpers/db';
 
 vi.mock('@/cluster/node', () => ({ cluster: { isLeader: vi.fn(() => true) } }));
 vi.mock('@/controllers/projectController', () => ({ getProject: vi.fn() }));
-vi.mock('@/controllers/deployController', () => ({ deployProject: vi.fn(), updateDeploymentLog: vi.fn() }));
+vi.mock('@/controllers/deployController', () => ({ deployProject: vi.fn(), updateDeploymentLog: vi.fn(async () => {}) }));
 
 import { getProject } from '@/controllers/projectController';
 import { deployProject } from '@/controllers/deployController';
-import { enqueueDeploy, getDeployQueueState, recoverDeployQueue } from '@/controllers/deployQueue';
+import { cancelQueuedDeploy, enqueueDeploy, getDeployQueueState, recoverDeployQueue } from '@/controllers/deployQueue';
+import { updateDeploymentLog } from '@/controllers/deployController';
 import { createProjectInstanceModel, getProjectInstanceByIdModel } from '@/persistence/projectInstancePersistence';
 import { DeploymentState } from '@mosaiq/nsm-common/types';
 
 const mockGetProject = getProject as unknown as Mock;
 const mockDeploy = deployProject as unknown as Mock;
+const mockUpdateLog = updateDeploymentLog as unknown as Mock;
 
 // Delay the queue inserts between consecutive deploys; tests advance past it with fake timers.
 const INTER_DEPLOY_DELAY_MS = 30_000;
@@ -121,5 +123,29 @@ describe('deploy queue serialization', () => {
         await recoverDeployQueue();
         await flush();
         expect(started).toContain('pr');
+    });
+});
+
+describe('deploy queue cancellation', () => {
+    it('cancels a queued project: removes it and marks it CANCELLED', async () => {
+        await enqueueDeploy('p1'); // becomes active (parked)
+        const p2id = await enqueueDeploy('p2'); // queued behind p1
+        expect(getDeployQueueState().queued.map((e) => e.projectId)).toEqual(['p2']);
+
+        const phase = await cancelQueuedDeploy('p2');
+        expect(phase).toBe('queued');
+        expect(getDeployQueueState().queued).toEqual([]);
+        expect(mockUpdateLog).toHaveBeenCalledWith(p2id, DeploymentState.CANCELLED, expect.stringContaining('cancelled'));
+    });
+
+    it('flags the actively-planning project as planning without touching the queue', async () => {
+        await enqueueDeploy('p1'); // active/planning
+        const phase = await cancelQueuedDeploy('p1');
+        expect(phase).toBe('planning');
+        expect(getDeployQueueState().active?.projectId).toBe('p1');
+    });
+
+    it('returns none for a project that is neither queued nor planning', async () => {
+        expect(await cancelQueuedDeploy('ghost')).toBe('none');
     });
 });

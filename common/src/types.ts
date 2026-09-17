@@ -59,6 +59,7 @@ export enum DeploymentState {
     DEPLOYED = 'deployed',
     HEALTHY = 'healthy',
     DESTROYING = 'destroying',
+    CANCELLED = 'cancelled',
 }
 
 export interface DeployableProject {
@@ -116,11 +117,14 @@ export interface DeployQueueEntry {
     enqueuedAt: number;
 }
 
-// Snapshot of the leader's deploy queue: at most one entry deploys at a time (`active`), the rest
-// wait in `queued` order.
+// Snapshot of the leader's deploy queue: at most one entry occupies the leader's planning slot
+// (`active`), the rest wait in `queued` order. `deploying` lists the instances actually being built
+// on their assigned nodes (ProjectInstances in DEPLOYING state) - this outlives the brief planning
+// slot, so the UI can pin a "Deploying" row for the whole build.
 export interface DeployQueueState {
     active: (DeployQueueEntry & { startedAt: number }) | null;
     queued: DeployQueueEntry[];
+    deploying: (DeployQueueEntry & { startedAt: number })[];
 }
 
 export interface ClusterStatus {

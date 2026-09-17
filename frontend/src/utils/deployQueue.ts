@@ -7,6 +7,8 @@ export type DeployQueueStatus = { state: 'active' | 'queued' | null; position: n
 export const deployQueueStatusFor = (status: ClusterStatus | null | undefined, projectId: string): DeployQueueStatus => {
     const queue = status?.deployQueue;
     if (!queue) return { state: null, position: 0 };
+    // `deploying` reflects the full build (not just the brief leader planning slot in `active`).
+    if (queue.deploying?.some((e) => e.projectId === projectId)) return { state: 'active', position: 0 };
     if (queue.active?.projectId === projectId) return { state: 'active', position: 0 };
     const idx = queue.queued.findIndex((e) => e.projectId === projectId);
     if (idx >= 0) return { state: 'queued', position: idx + 1 };

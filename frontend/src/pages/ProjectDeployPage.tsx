@@ -7,7 +7,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { MdOutlineCheckBox, MdOutlineDelete, MdOutlineInsertLink, MdOutlineKey, MdOutlineRefresh, MdOutlineRocketLaunch } from 'react-icons/md';
+import { MdOutlineCancel, MdOutlineCheckBox, MdOutlineDelete, MdOutlineInsertLink, MdOutlineKey, MdOutlineRefresh, MdOutlineRocketLaunch } from 'react-icons/md';
 import { ConsoleLog } from '@/components/ConsoleLog';
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 import { deployQueueStatusFor } from '@/utils/deployQueue';
@@ -20,7 +20,7 @@ const ProjectDeployPage = () => {
     const projectCtx = useProjects();
     const clusterCtx = useCluster();
     const [project, setProject] = useState<Project | undefined | null>(undefined);
-    const [modal, setModal] = useState<'reset-key' | 'deploy' | 'teardown' | null>(null);
+    const [modal, setModal] = useState<'reset-key' | 'deploy' | 'teardown' | 'cancel' | null>(null);
     const [openProjectInstance, setOpenProjectInstance] = useState<string | null>(null);
     const [currentProjectInstanceId, setCurrentProjectInstanceId] = useState<string | undefined>(undefined);
     const [currentProjectInstance, setCurrentProjectInstance] = useState<ProjectInstance | undefined>(undefined);
@@ -95,6 +95,17 @@ const ProjectDeployPage = () => {
         notifications.show({ message: 'Teardown requested', color: 'green' });
     };
 
+    const handleCancelDeploy = async () => {
+        if (!project) return;
+        notifications.show({ message: 'Cancelling deployment...', color: 'orange' });
+        try {
+            await api.post(API_ROUTES.POST_CANCEL_DEPLOY, { projectId: project.id }, {});
+            notifications.show({ message: 'Deployment cancellation requested', color: 'green' });
+        } catch {
+            notifications.show({ message: 'Failed to cancel deployment', color: 'red' });
+        }
+    };
+
     const queueStatus = deployQueueStatusFor(clusterCtx.status, project.id);
     const inQueue = queueStatus.state !== null;
     const canDeploy = project.hasDockerCompose && clusterCtx.hasLeader && !inQueue && project.state !== DeploymentState.DEPLOYING && project.state !== DeploymentState.DESTROYING;
@@ -149,6 +160,31 @@ const ProjectDeployPage = () => {
                     </Group>
                 </Stack>
             </Modal>
+            <Modal opened={modal === 'cancel'} onClose={() => setModal(null)} withCloseButton={false}>
+                <Stack>
+                    <Title order={3}>Cancel Deployment</Title>
+                    <Text>
+                        Are you sure you want to cancel the in-progress deployment?
+                        <br />
+                        It will stop building immediately. Any previously deployed version keeps running.
+                    </Text>
+                    <Group justify="space-between">
+                        <Button variant="filled" onClick={() => setModal(null)}>
+                            No. Keep Deploying.
+                        </Button>
+                        <Button
+                            variant="light"
+                            color="red"
+                            onClick={() => {
+                                handleCancelDeploy();
+                                setModal(null);
+                            }}
+                        >
+                            Yes. Cancel The Deployment.
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
             <Modal opened={modal === 'teardown'} onClose={() => setModal(null)} withCloseButton={false}>
                 <Stack>
                     <Title order={3}>Teardown Project</Title>
@@ -184,6 +220,11 @@ const ProjectDeployPage = () => {
                     <Text size="sm" c="dimmed">
                         {queueStatus.state === 'active' ? 'Deploying now.' : `Waiting in queue (position ${queueStatus.position}).`}
                     </Text>
+                )}
+                {inQueue && (
+                    <Button onClick={() => setModal('cancel')} variant="light" color="orange" leftSection={<MdOutlineCancel />}>
+                        Cancel Deploy
+                    </Button>
                 )}
                 <Button onClick={() => setModal('teardown')} variant="light" color="red" leftSection={<MdOutlineDelete />} disabled={!clusterCtx.hasLeader || project.state === DeploymentState.DESTROYING}>
                     Teardown

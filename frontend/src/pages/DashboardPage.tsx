@@ -2,10 +2,13 @@ import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useUser } from '@/contexts/user-context';
 import { Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { DeploymentState } from '@mosaiq/nsm-common/types';
+import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
+import { useAPI } from '@/utils/api';
 
 const stateColor = (state?: DeploymentState) => {
     switch (state) {
@@ -18,6 +21,8 @@ const stateColor = (state?: DeploymentState) => {
             return 'grape';
         case DeploymentState.FAILED:
             return 'red';
+        case DeploymentState.CANCELLED:
+            return 'gray';
         case DeploymentState.DESTROYING:
             return 'orange';
         default:
@@ -39,6 +44,7 @@ const DashboardPage = () => {
     const projectCtx = useProjects();
     const clusterCtx = useCluster();
     const navigate = useNavigate();
+    const api = useAPI();
 
     useEffect(() => {
         if (token) {
@@ -47,9 +53,24 @@ const DashboardPage = () => {
         }
     }, [token]);
 
+    const handleCancelDeploy = async (projectId: string) => {
+        notifications.show({ message: `Cancelling deployment of ${projectId}...`, color: 'orange' });
+        try {
+            await api.post(API_ROUTES.POST_CANCEL_DEPLOY, { projectId }, {});
+            notifications.show({ message: `Cancelled deployment of ${projectId}`, color: 'green' });
+        } catch {
+            notifications.show({ message: `Failed to cancel deployment of ${projectId}`, color: 'red' });
+        }
+    };
+
     const reachable = clusterCtx.status?.health.filter((h) => h.reachable).length ?? 0;
     const deployQueue = clusterCtx.status?.deployQueue;
-    const queueCount = (deployQueue?.active ? 1 : 0) + (deployQueue?.queued.length ?? 0);
+    const deploying = deployQueue?.deploying ?? [];
+    // Include the leader planning slot only if it isn't already reflected in `deploying`.
+    const active = deployQueue?.active && !deploying.some((d) => d.projectId === deployQueue.active!.projectId) ? deployQueue.active : null;
+    const deployingRows = [...(active ? [active] : []), ...deploying];
+    const queued = deployQueue?.queued ?? [];
+    const queueCount = deployingRows.length + queued.length;
 
     return (
         <Stack>
@@ -109,11 +130,12 @@ const DashboardPage = () => {
                                     <Table.Th w={110}>Position</Table.Th>
                                     <Table.Th>Project</Table.Th>
                                     <Table.Th>Since</Table.Th>
+                                    <Table.Th w={110} />
                                 </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
-                                {deployQueue?.active && (
-                                    <Table.Tr key={deployQueue.active.instanceId} onClick={() => navigate(`/p/${deployQueue.active!.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
+                                {deployingRows.map((entry) => (
+                                    <Table.Tr key={entry.instanceId} onClick={() => navigate(`/p/${entry.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
                                         <Table.Td>
                                             <Group gap={6} wrap="nowrap">
                                                 <Loader size="xs" />
@@ -123,12 +145,25 @@ const DashboardPage = () => {
                                             </Group>
                                         </Table.Td>
                                         <Table.Td>
-                                            <Text fw={600}>{deployQueue.active.projectId}</Text>
+                                            <Text fw={600}>{entry.projectId}</Text>
                                         </Table.Td>
-                                        <Table.Td>{relativeTime(deployQueue.active.startedAt)}</Table.Td>
+                                        <Table.Td>{relativeTime(entry.startedAt)}</Table.Td>
+                                        <Table.Td>
+                                            <Button
+                                                size="compact-xs"
+                                                color="red"
+                                                variant="light"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleCancelDeploy(entry.projectId);
+                                                }}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        </Table.Td>
                                     </Table.Tr>
-                                )}
-                                {deployQueue?.queued.map((entry, idx) => (
+                                ))}
+                                {queued.map((entry, idx) => (
                                     <Table.Tr key={entry.instanceId} onClick={() => navigate(`/p/${entry.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
                                         <Table.Td>
                                             <Badge color="grape" variant="light">
@@ -139,6 +174,19 @@ const DashboardPage = () => {
                                             <Text fw={600}>{entry.projectId}</Text>
                                         </Table.Td>
                                         <Table.Td>queued {relativeTime(entry.enqueuedAt)}</Table.Td>
+                                        <Table.Td>
+                                            <Button
+                                                size="compact-xs"
+                                                color="red"
+                                                variant="light"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleCancelDeploy(entry.projectId);
+                                                }}
+                                            >
+                                                Cancel
+                                            </Button>
+                                        </Table.Td>
                                     </Table.Tr>
                                 ))}
                             </Table.Tbody>

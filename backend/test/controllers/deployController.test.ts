@@ -13,7 +13,7 @@ import { cluster } from '@/cluster/node';
 import { getProject, syncProjectToRepoData } from '@/controllers/projectController';
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
 import { postToNode } from '@/cluster/leaderClient';
-import { deployProject, teardownProject, updateDeploymentLog, planLocally, promoteDeployment } from '@/controllers/deployController';
+import { deployProject, teardownProject, updateDeploymentLog, planLocally, promoteDeployment, cancelDeploy } from '@/controllers/deployController';
 import { NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_MANAGED, NSM_LABEL_PROJECT_ID } from '@/constants';
 import { OpType, DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 import { DeploymentState, DockerStatus, NginxConfigLocationType, Project } from '@mosaiq/nsm-common/types';
@@ -211,6 +211,58 @@ describe('teardownProject', () => {
         await teardownProject('p1');
         expect((await getProjectInstanceByIdModel('i1'))?.active).toBe(false);
         expect(proposedOps().some((o) => o.type === OpType.CLEAR_DESIRED_DEPLOYMENT)).toBe(true);
+    });
+});
+
+describe('cancelDeploy', () => {
+    const desiredWith = (over: Partial<DesiredDeployment>): DesiredDeployment => ({
+        projectId: 'p1',
+        generation: 1,
+        assignedNodeId: 'n1',
+        repoOwner: 'o',
+        repoName: 'r',
+        timeout: 1,
+        logId: 'iDep',
+        dotenv: '',
+        compose: '',
+        nginxConf: 'NEW',
+        domains: ['new.com'],
+        services: [],
+        zeroDowntime: true,
+        ports: [],
+        ...over,
+    });
+
+    it('throws when not the leader', async () => {
+        isLeader.mockReturnValue(false);
+        await expect(cancelDeploy('p1')).rejects.toThrow(/leader/);
+    });
+
+    it('rolls the desired state back to the previously-serving generation and cancels on the node', async () => {
+        mockGetProject.mockResolvedValue(baseProject());
+        await upsertDesiredDeploymentModel(desiredWith({ generation: 3, activeGeneration: 2, activeNginxConf: 'OLD', activeDomains: ['old.com'] }));
+        await createProjectInstanceModel({ id: 'iDep', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DEPLOYING, created: 1, lastUpdated: 1, active: true, directories: {} });
+
+        await cancelDeploy('p1');
+
+        const op = proposedOps().find((o) => o.type === OpType.SET_DESIRED_DEPLOYMENT);
+        expect(op.deployment.generation).toBe(2);
+        expect(op.deployment.nginxConf).toBe('OLD');
+        expect(op.deployment.domains).toEqual(['old.com']);
+        expect(mockPostToNode).toHaveBeenCalledWith('10.0.0.2', 5, '/node/cancel-deploy', { projectId: 'p1' });
+        expect((await getProjectInstanceByIdModel('iDep'))?.state).toBe(DeploymentState.CANCELLED);
+    });
+
+    it('clears the desired state for a first-ever deploy with nothing serving', async () => {
+        mockGetProject.mockResolvedValue(baseProject());
+        await upsertDesiredDeploymentModel(desiredWith({ generation: 1, activeGeneration: undefined }));
+        await createProjectInstanceModel({ id: 'iDep', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DEPLOYING, created: 1, lastUpdated: 1, active: true, directories: {} });
+
+        await cancelDeploy('p1');
+
+        expect(proposedOps().some((o) => o.type === OpType.CLEAR_DESIRED_DEPLOYMENT)).toBe(true);
+        expect(proposedOps().some((o) => o.type === OpType.SET_DESIRED_DEPLOYMENT)).toBe(false);
+        expect((await getProjectInstanceByIdModel('iDep'))?.state).toBe(DeploymentState.CANCELLED);
     });
 });
 

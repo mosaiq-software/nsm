@@ -28,6 +28,8 @@ import { postToNode } from '@/cluster/leaderClient';
 import { getNextFreePorts } from '@/reconcile/ports';
 import { ensureDirectories } from '@/reconcile/directories';
 import { purgeProjectLocal } from '@/reconcile/teardown';
+import { cancelLocalDeployment } from '@/reconcile/deploy';
+import { cancelQueuedDeploy, isInstanceCanceled, clearInstanceCanceled } from './deployQueue';
 import { config } from '@/config';
 import { DEFAULT_TIMEOUT, NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_PROJECT_ID, NSM_LABEL_PROJECT_INSTANCE_ID, NSM_LABEL_SERVICE_NAME, NSM_LABEL_MANAGED } from '@/constants';
 import { leaderEnsureCerts } from '@/reconcile/certs';
@@ -213,6 +215,15 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
             activeNginxConf: zeroDowntime ? prev?.activeNginxConf : nginxConf,
             activeDomains: zeroDowntime ? prev?.activeDomains : domains,
         };
+        // A cancel that arrived during planning aborts here, before the desired deployment is
+        // proposed - so the node is never asked to build it and any previously-serving generation is
+        // left untouched.
+        if (isInstanceCanceled(instanceId!)) {
+            clearInstanceCanceled(instanceId!);
+            deployLog.info({ action: 'deploy_canceled_before_propose', projectId, instanceId }, `deploy for ${projectId} canceled during planning`);
+            await updateDeploymentLog(instanceId!, DeploymentState.CANCELLED, 'Deployment cancelled before it started.\n');
+            return instanceId;
+        }
         await cluster.propose({ type: OpType.SET_DESIRED_DEPLOYMENT, deployment });
         deployLog.info(
             { action: 'desired_deployment_proposed', projectId, instanceId, generation, zeroDowntime, assignedNodeId: project.workerNodeId, domainCount: domains.length },
@@ -227,7 +238,7 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
     return instanceId;
 };
 
-const TERMINAL_DEPLOY_STATES = [DeploymentState.DEPLOYED, DeploymentState.HEALTHY, DeploymentState.FAILED];
+const TERMINAL_DEPLOY_STATES = [DeploymentState.DEPLOYED, DeploymentState.HEALTHY, DeploymentState.FAILED, DeploymentState.CANCELLED];
 
 export const updateDeploymentLog = async (instanceId: string, status: DeploymentState, logText: string) => {
     // Read the prior state first so we can fire a push notification only on the transition into a
@@ -352,4 +363,65 @@ export const teardownProject = async (projectId: string): Promise<void> => {
         if (inst.active) await updateProjectInstanceModel(inst.id, { state: DeploymentState.DESTROYING, active: false });
     }
     await cluster.propose({ type: OpType.CLEAR_DESIRED_DEPLOYMENT, projectId });
+};
+
+// Ask a project's assigned node to cancel an in-flight local deployment (SIGKILL the build + tear
+// down the partial generation). Runs in-process when the leader is the assigned node.
+const cancelOnAssignedNode = async (projectId: string): Promise<void> => {
+    const project = await getProject(projectId);
+    const nodeId = project?.workerNodeId;
+    if (!nodeId || nodeId === config.nodeId) {
+        cancelLocalDeployment(projectId);
+        return;
+    }
+    const node = await getNodeByIdModel(nodeId);
+    if (!node) return;
+    await postToNode(node.address, node.apiPort, '/node/cancel-deploy', { projectId });
+};
+
+// Leader-only: cancel a project's in-flight deployment so it stops immediately instead of running to
+// its timeout. Three phases:
+//   - Still queued: dropped from the queue and marked CANCELLED (no further work).
+//   - In the leader planning slot: flagged so deployProject aborts before it proposes desired state.
+//   - Already building on its node: roll the desired state back to the previously-serving generation
+//     (or clear it for a first-ever deploy) so the reconciler stops re-applying it, then tell the
+//     node to kill the build.
+export const cancelDeploy = async (projectId: string): Promise<void> => {
+    if (!cluster.isLeader()) throw new Error('cancelDeploy must run on the leader');
+    deployLog.info({ action: 'deploy_cancel_requested', projectId }, `cancel requested for ${projectId}`);
+
+    const phase = await cancelQueuedDeploy(projectId);
+    if (phase === 'queued') return; // never started; fully handled by the queue
+
+    // Roll back the desired state so the reconciler stops trying to converge to the cancelled deploy.
+    const dep = await getDesiredDeploymentModel(projectId);
+    if (dep && dep.activeGeneration != null && dep.generation > dep.activeGeneration) {
+        // A pending (zero-downtime) generation was proposed: revert to the generation that is still
+        // serving so the old version keeps running and the pending one is abandoned.
+        const rolledBack: DesiredDeployment = {
+            ...dep,
+            generation: dep.activeGeneration,
+            nginxConf: dep.activeNginxConf ?? dep.nginxConf,
+            domains: dep.activeDomains ?? dep.domains,
+        };
+        await cluster.propose({ type: OpType.SET_DESIRED_DEPLOYMENT, deployment: rolledBack });
+        deployLog.info({ action: 'deploy_cancel_rollback', projectId, fromGeneration: dep.generation, toGeneration: dep.activeGeneration }, `rolled back ${projectId} to generation ${dep.activeGeneration}`);
+    } else if (dep && phase !== 'planning') {
+        // Building with nothing previously serving (first-ever deploy, or the legacy in-place path):
+        // clear the desired state so the node tears the partial stack down. Skipped while still
+        // planning, where clearing would tear down a currently-serving generation.
+        await cluster.propose({ type: OpType.CLEAR_DESIRED_DEPLOYMENT, projectId });
+        deployLog.info({ action: 'deploy_cancel_clear', projectId, generation: dep.generation }, `cleared desired deployment for ${projectId}`);
+    }
+
+    // Kill the in-flight build on the owning node (no-op if nothing is building there yet).
+    await cancelOnAssignedNode(projectId);
+
+    // Mark the project's active, non-terminal instance(s) CANCELLED.
+    const instances = await getProjectInstancesByProjectIdModel(projectId);
+    for (const inst of instances) {
+        if (inst.active && (inst.state === DeploymentState.DEPLOYING || inst.state === DeploymentState.QUEUED)) {
+            await updateDeploymentLog(inst.id, DeploymentState.CANCELLED, 'Deployment cancelled.\n');
+        }
+    }
 };

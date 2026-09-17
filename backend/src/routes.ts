@@ -5,7 +5,7 @@ import { spawn } from 'child_process';
 import { API_BODY, API_PARAMS, API_RETURN, API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeStatusReport } from '@mosaiq/nsm-common/types';
 import { createProject, deleteProject, getAllProjects, getProject, resetDeploymentKey, setProjectAssignment, syncProjectToRepoData, updateProject, verifyDeploymentKey } from '@/controllers/projectController';
-import { planLocally, teardownProject, updateDeploymentLog, promoteDeployment } from '@/controllers/deployController';
+import { planLocally, teardownProject, updateDeploymentLog, promoteDeployment, cancelDeploy } from '@/controllers/deployController';
 import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
@@ -25,6 +25,7 @@ import { registerNode, deregisterNode, getRegistry } from '@/cluster/registry';
 import { getDesiredDeploymentsAssignedToModel } from '@/persistence/desiredDeploymentPersistence';
 import { applyUpdateInstruction, setDesiredNsmVersion } from '@/cluster/selfUpdate';
 import { purgeProjectLocal } from '@/reconcile/teardown';
+import { cancelLocalDeployment } from '@/reconcile/deploy';
 import { registry } from '@/utils/metrics';
 import { areaLog } from '@/utils/log';
 
@@ -430,6 +431,19 @@ privateRouter.post(API_ROUTES.POST_TEARDOWN_PROJECT, async (req, res) => {
     }
 });
 
+privateRouter.post(API_ROUTES.POST_CANCEL_DEPLOY, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_CANCEL_DEPLOY];
+    try {
+        if (!params.projectId) return void res.status(400).send('No projectId');
+        if (!requireLeader(req, res)) return;
+        await cancelDeploy(params.projectId);
+        res.status(200).json(undefined);
+    } catch (e) {
+        routeLog.error({ action: 'cancel_deploy_error', err: (e as any)?.message }, 'error cancelling deployment');
+        res.status(500).send();
+    }
+});
+
 privateRouter.post(API_ROUTES.POST_SET_PROJECT_ASSIGNMENT, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.POST_SET_PROJECT_ASSIGNMENT];
     const body = req.body as API_BODY[API_ROUTES.POST_SET_PROJECT_ASSIGNMENT];
@@ -630,6 +644,14 @@ internalRouter.post('/node/purge-project', requireClusterSecret, async (req, res
     const { projectId } = req.body || {};
     res.status(200).json(undefined);
     if (projectId) void purgeProjectLocal(String(projectId));
+});
+
+// Leader asks the owning node to cancel an in-flight deployment: SIGKILL the build so it stops
+// immediately (its failure/rollback path then tears down the partial generation).
+internalRouter.post('/node/cancel-deploy', requireClusterSecret, async (req, res) => {
+    const { projectId } = req.body || {};
+    if (projectId) cancelLocalDeployment(String(projectId));
+    res.status(200).json(undefined);
 });
 
 // CI/CD sets the desired NSM version (leader records it; rollout is orchestrated).
