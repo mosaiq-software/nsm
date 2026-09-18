@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useAPI } from '@/utils/api';
+import { formatAxisTime, formatBytes, formatBytesPerSec, formatCores } from '@/utils/format';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { LogViewer } from '@/components/LogViewer/LogViewer';
 import { MdOutlineRefresh } from 'react-icons/md';
@@ -27,9 +28,32 @@ const metricLabel = (metric: MetricKind) => {
         case 'cpu':
             return 'CPU (cores)';
         case 'mem':
-            return 'Memory (bytes)';
+            return 'Memory';
         case 'net':
-            return 'Network (bytes/s)';
+            return 'Network';
+    }
+};
+
+// Series display name shown in the tooltip for the single aggregated line.
+const metricSeriesLabel = (metric: MetricKind) => {
+    switch (metric) {
+        case 'cpu':
+            return 'CPU';
+        case 'mem':
+            return 'Memory used';
+        case 'net':
+            return 'Throughput';
+    }
+};
+
+const metricFormatter = (metric: MetricKind): ((value: number) => string) => {
+    switch (metric) {
+        case 'cpu':
+            return formatCores;
+        case 'mem':
+            return formatBytes;
+        case 'net':
+            return formatBytesPerSec;
     }
 };
 
@@ -95,31 +119,21 @@ const ProjectLogsPage = () => {
         return () => clearInterval(interval);
     }, [project, scope, rangeMs, metric]);
 
+    // The metric expressions are aggregated with sum() on the backend, so the result is a single
+    // unlabelled line; collapse any returned series into one { time, value } line per timestamp.
     const chartData = useMemo(() => {
         const series = metrics?.series ?? [];
         if (series.length === 0) return [] as Record<string, number | string>[];
-        const byTime = new Map<number, Record<string, number | string>>();
-        series.forEach((s, idx) => {
-            const name = Object.entries(s.labels).map(([k, v]) => `${k}=${v}`).join(',') || `series ${idx + 1}`;
-            for (const point of s.values) {
-                const existing = byTime.get(point.t) ?? { time: new Date(point.t * 1000).toLocaleTimeString() };
-                existing[name] = point.v;
-                byTime.set(point.t, existing);
-            }
-        });
+        const byTime = new Map<number, number>();
+        for (const s of series) {
+            for (const point of s.values) byTime.set(point.t, (byTime.get(point.t) ?? 0) + point.v);
+        }
         return Array.from(byTime.entries())
             .sort((a, b) => a[0] - b[0])
-            .map(([, row]) => row);
-    }, [metrics]);
+            .map(([t, value]) => ({ time: formatAxisTime(t, rangeMs), value }));
+    }, [metrics, rangeMs]);
 
-    const chartSeries = useMemo(() => {
-        const series = metrics?.series ?? [];
-        const palette = ['blue.6', 'teal.6', 'grape.6', 'orange.6', 'red.6', 'cyan.6'];
-        return series.map((s, idx) => ({
-            name: Object.entries(s.labels).map(([k, v]) => `${k}=${v}`).join(',') || `series ${idx + 1}`,
-            color: palette[idx % palette.length],
-        }));
-    }, [metrics]);
+    const chartSeries = useMemo(() => [{ name: 'value', label: metricSeriesLabel(metric), color: 'blue.6' }], [metric]);
 
     if (project === undefined) {
         return (
@@ -186,7 +200,21 @@ const ProjectLogsPage = () => {
                         <Text c="dimmed">No metric data for this selection.</Text>
                     </Center>
                 ) : (
-                    <LineChart h={280} data={chartData} dataKey="time" series={chartSeries} curveType="monotone" withDots={false} yAxisLabel={metricLabel(metric)} withLegend />
+                    <LineChart
+                        h={280}
+                        data={chartData}
+                        dataKey="time"
+                        series={chartSeries}
+                        curveType="monotone"
+                        withDots={false}
+                        strokeWidth={2}
+                        tickLine="y"
+                        gridAxis="y"
+                        yAxisLabel={metricLabel(metric)}
+                        yAxisProps={{ width: 72 }}
+                        xAxisProps={{ minTickGap: 40 }}
+                        valueFormatter={metricFormatter(metric)}
+                    />
                 )}
             </Card>
 

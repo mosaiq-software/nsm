@@ -7,6 +7,7 @@ import { Link, useParams } from 'react-router-dom';
 import { MdArrowBack, MdOutlineCameraAlt, MdOutlineRefresh, MdOutlineStar } from 'react-icons/md';
 import { useCluster } from '@/contexts/cluster-context';
 import { useAPI } from '@/utils/api';
+import { formatAxisTime, formatBytes, formatBytesPerSec, formatPercent01 } from '@/utils/format';
 
 const TIME_RANGES: { label: string; ms: number }[] = [
     { label: '1h', ms: 60 * 60 * 1000 },
@@ -16,20 +17,13 @@ const TIME_RANGES: { label: string; ms: number }[] = [
 ];
 
 const METRIC_DEFS: { kind: NodeMetricKind; title: string; yLabel: string; color: string; format: (v: number) => string }[] = [
-    { kind: 'cpu', title: 'CPU', yLabel: 'Cores used', color: 'blue.6', format: (v) => `${v.toFixed(2)}` },
-    { kind: 'mem', title: 'Memory', yLabel: 'Bytes used', color: 'teal.6', format: (v) => formatBytes(v) },
-    { kind: 'net', title: 'Network', yLabel: 'Bytes/s', color: 'grape.6', format: (v) => `${formatBytes(v)}/s` },
-    { kind: 'disk', title: 'Disk', yLabel: 'Bytes used', color: 'orange.6', format: (v) => formatBytes(v) },
+    { kind: 'cpu', title: 'CPU', yLabel: 'CPU utilization', color: 'blue.6', format: formatPercent01 },
+    { kind: 'mem', title: 'Memory', yLabel: 'Memory used', color: 'teal.6', format: formatBytes },
+    { kind: 'net', title: 'Network', yLabel: 'Throughput', color: 'grape.6', format: formatBytesPerSec },
+    { kind: 'disk', title: 'Disk', yLabel: 'Disk used', color: 'orange.6', format: formatBytes },
 ];
 
 const PROJECT_PALETTE = ['blue.6', 'teal.6', 'grape.6', 'cyan.6', 'lime.6', 'pink.6', 'indigo.6', 'yellow.7', 'red.6', 'green.6'];
-
-function formatBytes(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-    return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
 
 function relativeTime(ts: number): string {
     if (!ts) return 'never';
@@ -46,21 +40,21 @@ function relativeTime(ts: number): string {
 
 // Collapse a (possibly multi-series) node metric result into one { time, value } line by summing
 // series per timestamp - node-level expressions return a single series, but this is robust either way.
-function singleSeries(result?: ObservabilityMetricsResult): { time: string; value: number }[] {
+function singleSeries(result: ObservabilityMetricsResult | undefined, rangeMs: number): { time: string; value: number }[] {
     const byTime = new Map<number, number>();
     for (const s of result?.series ?? []) {
         for (const p of s.values) byTime.set(p.t, (byTime.get(p.t) ?? 0) + p.v);
     }
     return Array.from(byTime.entries())
         .sort((a, b) => a[0] - b[0])
-        .map(([t, v]) => ({ time: new Date(t * 1000).toLocaleTimeString(), value: v }));
+        .map(([t, v]) => ({ time: formatAxisTime(t, rangeMs), value: v }));
 }
 
 const fsKey = (device: string, mountpoint: string) => `${device}|${mountpoint}`;
 const projectLabel = (p: string) => (p === '__total__' ? 'All projects' : p);
 
-const MetricChart = ({ def, result }: { def: (typeof METRIC_DEFS)[number]; result?: ObservabilityMetricsResult }) => {
-    const data = useMemo(() => singleSeries(result), [result]);
+const MetricChart = ({ def, result, rangeMs }: { def: (typeof METRIC_DEFS)[number]; result?: ObservabilityMetricsResult; rangeMs: number }) => {
+    const data = useMemo(() => singleSeries(result, rangeMs), [result, rangeMs]);
     return (
         <Card withBorder>
             <Title order={5} mb="sm">
@@ -78,7 +72,12 @@ const MetricChart = ({ def, result }: { def: (typeof METRIC_DEFS)[number]; resul
                     series={[{ name: 'value', label: def.title, color: def.color }]}
                     curveType="monotone"
                     withDots={false}
+                    strokeWidth={2}
+                    tickLine="y"
+                    gridAxis="y"
                     yAxisLabel={def.yLabel}
+                    yAxisProps={{ width: 72 }}
+                    xAxisProps={{ minTickGap: 40 }}
                     valueFormatter={def.format}
                 />
             )}
@@ -275,11 +274,11 @@ const NodeDetailPage = () => {
         const s = series?.series ?? [];
         if (s.length === 0) return { data: [] as Record<string, number | string>[], defs: [] as { name: string; color: string }[] };
         const byTime = new Map<number, Record<string, number | string>>();
-        const defs = s.map((entry, idx) => ({ name: projectLabel(entry.labels.projectId ?? `series ${idx + 1}`), color: entry.labels.projectId === '__total__' ? 'dark.4' : PROJECT_PALETTE[idx % PROJECT_PALETTE.length] }));
+        const defs = s.map((entry, idx) => ({ name: projectLabel(entry.labels.projectId || `Project ${idx + 1}`), color: entry.labels.projectId === '__total__' ? 'dark.4' : PROJECT_PALETTE[idx % PROJECT_PALETTE.length] }));
         s.forEach((entry, idx) => {
             const name = defs[idx].name;
             for (const point of entry.values) {
-                const row = byTime.get(point.t) ?? { time: new Date(point.t * 1000).toLocaleString() };
+                const row = byTime.get(point.t) ?? { time: formatAxisTime(point.t, rangeMs) };
                 row[name] = point.v;
                 byTime.set(point.t, row);
             }
@@ -288,7 +287,7 @@ const NodeDetailPage = () => {
             .sort((a, b) => a[0] - b[0])
             .map(([, row]) => row);
         return { data, defs };
-    }, [series]);
+    }, [series, rangeMs]);
 
     return (
         <Stack>
@@ -339,7 +338,7 @@ const NodeDetailPage = () => {
 
             <SimpleGrid cols={{ base: 1, md: 2 }}>
                 {METRIC_DEFS.map((def) => (
-                    <MetricChart key={def.kind} def={def} result={metrics[def.kind]} />
+                    <MetricChart key={def.kind} def={def} result={metrics[def.kind]} rangeMs={rangeMs} />
                 ))}
             </SimpleGrid>
 
@@ -397,7 +396,22 @@ const NodeDetailPage = () => {
                         <Text c="dimmed">No time-series storage data yet.</Text>
                     </Center>
                 ) : (
-                    <LineChart h={280} data={seriesChart.data} dataKey="time" series={seriesChart.defs} curveType="monotone" withDots={false} yAxisLabel="Bytes" valueFormatter={formatBytes} withLegend />
+                    <LineChart
+                        h={280}
+                        data={seriesChart.data}
+                        dataKey="time"
+                        series={seriesChart.defs}
+                        curveType="monotone"
+                        withDots={false}
+                        strokeWidth={2}
+                        tickLine="y"
+                        gridAxis="y"
+                        yAxisLabel="Disk used"
+                        yAxisProps={{ width: 72 }}
+                        xAxisProps={{ minTickGap: 40 }}
+                        valueFormatter={formatBytes}
+                        withLegend
+                    />
                 )}
             </Card>
         </Stack>
