@@ -1,4 +1,4 @@
-import { AllowedGithubEntity, ClusterNode, ClusterStatus, DeploymentLogUpdate, DeploymentState, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, User } from './types';
+import { Admin, Capability, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -12,7 +12,10 @@ export enum API_ROUTES {
     GET_WORKER_STATUSES = '/cluster/nodes/status',
     GET_JOIN_INFO = '/cluster/join-info',
     GET_CONTROL_PLANE_STATUS = '/cluster/status',
-    GET_ALLOWED_ENTITIES = '/allowed-entities',
+    GET_ME = '/me',
+    GET_TEAMS = '/teams',
+    GET_TEAM = '/team/:ownerId',
+    GET_ADMINS = '/admins',
     GET_OBSERVABILITY_LOGS = '/observability/logs',
     GET_OBSERVABILITY_METRICS = '/observability/metrics',
     GET_NSM_LOGS = '/observability/nsm-logs',
@@ -34,7 +37,11 @@ export enum API_ROUTES {
     POST_DEPLOYMENT_LOG_UPDATE = '/deploy/update',
     POST_GITHUB_LOGIN = '/login/github/:token',
     POST_GITHUB_LOGOUT = '/logout/github/:token',
-    POST_SET_ALLOWED_ENTITIES = '/allowed-entities/set',
+    POST_SET_TEAM_DEFAULTS = '/team/:ownerId/defaults',
+    POST_SET_TEAM_OVERRIDE = '/team/:ownerId/override',
+    POST_DELETE_TEAM_OVERRIDE = '/team/:ownerId/override/delete',
+    POST_ADD_ADMIN = '/admins/add',
+    POST_REMOVE_ADMIN = '/admins/remove',
     POST_LOGGER = '/logger/:logKey',
     POST_PUSH_SUBSCRIBE = '/push/subscribe',
     POST_PUSH_UNSUBSCRIBE = '/push/unsubscribe',
@@ -53,7 +60,10 @@ export interface API_PARAMS {
     [API_ROUTES.GET_WORKER_STATUSES]: {};
     [API_ROUTES.GET_JOIN_INFO]: {};
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: {};
-    [API_ROUTES.GET_ALLOWED_ENTITIES]: {};
+    [API_ROUTES.GET_ME]: {};
+    [API_ROUTES.GET_TEAMS]: {};
+    [API_ROUTES.GET_TEAM]: { ownerId: string };
+    [API_ROUTES.GET_ADMINS]: {};
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: {};
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: {};
     [API_ROUTES.GET_NSM_LOGS]: {};
@@ -75,7 +85,11 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: {};
     [API_ROUTES.POST_GITHUB_LOGIN]: { token: string };
     [API_ROUTES.POST_GITHUB_LOGOUT]: { token: string };
-    [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: {};
+    [API_ROUTES.POST_SET_TEAM_DEFAULTS]: { ownerId: string };
+    [API_ROUTES.POST_SET_TEAM_OVERRIDE]: { ownerId: string };
+    [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: { ownerId: string };
+    [API_ROUTES.POST_ADD_ADMIN]: {};
+    [API_ROUTES.POST_REMOVE_ADMIN]: {};
     [API_ROUTES.POST_LOGGER]: { logKey: string };
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: {};
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: {};
@@ -95,7 +109,10 @@ export interface API_BODY {
     [API_ROUTES.GET_WORKER_STATUSES]: undefined;
     [API_ROUTES.GET_JOIN_INFO]: undefined;
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: undefined;
-    [API_ROUTES.GET_ALLOWED_ENTITIES]: undefined;
+    [API_ROUTES.GET_ME]: undefined;
+    [API_ROUTES.GET_TEAMS]: undefined;
+    [API_ROUTES.GET_TEAM]: undefined;
+    [API_ROUTES.GET_ADMINS]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: undefined;
     [API_ROUTES.GET_NSM_LOGS]: undefined;
@@ -117,7 +134,11 @@ export interface API_BODY {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: DeploymentLogUpdate;
     [API_ROUTES.POST_GITHUB_LOGIN]: {};
     [API_ROUTES.POST_GITHUB_LOGOUT]: {};
-    [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: { entities: AllowedGithubEntity[] };
+    [API_ROUTES.POST_SET_TEAM_DEFAULTS]: { capabilities: Capability[] };
+    [API_ROUTES.POST_SET_TEAM_OVERRIDE]: { memberId: string; memberLogin: string; capabilities: Capability[] };
+    [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: { memberId: string };
+    [API_ROUTES.POST_ADD_ADMIN]: { login: string };
+    [API_ROUTES.POST_REMOVE_ADMIN]: { id: string };
     [API_ROUTES.POST_LOGGER]: LogMessage;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: PushSubscriptionJSON;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: { endpoint: string };
@@ -136,7 +157,10 @@ export interface API_RETURN {
     [API_ROUTES.GET_WORKER_STATUSES]: undefined; //TODO
     [API_ROUTES.GET_JOIN_INFO]: { command: string; deployPublicKey: string | null };
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: ClusterStatus | undefined;
-    [API_ROUTES.GET_ALLOWED_ENTITIES]: AllowedGithubEntity[] | undefined;
+    [API_ROUTES.GET_ME]: MeResponse | undefined;
+    [API_ROUTES.GET_TEAMS]: Team[];
+    [API_ROUTES.GET_TEAM]: TeamDetail | undefined;
+    [API_ROUTES.GET_ADMINS]: { admins: Admin[]; superAdminLogin: string | null } | undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: ObservabilityLogsResult | undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: ObservabilityMetricsResult | undefined;
     [API_ROUTES.GET_NSM_LOGS]: ObservabilityLogsResult | undefined;
@@ -158,7 +182,11 @@ export interface API_RETURN {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: undefined;
     [API_ROUTES.POST_GITHUB_LOGIN]: User | undefined;
     [API_ROUTES.POST_GITHUB_LOGOUT]: undefined;
-    [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: undefined;
+    [API_ROUTES.POST_SET_TEAM_DEFAULTS]: undefined;
+    [API_ROUTES.POST_SET_TEAM_OVERRIDE]: undefined;
+    [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: undefined;
+    [API_ROUTES.POST_ADD_ADMIN]: Admin | undefined;
+    [API_ROUTES.POST_REMOVE_ADMIN]: undefined;
     [API_ROUTES.POST_LOGGER]: undefined;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: undefined;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: undefined;
@@ -179,7 +207,10 @@ export interface API_AUTH {
     [API_ROUTES.GET_WORKER_STATUSES]: string;
     [API_ROUTES.GET_JOIN_INFO]: string;
     [API_ROUTES.GET_CONTROL_PLANE_STATUS]: string;
-    [API_ROUTES.GET_ALLOWED_ENTITIES]: string;
+    [API_ROUTES.GET_ME]: string;
+    [API_ROUTES.GET_TEAMS]: string;
+    [API_ROUTES.GET_TEAM]: string;
+    [API_ROUTES.GET_ADMINS]: string;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: string;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: string;
     [API_ROUTES.GET_NSM_LOGS]: string;
@@ -201,7 +232,11 @@ export interface API_AUTH {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: string;
     [API_ROUTES.POST_GITHUB_LOGIN]: undefined;
     [API_ROUTES.POST_GITHUB_LOGOUT]: string;
-    [API_ROUTES.POST_SET_ALLOWED_ENTITIES]: string;
+    [API_ROUTES.POST_SET_TEAM_DEFAULTS]: string;
+    [API_ROUTES.POST_SET_TEAM_OVERRIDE]: string;
+    [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: string;
+    [API_ROUTES.POST_ADD_ADMIN]: string;
+    [API_ROUTES.POST_REMOVE_ADMIN]: string;
     [API_ROUTES.POST_LOGGER]: undefined;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: string;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: string;

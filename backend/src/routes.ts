@@ -13,7 +13,10 @@ import { getControlPlaneStatus } from '@/controllers/statusController';
 import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, MetricKind } from '@/controllers/observabilityController';
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
-import { getAllowedEntities, setAllowedEntities } from '@/controllers/allowedEntityController';
+import { Capability } from '@mosaiq/nsm-common/types';
+import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requireCreateProjectForOwner, requireOwnerInstalledForProject, requireProjectCapability, requireSuperAdmin, requireTeamManage } from '@/controllers/authz';
+import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
+import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
 import { getVapidPublicKey, regenerateVapidKeys, subscribe, unsubscribe } from '@/controllers/pushController';
 import { getAllNodesModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
@@ -143,6 +146,7 @@ publicRouter.get(API_ROUTES.GET_DEPLOY, async (req, res) => {
         if (!params.key) return void res.status(401).send('Unauthorized');
         if (!(await verifyDeploymentKey(params.projectId, params.key, false))) return void res.status(403).send('Forbidden');
         if (!requireLeader(req, res)) return;
+        if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
         await enqueueDeploy(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
@@ -166,16 +170,25 @@ publicRouter.post(API_ROUTES.POST_GITHUB_LOGIN, async (req, res) => {
 });
 
 // === Private (user-authenticated) reads ===
+// Permission-filtered reads run on the leader (where team/membership resolution and the GitHub App
+// live); followers forward via requireLeader.
 privateRouter.get(API_ROUTES.GET_PROJECT, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
     const project = await getProject(params.projectId);
     if (!project) return void res.status(404).send('Project not found');
-    res.status(200).json(project);
+    const user = await getRequestUser(req);
+    const caps = user ? await getEffectiveCapabilitiesForProject(user, { repoOwner: project.repoOwner }) : [];
+    res.status(200).json(redactProjectSecrets(project, caps.includes(Capability.CONFIGURE)));
 });
 
-privateRouter.get(API_ROUTES.GET_PROJECTS, async (_req, res) => {
+privateRouter.get(API_ROUTES.GET_PROJECTS, async (req, res) => {
     try {
-        res.status(200).json(await getAllProjects());
+        if (!requireLeader(req, res)) return;
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        res.status(200).json(await getVisibleProjects(user));
     } catch (e) {
         routeLog.error({ action: 'list_projects_error', err: (e as any)?.message }, 'error listing projects');
         res.status(500).send();
@@ -184,8 +197,10 @@ privateRouter.get(API_ROUTES.GET_PROJECTS, async (_req, res) => {
 
 privateRouter.get(API_ROUTES.GET_PROJECT_INSTANCE, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_INSTANCE];
+    if (!requireLeader(req, res)) return;
     const instance = await getProjectInstance(params.projectInstanceId);
     if (!instance) return void res.status(404).send('Project instance not found');
+    if (!(await requireProjectCapability(req, res, instance.projectId, Capability.VIEW))) return;
     res.status(200).json(instance);
 });
 
@@ -221,8 +236,61 @@ privateRouter.get(API_ROUTES.GET_CONTROL_PLANE_STATUS, async (_req, res) => {
     res.status(200).json(await getControlPlaneStatus());
 });
 
-privateRouter.get(API_ROUTES.GET_ALLOWED_ENTITIES, async (_req, res) => {
-    res.status(200).json(await getAllowedEntities());
+// The permission-aware view driving the UI: the signed-in user's teams, projects and capabilities.
+privateRouter.get(API_ROUTES.GET_ME, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        res.status(200).json(await buildMeResponse(user));
+    } catch (e) {
+        routeLog.error({ action: 'me_error', err: (e as any)?.message }, 'error building me response');
+        res.status(500).send();
+    }
+});
+
+// Teams management (admin only): installed teams merged with configured-but-uninstalled ones.
+privateRouter.get(API_ROUTES.GET_TEAMS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    try {
+        res.status(200).json(await listAllTeams());
+    } catch (e) {
+        routeLog.error({ action: 'list_teams_error', err: (e as any)?.message }, 'error listing teams');
+        res.status(500).send();
+    }
+});
+
+// Team detail + dynamic member list. Visible to anyone who can manage the team (admin or owner) or
+// is a member; managing/editing is gated separately on the write routes.
+privateRouter.get(API_ROUTES.GET_TEAM, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_TEAM];
+    if (!requireLeader(req, res)) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        const detail = await getTeamDetail(user, params.ownerId);
+        if (!detail) return void res.status(404).send('Team not found');
+        // Only admins/owners/members should see a team's member list.
+        if (!detail.canManage && detail.team.installed) {
+            const meCaps = await buildMeResponse(user);
+            const isMember = meCaps.teams.some((t) => t.ownerId === detail.team.ownerId && t.capabilities.length > 0);
+            if (!isMember) return void res.status(403).send('Forbidden');
+        } else if (!detail.canManage && !detail.team.installed) {
+            return void res.status(403).send('Forbidden');
+        }
+        res.status(200).json(detail);
+    } catch (e) {
+        routeLog.error({ action: 'get_team_error', err: (e as any)?.message }, 'error getting team detail');
+        res.status(500).send();
+    }
+});
+
+// Admin management (super admin only).
+privateRouter.get(API_ROUTES.GET_ADMINS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    if (!(await requireSuperAdmin(req, res))) return;
+    res.status(200).json(await getAdmins());
 });
 
 // Observability query proxy (leader-only, where the Loki/Prometheus stack lives). Followers
@@ -329,6 +397,8 @@ privateRouter.get(API_ROUTES.GET_DEPLOY_WEB, async (req, res) => {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!(await verifyDeploymentKey(params.projectId, params.key, true))) return void res.status(403).send('Forbidden');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.DEPLOY))) return;
+        if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
         const logId = await enqueueDeploy(params.projectId);
         res.status(200).json(logId);
     } catch (e) {
@@ -343,6 +413,7 @@ privateRouter.post(API_ROUTES.POST_CREATE_PROJECT, async (req, res) => {
     try {
         if (!body || !body.id || !body.repoOwner || !body.repoName) return void res.status(400).send('Invalid request body');
         if (!requireLeader(req, res)) return;
+        if (!(await requireCreateProjectForOwner(req, res, body.repoOwner))) return;
         res.status(200).json(await createProject(body));
     } catch (e) {
         routeLog.error({ action: 'create_project_error', err: (e as any)?.message }, 'error creating project');
@@ -356,6 +427,7 @@ privateRouter.post(API_ROUTES.POST_UPDATE_PROJECT, async (req, res) => {
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
         await updateProject(params.projectId, body);
         res.status(200).json(undefined);
     } catch (e) {
@@ -369,6 +441,7 @@ privateRouter.post(API_ROUTES.POST_DELETE_PROJECT, async (req, res) => {
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.DELETE))) return;
         await deleteProject(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
@@ -381,6 +454,7 @@ privateRouter.post(API_ROUTES.POST_RESET_DEPLOYMENT_KEY, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.POST_RESET_DEPLOYMENT_KEY];
     try {
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
         const newKey = await resetDeploymentKey(params.projectId);
         if (!newKey) return void res.status(404).send('Project not found');
         res.status(200).json(newKey);
@@ -396,6 +470,7 @@ privateRouter.post(API_ROUTES.POST_UPDATE_ENV_VAR, async (req, res) => {
     try {
         if (!params.projectId || !body.secretName) return void res.status(400).send('Invalid request');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
         await updateEnvironmentVariable(params.projectId, body);
         res.status(200).send('Environment variable updated');
     } catch (e) {
@@ -409,6 +484,7 @@ privateRouter.post(API_ROUTES.POST_SYNC_TO_REPO, async (req, res) => {
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
         const project = await syncProjectToRepoData(params.projectId);
         if (!project) return void res.status(404).send('Project not found');
         res.status(200).json(project);
@@ -423,6 +499,7 @@ privateRouter.post(API_ROUTES.POST_TEARDOWN_PROJECT, async (req, res) => {
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.DEPLOY))) return;
         await teardownProjectWithCleanup(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
@@ -436,6 +513,7 @@ privateRouter.post(API_ROUTES.POST_CANCEL_DEPLOY, async (req, res) => {
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.DEPLOY))) return;
         await cancelDeploy(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
@@ -450,6 +528,7 @@ privateRouter.post(API_ROUTES.POST_SET_PROJECT_ASSIGNMENT, async (req, res) => {
     try {
         if (!params.projectId || !body.nodeId) return void res.status(400).send('Invalid request');
         if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
         await setProjectAssignment(params.projectId, body.nodeId);
         res.status(200).json(undefined);
     } catch (e) {
@@ -458,15 +537,77 @@ privateRouter.post(API_ROUTES.POST_SET_PROJECT_ASSIGNMENT, async (req, res) => {
     }
 });
 
-privateRouter.post(API_ROUTES.POST_SET_ALLOWED_ENTITIES, async (req, res) => {
-    const body = req.body as API_BODY[API_ROUTES.POST_SET_ALLOWED_ENTITIES];
+// === Team management writes (team owner or NSM admin) ===
+privateRouter.post(API_ROUTES.POST_SET_TEAM_DEFAULTS, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_SET_TEAM_DEFAULTS];
+    const body = req.body as API_BODY[API_ROUTES.POST_SET_TEAM_DEFAULTS];
     try {
-        if (!body || !body.entities) return void res.status(400).send('Invalid request body');
         if (!requireLeader(req, res)) return;
-        await setAllowedEntities(body.entities);
-        res.status(200).send('Allowed entities set');
+        if (!(await requireTeamManage(req, res, params.ownerId))) return;
+        await setTeamDefaults(params.ownerId, body.capabilities || []);
+        res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'set_allowed_entities_error', err: (e as any)?.message }, 'error setting allowed entities');
+        routeLog.error({ action: 'set_team_defaults_error', err: (e as any)?.message }, 'error setting team defaults');
+        res.status(500).send();
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_SET_TEAM_OVERRIDE, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_SET_TEAM_OVERRIDE];
+    const body = req.body as API_BODY[API_ROUTES.POST_SET_TEAM_OVERRIDE];
+    try {
+        if (!body?.memberId) return void res.status(400).send('memberId required');
+        if (!requireLeader(req, res)) return;
+        if (!(await requireTeamManage(req, res, params.ownerId))) return;
+        await setTeamOverride(params.ownerId, body.memberId, body.memberLogin || '', body.capabilities || []);
+        res.status(200).json(undefined);
+    } catch (e) {
+        routeLog.error({ action: 'set_team_override_error', err: (e as any)?.message }, 'error setting team override');
+        res.status(500).send();
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_DELETE_TEAM_OVERRIDE, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_DELETE_TEAM_OVERRIDE];
+    const body = req.body as API_BODY[API_ROUTES.POST_DELETE_TEAM_OVERRIDE];
+    try {
+        if (!body?.memberId) return void res.status(400).send('memberId required');
+        if (!requireLeader(req, res)) return;
+        if (!(await requireTeamManage(req, res, params.ownerId))) return;
+        await clearTeamOverride(params.ownerId, body.memberId);
+        res.status(200).json(undefined);
+    } catch (e) {
+        routeLog.error({ action: 'delete_team_override_error', err: (e as any)?.message }, 'error deleting team override');
+        res.status(500).send();
+    }
+});
+
+// === Admin management writes (super admin only) ===
+privateRouter.post(API_ROUTES.POST_ADD_ADMIN, async (req, res) => {
+    const body = req.body as API_BODY[API_ROUTES.POST_ADD_ADMIN];
+    try {
+        if (!body?.login) return void res.status(400).send('login required');
+        if (!requireLeader(req, res)) return;
+        if (!(await requireSuperAdmin(req, res))) return;
+        const admin = await addAdmin(body.login);
+        if (!admin) return void res.status(404).send('GitHub user not found');
+        res.status(200).json(admin);
+    } catch (e) {
+        routeLog.error({ action: 'add_admin_error', err: (e as any)?.message }, 'error adding admin');
+        res.status(500).send();
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_REMOVE_ADMIN, async (req, res) => {
+    const body = req.body as API_BODY[API_ROUTES.POST_REMOVE_ADMIN];
+    try {
+        if (!body?.id) return void res.status(400).send('id required');
+        if (!requireLeader(req, res)) return;
+        if (!(await requireSuperAdmin(req, res))) return;
+        await removeAdmin(body.id);
+        res.status(200).json(undefined);
+    } catch (e) {
+        routeLog.error({ action: 'remove_admin_error', err: (e as any)?.message }, 'error removing admin');
         res.status(500).send();
     }
 });

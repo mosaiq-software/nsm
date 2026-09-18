@@ -6,6 +6,9 @@ import { deleteDesiredDeploymentModel, upsertDesiredDeploymentModel } from '@/pe
 import { setDesiredNsmVersion } from '@/persistence/clusterMetaPersistence';
 import { createUserModel } from '@/persistence/userPersistence';
 import { createAllowedEntityModel, deleteAllowedEntitiesModel, getAllAllowedEntitiesModel } from '@/persistence/allowedEntitiesPersistence';
+import { upsertTeamConfigModel } from '@/persistence/teamConfigPersistence';
+import { deleteTeamOverrideModel, upsertTeamOverrideModel } from '@/persistence/teamOverridePersistence';
+import { createAdminModel, deleteAdminModel } from '@/persistence/adminPersistence';
 import { areaLog } from '@/utils/log';
 
 const clusterLog = areaLog('cluster');
@@ -33,6 +36,16 @@ const opDetails = (op: Op): Record<string, unknown> => {
             return { githubId: op.user.githubId, name: op.user.name };
         case OpType.SET_ALLOWED_ENTITIES:
             return { entityCount: op.entities.length };
+        case OpType.UPSERT_TEAM_CONFIG:
+            return { ownerId: op.config.ownerId, login: op.config.login, capabilityCount: op.config.defaultCapabilities.length };
+        case OpType.UPSERT_TEAM_OVERRIDE:
+            return { ownerId: op.override.ownerId, memberLogin: op.override.memberLogin, capabilityCount: op.override.capabilities.length };
+        case OpType.DELETE_TEAM_OVERRIDE:
+            return { ownerId: op.ownerId, memberId: op.memberId };
+        case OpType.ADD_ADMIN:
+            return { id: op.admin.id, login: op.admin.login };
+        case OpType.REMOVE_ADMIN:
+            return { id: op.id };
         default:
             return {};
     }
@@ -95,6 +108,21 @@ export const applyOp = async (op: Op): Promise<void> => {
             for (const e of op.entities) await createAllowedEntityModel(e);
             break;
         }
+        case OpType.UPSERT_TEAM_CONFIG:
+            await upsertTeamConfigModel(op.config);
+            break;
+        case OpType.UPSERT_TEAM_OVERRIDE:
+            await upsertTeamOverrideModel(op.override);
+            break;
+        case OpType.DELETE_TEAM_OVERRIDE:
+            await deleteTeamOverrideModel(op.ownerId, op.memberId);
+            break;
+        case OpType.ADD_ADMIN:
+            await createAdminModel(op.admin);
+            break;
+        case OpType.REMOVE_ADMIN:
+            await deleteAdminModel(op.id);
+            break;
         default:
             clusterLog.warn({ action: 'op_unknown', opType: (op as any).type }, 'unknown cluster op ignored');
             return;

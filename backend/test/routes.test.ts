@@ -17,7 +17,18 @@ vi.mock('@/controllers/deployQueue', () => ({ enqueueDeploy: vi.fn(async () => '
 vi.mock('@/controllers/secretController', () => ({ updateEnvironmentVariable: vi.fn() }));
 vi.mock('@/controllers/projectInstanceController', () => ({ getProjectInstance: vi.fn() }));
 vi.mock('@/controllers/statusController', () => ({ getControlPlaneStatus: vi.fn(async () => ({})) }));
-vi.mock('@/controllers/allowedEntityController', () => ({ getAllowedEntities: vi.fn(async () => []), setAllowedEntities: vi.fn() }));
+vi.mock('@/controllers/authz', () => ({
+    getRequestUser: vi.fn(async () => ({ name: 'u', githubId: 'g', authToken: 'good', avatarUrl: '', created: 0, signedIn: true })),
+    getEffectiveCapabilitiesForProject: vi.fn(async () => ['view', 'deploy', 'configure', 'delete']),
+    requireAdmin: vi.fn(async () => true),
+    requireSuperAdmin: vi.fn(async () => true),
+    requireProjectCapability: vi.fn(async () => true),
+    requireCreateProjectForOwner: vi.fn(async () => true),
+    requireOwnerInstalledForProject: vi.fn(async () => true),
+    requireTeamManage: vi.fn(async () => true),
+}));
+vi.mock('@/controllers/teamController', () => ({ buildMeResponse: vi.fn(async () => ({ user: {}, isSuperAdmin: false, isAdmin: false, teams: [] })), getVisibleProjects: vi.fn(async () => []), redactProjectSecrets: vi.fn((p: any) => p), listAllTeams: vi.fn(async () => []), getTeamDetail: vi.fn(async () => null), setTeamDefaults: vi.fn(), setTeamOverride: vi.fn(), clearTeamOverride: vi.fn() }));
+vi.mock('@/controllers/adminController', () => ({ getAdmins: vi.fn(async () => ({ admins: [], superAdminLogin: null })), addAdmin: vi.fn(async () => ({ id: '1', login: 'x', avatarUrl: '' })), removeAdmin: vi.fn() }));
 vi.mock('@/utils/authUtils', () => ({ getGithubAuthTokenFromTempCode: vi.fn() }));
 vi.mock('@/persistence/nodePersistence', () => ({ getAllNodesModel: vi.fn(async () => []) }));
 
@@ -27,7 +38,7 @@ import { cluster } from '@/cluster/node';
 import { forwardToLeader } from '@/cluster/leaderClient';
 import { verifyAuthToken } from '@/controllers/userController';
 import { verifyDeploymentKey } from '@/controllers/projectController';
-import { setAllowedEntities } from '@/controllers/allowedEntityController';
+import { setTeamDefaults } from '@/controllers/teamController';
 import { ingestReport } from '@/cluster/statusGossip';
 import { enqueueDeploy } from '@/controllers/deployQueue';
 import { queryNsmLogs } from '@/controllers/observabilityController';
@@ -78,14 +89,14 @@ describe('private auth middleware', () => {
 describe('requireLeader forwarding', () => {
     it('forwards a private write to the leader when this node is a follower', async () => {
         isLeader.mockReturnValue(false);
-        const res = await request(app).post('/allowed-entities/set').set('authorization', 'good').send({ entities: [] });
+        const res = await request(app).post('/team/o1/defaults').set('authorization', 'good').send({ capabilities: [] });
         expect(res.status).toBe(599);
         expect(mForward).toHaveBeenCalled();
     });
     it('runs the controller locally when this node is the leader', async () => {
-        const res = await request(app).post('/allowed-entities/set').set('authorization', 'good').send({ entities: [] });
+        const res = await request(app).post('/team/o1/defaults').set('authorization', 'good').send({ capabilities: [] });
         expect(res.status).toBe(200);
-        expect(setAllowedEntities).toHaveBeenCalledWith([]);
+        expect(setTeamDefaults).toHaveBeenCalledWith('o1', []);
     });
 });
 

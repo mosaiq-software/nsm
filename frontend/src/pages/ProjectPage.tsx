@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
+import { useMe } from '@/contexts/me-context';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { DeploymentState, Project } from '@mosaiq/nsm-common/types';
+import { Capability, DeploymentState, Project } from '@mosaiq/nsm-common/types';
 import { MdOutlineRocketLaunch, MdOutlineSettings, MdOutlineViewList } from 'react-icons/md';
 
 const stateColor = (state?: DeploymentState) => {
@@ -28,6 +29,7 @@ const ProjectPage = () => {
     const projectId = params.projectId;
     const projectCtx = useProjects();
     const clusterCtx = useCluster();
+    const meCtx = useMe();
     const [project, setProject] = useState<Project | undefined | null>(undefined);
 
     useEffect(() => {
@@ -90,15 +92,21 @@ const ProjectPage = () => {
                 </Card>
             </SimpleGrid>
             <Group>
-                <Button component={Link} to={`/p/${project.id}/config`} variant="light" leftSection={<MdOutlineSettings />}>
-                    Configure
-                </Button>
-                <Button component={Link} to={`/p/${project.id}/deploy`} variant="light" color="green" leftSection={<MdOutlineRocketLaunch />}>
-                    Deploy
-                </Button>
-                <Button component={Link} to={`/p/${project.id}/logs`} variant="light" leftSection={<MdOutlineViewList />}>
-                    Logs & Metrics
-                </Button>
+                {meCtx.canProject(project.id, Capability.CONFIGURE) && (
+                    <Button component={Link} to={`/p/${project.id}/config`} variant="light" leftSection={<MdOutlineSettings />}>
+                        Configure
+                    </Button>
+                )}
+                {meCtx.canProject(project.id, Capability.DEPLOY) && (
+                    <Button component={Link} to={`/p/${project.id}/deploy`} variant="light" color="green" leftSection={<MdOutlineRocketLaunch />}>
+                        Deploy
+                    </Button>
+                )}
+                {meCtx.canProject(project.id, Capability.DEPLOY) && (
+                    <Button component={Link} to={`/p/${project.id}/logs`} variant="light" leftSection={<MdOutlineViewList />}>
+                        Logs & Metrics
+                    </Button>
+                )}
             </Group>
         </Stack>
     );

@@ -1,4 +1,4 @@
-import { AllowedGithubEntity, Project, ProjectServiceInstance, Secret, User } from './types';
+import { Admin, AllowedGithubEntity, Project, ProjectServiceInstance, Secret, TeamConfig, TeamMemberOverride, User } from './types';
 
 // Static description of a peer in the cluster. Identity is nodeId; address is the current IP.
 export interface NodeInfo {
@@ -72,6 +72,11 @@ export enum OpType {
     SET_DESIRED_NSM_VERSION = 'SET_DESIRED_NSM_VERSION',
     UPSERT_USER = 'UPSERT_USER',
     SET_ALLOWED_ENTITIES = 'SET_ALLOWED_ENTITIES',
+    UPSERT_TEAM_CONFIG = 'UPSERT_TEAM_CONFIG',
+    UPSERT_TEAM_OVERRIDE = 'UPSERT_TEAM_OVERRIDE',
+    DELETE_TEAM_OVERRIDE = 'DELETE_TEAM_OVERRIDE',
+    ADD_ADMIN = 'ADD_ADMIN',
+    REMOVE_ADMIN = 'REMOVE_ADMIN',
 }
 
 export type Op =
@@ -84,4 +89,9 @@ export type Op =
     | { type: OpType.CLEAR_DESIRED_DEPLOYMENT; projectId: string }
     | { type: OpType.SET_DESIRED_NSM_VERSION; version: string; artifactRef: string }
     | { type: OpType.UPSERT_USER; user: User }
-    | { type: OpType.SET_ALLOWED_ENTITIES; entities: AllowedGithubEntity[] };
+    | { type: OpType.SET_ALLOWED_ENTITIES; entities: AllowedGithubEntity[] }
+    | { type: OpType.UPSERT_TEAM_CONFIG; config: TeamConfig }
+    | { type: OpType.UPSERT_TEAM_OVERRIDE; override: TeamMemberOverride }
+    | { type: OpType.DELETE_TEAM_OVERRIDE; ownerId: string; memberId: string }
+    | { type: OpType.ADD_ADMIN; admin: Admin }
+    | { type: OpType.REMOVE_ADMIN; id: string };

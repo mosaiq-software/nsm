@@ -4,6 +4,7 @@ import '@mantine/notifications/styles.css';
 import '@mantine/charts/styles.css';
 
 import { UserProvider } from '@/contexts/user-context';
+import { MeProvider } from '@/contexts/me-context';
 import { ProjectProvider } from '@/contexts/project-context';
 import { ClusterProvider } from '@/contexts/cluster-context';
 import { createTheme, MantineProvider } from '@mantine/core';
@@ -23,11 +24,13 @@ const App = () => {
             <BrowserRouter>
                 <Notifications />
                 <UserProvider>
-                    <ProjectProvider>
-                        <ClusterProvider>
-                            <Router />
-                        </ClusterProvider>
-                    </ProjectProvider>
+                    <MeProvider>
+                        <ProjectProvider>
+                            <ClusterProvider>
+                                <Router />
+                            </ClusterProvider>
+                        </ProjectProvider>
+                    </MeProvider>
                 </UserProvider>
             </BrowserRouter>
         </MantineProvider>

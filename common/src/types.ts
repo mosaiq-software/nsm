@@ -312,9 +312,105 @@ export interface AllowedGithubEntity {
 
 // A user/org that has installed the NSM GitHub App, surfaced as create-project suggestions.
 export interface GithubOwner {
+    id: string; // GitHub numeric account id (stable across login renames)
     login: string;
     type: string; // 'User' | 'Organization'
     avatarUrl: string;
+}
+
+// === Access control (admins, teams, capabilities) ===
+
+// The set of actions a member can be granted within a team. Simple checkbox capabilities (no role
+// builder). CREATE_PROJECT is team-scoped; the rest are evaluated per project. Any non-empty grant
+// implies VIEW (you cannot act on something you cannot see).
+export enum Capability {
+    VIEW = 'view',
+    DEPLOY = 'deploy', // see logs + trigger deploy/teardown/cancel
+    CONFIGURE = 'configure', // edit config + env vars + repo settings
+    DELETE = 'delete', // delete the project
+    CREATE_PROJECT = 'create_project', // create a project within the team
+}
+
+// Every capability, granted to admins / owners (absolute power).
+export const ALL_CAPABILITIES: Capability[] = [Capability.VIEW, Capability.DEPLOY, Capability.CONFIGURE, Capability.DELETE, Capability.CREATE_PROJECT];
+
+export enum TeamType {
+    ORGANIZATION = 'organization',
+    USER = 'user',
+}
+
+// Reserved synthetic team that holds projects whose repo owner has no current App installation and
+// no stored config. Visible to the super admin only.
+export const ORPHAN_TEAM_ID = '__orphan__';
+
+// Stored team configuration, keyed by the owner's stable GitHub account id. Never deleted when the
+// App is uninstalled; `login` is refreshed from installations for display.
+export interface TeamConfig {
+    ownerId: string;
+    login: string;
+    type: TeamType;
+    defaultCapabilities: Capability[];
+}
+
+// Stored per-member permission override, keyed by (ownerId, memberId) using stable GitHub ids so it
+// survives a member leaving and rejoining the org. Additive-only: unioned with the team default.
+export interface TeamMemberOverride {
+    ownerId: string;
+    memberId: string;
+    memberLogin: string;
+    capabilities: Capability[];
+}
+
+// A stored NSM admin (individual GitHub user). The super admin (env) is implicit and not stored.
+export interface Admin {
+    id: string; // GitHub account id
+    login: string;
+    avatarUrl: string;
+}
+
+// Derived team view = installation state merged with stored config.
+export interface Team {
+    ownerId: string;
+    login: string;
+    type: TeamType;
+    installed: boolean;
+    defaultCapabilities: Capability[];
+}
+
+// A team member surfaced in the team-detail editor.
+export interface TeamMember {
+    id: string;
+    login: string;
+    avatarUrl: string;
+    isOwner: boolean; // org owner -> absolute permissions
+    override: Capability[] | null; // null = no explicit override
+    effective: Capability[];
+}
+
+// Full team detail for the admin/owner editor.
+export interface TeamDetail {
+    team: Team;
+    members: TeamMember[];
+    canManage: boolean; // whether the requester may edit defaults/overrides
+}
+
+// One team as seen by the signed-in user, driving the sidebar.
+export interface MeTeam {
+    ownerId: string;
+    login: string;
+    type: TeamType;
+    installed: boolean;
+    isOwner: boolean;
+    capabilities: Capability[];
+    projects: { id: string; capabilities: Capability[] }[];
+}
+
+// GET /me: everything the UI needs to render permission-aware navigation.
+export interface MeResponse {
+    user: User;
+    isSuperAdmin: boolean;
+    isAdmin: boolean;
+    teams: MeTeam[];
 }
 
 export enum LogLevel {

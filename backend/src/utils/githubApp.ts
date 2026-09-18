@@ -13,8 +13,15 @@ export interface CloneToken {
 }
 
 export interface GithubOwner {
+    id: string; // GitHub numeric account id (stable across login renames)
     login: string;
     type: string; // 'User' | 'Organization'
+    avatarUrl: string;
+}
+
+export interface GithubMember {
+    id: string;
+    login: string;
     avatarUrl: string;
 }
 
@@ -63,7 +70,7 @@ const ownerInstallationCache = new Map<string, string>();
 
 interface RawInstallation {
     id: number;
-    account: { login: string; type: string; avatar_url: string } | null;
+    account: { id: number; login: string; type: string; avatar_url: string } | null;
 }
 
 // List every installation of this GitHub App, following pagination. Also refreshes the
@@ -158,12 +165,50 @@ export const mintInstallationToken = async (owner: string, repo: string): Promis
     }
 };
 
-// Leader-only: the owners (users/orgs) that have installed the App, for create-project suggestions.
+// Leader-only: the owners (users/orgs) that have installed the App, for create-project suggestions
+// and team discovery.
 export const listInstallationOwners = async (): Promise<GithubOwner[]> => {
     const installs = await fetchInstallations();
     return installs
         .filter((i) => i.account)
-        .map((i) => ({ login: i.account!.login, type: i.account!.type, avatarUrl: i.account!.avatar_url }));
+        .map((i) => ({ id: String(i.account!.id), login: i.account!.login, type: i.account!.type, avatarUrl: i.account!.avatar_url }));
+};
+
+interface RawMember {
+    id: number;
+    login: string;
+    avatar_url: string;
+}
+
+// Leader-only: list the members of an org via an installation token. Requires the App to be granted
+// the "Organization members: read" permission on the org. Paginated.
+export const listOrgMembers = async (org: string): Promise<GithubMember[]> => {
+    const installationId = await resolveInstallationIdForOwner(org);
+    const token = await mintTokenForInstallation(`installation:${installationId}`, installationId);
+    const members: GithubMember[] = [];
+    for (let page = 1; ; page++) {
+        const res = await ghInstallationRequest(token.token, `/orgs/${org}/members?per_page=100&page=${page}`);
+        if (!res.ok) throw new Error(`Failed to list members for ${org}: ${res.status} ${await res.text()}`);
+        const data = (await res.json()) as RawMember[];
+        for (const m of data) members.push({ id: String(m.id), login: m.login, avatarUrl: m.avatar_url });
+        if (data.length < 100) break;
+    }
+    return members;
+};
+
+// Leader-only: the logins of an org's owners (admins), who get absolute permissions in their team.
+export const listOrgOwners = async (org: string): Promise<GithubMember[]> => {
+    const installationId = await resolveInstallationIdForOwner(org);
+    const token = await mintTokenForInstallation(`installation:${installationId}`, installationId);
+    const owners: GithubMember[] = [];
+    for (let page = 1; ; page++) {
+        const res = await ghInstallationRequest(token.token, `/orgs/${org}/members?role=admin&per_page=100&page=${page}`);
+        if (!res.ok) throw new Error(`Failed to list owners for ${org}: ${res.status} ${await res.text()}`);
+        const data = (await res.json()) as RawMember[];
+        for (const m of data) owners.push({ id: String(m.id), login: m.login, avatarUrl: m.avatar_url });
+        if (data.length < 100) break;
+    }
+    return owners;
 };
 
 // Leader-only: the repositories the App can access for a given owner (sorted, names only).

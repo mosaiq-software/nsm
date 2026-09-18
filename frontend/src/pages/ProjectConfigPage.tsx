@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
+import { useMe } from '@/contexts/me-context';
+import { Capability } from '@mosaiq/nsm-common/types';
 import { useAPI } from '@/utils/api';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { ProjectHeader } from '@/components/ProjectHeader';
@@ -19,6 +21,7 @@ const ProjectConfigPage = () => {
     const navigate = useNavigate();
     const projectCtx = useProjects();
     const clusterCtx = useCluster();
+    const meCtx = useMe();
     const api = useAPI();
     const [project, setProject] = useState<Project | undefined | null>(undefined);
     const [secrets, setSecrets] = useState<Secret[]>([]);
@@ -422,17 +425,19 @@ const ProjectConfigPage = () => {
                     </Group>
                 </Stack>
                 <Space h="xl" />
-                <Alert color="red" variant="light" title="Danger Zone">
-                    <Stack>
-                        <Group>
-                            <Tooltip label="Delete Project">
-                                <Button color="red" variant="outline" onClick={() => setModal('delete-project')}>
-                                    Delete Project
-                                </Button>
-                            </Tooltip>
-                        </Group>
-                    </Stack>
-                </Alert>
+                {meCtx.canProject(project.id, Capability.DELETE) && (
+                    <Alert color="red" variant="light" title="Danger Zone">
+                        <Stack>
+                            <Group>
+                                <Tooltip label="Delete Project">
+                                    <Button color="red" variant="outline" onClick={() => setModal('delete-project')}>
+                                        Delete Project
+                                    </Button>
+                                </Tooltip>
+                            </Group>
+                        </Stack>
+                    </Alert>
+                )}
             </Stack>
         </>
     );

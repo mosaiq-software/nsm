@@ -1,6 +1,5 @@
-import { getAllowedOrganizationsModel, getAllowedUsersModel } from '@/persistence/allowedEntitiesPersistence';
 import { getAllSignedInUsersModel, getUserByAuthTokenModel } from '@/persistence/userPersistence';
-import { getOrgsForUser, getPrivateGitHubUserData, revokeGithubAuth } from '@/utils/authUtils';
+import { getPrivateGitHubUserData, revokeGithubAuth } from '@/utils/authUtils';
 import { User } from '@mosaiq/nsm-common/types';
 import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { cluster } from '@/cluster/node';
@@ -8,30 +7,15 @@ import { areaLog } from '@/utils/log';
 
 const authLog = areaLog('auth');
 
+// Any GitHub user may establish a session; what they can actually see or do is computed per-request
+// from their admin status and team memberships (see authz). A user who is neither an admin nor a
+// member of any team simply lands on an empty "no access" state in the UI.
 export const signInUser = async (authToken: string) => {
     try {
-        const existingUser = await getUserByAuthTokenModel(authToken);
         const githubUser = await getPrivateGitHubUserData(authToken);
         if (!githubUser) {
             authLog.error({ action: 'signin_failed', reason: 'github_user_fetch_failed' }, 'failed to fetch GitHub user data');
             throw new Error('Failed to fetch GitHub user data');
-        }
-        const allowedUsers = await getAllowedUsersModel();
-        const isUserAllowed = allowedUsers.some((u) => u.id.toLowerCase() === githubUser.login.toLowerCase());
-        const isDefaultUser = process.env.VITE_GITHUB_OAUTH_DEFAULT_USER?.toLocaleLowerCase() === githubUser.login.toLowerCase();
-        // Org membership is only needed for the org-allow path. Fetch it, but a failure (transient GitHub
-        // error, missing org visibility) must not block a user who is already allowed by login / default.
-        const usersOrgs = isUserAllowed || isDefaultUser ? [] : await getOrgsForUser(authToken);
-        if (usersOrgs === null) authLog.warn({ action: 'org_fetch_failed', login: githubUser.login }, 'failed to fetch GitHub organizations; treating org-allow as no match');
-        const allowedOrgs = await getAllowedOrganizationsModel();
-        const isOrgAllowed = (usersOrgs || []).some((org) => allowedOrgs.some((allowed) => allowed.id.toLowerCase() === org.login.toLowerCase()));
-        if (!isUserAllowed && !isOrgAllowed && !isDefaultUser) {
-            authLog.warn({ action: 'signin_denied', githubId: githubUser.id, login: githubUser.login }, `sign-in denied for ${githubUser.login}`);
-            if (existingUser) {
-                // User is no longer allowed, sign them out
-                await signOutUser(authToken);
-            }
-            return null;
         }
         const user: User = {
             githubId: githubUser.id,
@@ -42,7 +26,7 @@ export const signInUser = async (authToken: string) => {
             signedIn: true,
         };
         await cluster.propose({ type: OpType.UPSERT_USER, user });
-        authLog.info({ action: 'user_signed_in', githubId: user.githubId, login: user.name, isUserAllowed, isOrgAllowed, isDefaultUser }, `user ${user.name} signed in`);
+        authLog.info({ action: 'user_signed_in', githubId: user.githubId, login: user.name }, `user ${user.name} signed in`);
         return user;
     } catch (error: any) {
         authLog.error({ action: 'signin_failed', err: error?.message }, 'failed to sign in user');

@@ -5,10 +5,12 @@ import { notifications } from '@mantine/notifications';
 import RouterLink from '@/components/RouterLink';
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 import { useProjects } from '@/contexts/project-context';
+import { useMe } from '@/contexts/me-context';
 import { Link, useNavigate } from 'react-router-dom';
-import { GithubOwner, Project } from '@mosaiq/nsm-common/types';
+import { Capability, GithubOwner, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
+import { MdOutlineWarningAmber } from 'react-icons/md';
 import { rawApiGetNoHook, useAPI } from '@/utils/api';
 import { disablePush, enablePush, isPushSubscribed, isPushSupported, regeneratePushKeys } from '@/utils/push';
 
@@ -23,6 +25,7 @@ const emptyProject: Project = {
 const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle }] = useDisclosure();
     const projectCtx = useProjects();
+    const meCtx = useMe();
     const userCtx = useUser();
     const navigate = useNavigate();
     const [modal, setModal] = useState<'create' | null>(null);
@@ -250,6 +253,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                     const createdId = newProject.id;
                                     setCreatingProject(true);
                                     await projectCtx.create(newProject);
+                                    await meCtx.refresh();
                                     await new Promise((resolve) => setTimeout(resolve, 1000));
                                     setCreatingProject(false);
                                     closeCreateModal();
@@ -333,23 +337,52 @@ const Layout = (props: { children: React.ReactNode }) => {
                     }}
                 >
                     <RouterLink to="/" label="Dashboard" showActive />
-                    <RouterLink to="/nodes" label="Nodes" showActive />
-                    <RouterLink to="/status" label="Cluster Status" showActive />
-                    <RouterLink to="/logs" label="NSM Logs" showActive />
-                    <RouterLink to="/access" label="Access Management" showActive />
+                    {meCtx.isAdmin && (
+                        <>
+                            <RouterLink to="/nodes" label="Nodes" showActive />
+                            <RouterLink to="/status" label="Cluster Status" showActive />
+                            <RouterLink to="/logs" label="NSM Logs" showActive />
+                            <RouterLink to="/teams" label="Teams" showActive />
+                        </>
+                    )}
+                    {meCtx.isSuperAdmin && <RouterLink to="/access" label="Access Management" showActive />}
                     <Space h="md" />
                     <Divider w="80%" mx="auto" my="sm" />
-                    {projectCtx.projects.map((project) => (
-                        <RouterLink to={`/p/${project.id}`} label={`${project.id}`} key={project.id} showActive rightSection={<DeployQueueBadge projectId={project.id} size="xs" />}>
-                            <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />
-                            <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />
-                            <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />
+                    {meCtx.teams.map((team) => (
+                        <RouterLink
+                            to={`/teams/${team.ownerId}`}
+                            label={team.login}
+                            key={team.ownerId}
+                            showActive
+                            rightSection={!team.installed ? <MdOutlineWarningAmber color="var(--mantine-color-red-6)" /> : undefined}
+                        >
+                            {team.installed &&
+                                team.projects
+                                    .filter((p) => p.capabilities.includes(Capability.VIEW))
+                                    .map((project) => (
+                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive rightSection={<DeployQueueBadge projectId={project.id} size="xs" />}>
+                                            {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />}
+                                            {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}
+                                            {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />}
+                                        </RouterLink>
+                                    ))}
+                            {team.installed && team.capabilities.includes(Capability.CREATE_PROJECT) && (
+                                <Button
+                                    variant="subtle"
+                                    size="xs"
+                                    mt="xs"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setNewProject({ ...emptyProject, repoOwner: team.login });
+                                        setModal('create');
+                                    }}
+                                >
+                                    Create Project
+                                </Button>
+                            )}
                         </RouterLink>
                     ))}
                     <Space h="md" />
-                    <Button onClick={() => setModal('create')} variant="outline" style={{ flexShrink: '0' }}>
-                        Create Project
-                    </Button>
                 </AppShell.Navbar>
 
                 <AppShell.Main>{props.children}</AppShell.Main>
