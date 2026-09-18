@@ -1,0 +1,81 @@
+import { ActionIcon, Card, Group, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
+import { MdOutlineBolt, MdOutlineRefresh } from 'react-icons/md';
+import { LogViewer } from '@/components/LogViewer/LogViewer';
+import { useLiveProjectInstance } from '@/hooks/useLiveProjectInstance';
+import { BuildLogConsole } from './BuildLogConsole';
+import { DeploymentStateBadge, isInProgressState } from './DeploymentStateBadge';
+import { ServiceStatusCard } from './ServiceStatusCard';
+
+const SummaryField = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <Stack gap={0}>
+        <Text fz="xs" c="dimmed">
+            {label}
+        </Text>
+        <Text fz="sm">{children}</Text>
+    </Stack>
+);
+
+export const DeploymentInstanceDetail = ({ header }: { header: ProjectInstanceHeader }) => {
+    const { instance, loading, refresh } = useLiveProjectInstance(header.id);
+
+    const state = instance?.state ?? header.state;
+    const created = instance?.created ?? header.created;
+    const lastUpdated = instance?.lastUpdated ?? header.lastUpdated;
+    const workerNodeId = instance?.workerNodeId ?? header.workerNodeId;
+    const active = instance?.active ?? header.active;
+    const services = instance?.services ?? [];
+
+    return (
+        <Stack style={{ flex: 1, minWidth: 0 }}>
+            <Card withBorder>
+                <Group justify="space-between" wrap="nowrap">
+                    <Group gap="sm" wrap="nowrap">
+                        <DeploymentStateBadge state={state} />
+                        {active && (
+                            <Group gap={4} c="yellow">
+                                <MdOutlineBolt size={16} />
+                                <Text fz="sm" fw={600}>
+                                    Active
+                                </Text>
+                            </Group>
+                        )}
+                    </Group>
+                    <Tooltip label="Refresh">
+                        <ActionIcon variant="light" onClick={() => void refresh()} loading={loading}>
+                            <MdOutlineRefresh />
+                        </ActionIcon>
+                    </Tooltip>
+                </Group>
+                <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md">
+                    <SummaryField label="Created">{new Date(created).toLocaleString()}</SummaryField>
+                    <SummaryField label="Last updated">{new Date(lastUpdated).toLocaleString()}</SummaryField>
+                    <SummaryField label="Node">{workerNodeId || 'Unassigned'}</SummaryField>
+                    <SummaryField label="Instance">{header.id.split('-')[0]}</SummaryField>
+                </SimpleGrid>
+            </Card>
+
+            <BuildLogConsole log={instance?.deploymentLog} live={isInProgressState(state)} />
+
+            <Stack gap="xs">
+                <Title order={6}>Services</Title>
+                {services.length === 0 ? (
+                    <Text c="dimmed" fz="sm">
+                        No services for this deployment.
+                    </Text>
+                ) : (
+                    <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                        {services.map((service) => (
+                            <ServiceStatusCard key={service.instanceId} service={service} />
+                        ))}
+                    </SimpleGrid>
+                )}
+            </Stack>
+
+            <Stack gap="xs">
+                <Title order={6}>Container Logs</Title>
+                <LogViewer selector={{ projectInstanceId: header.id }} facetFields={['serviceName', 'nodeId']} defaultColumns={['ts', 'serviceName', 'msg']} />
+            </Stack>
+        </Stack>
+    );
+};

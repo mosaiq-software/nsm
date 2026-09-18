@@ -1,17 +1,21 @@
-import { Accordion, ActionIcon, Alert, Box, Button, Center, CopyButton, Divider, Fieldset, Group, Loader, Modal, PasswordInput, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Box, Button, Card, Center, CopyButton, Divider, Group, Loader, Modal, PasswordInput, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { DeploymentState, Project, ProjectInstance, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
-import { useEffect, useState } from 'react';
+import { DeploymentState, FullDirectoryMap, Project, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { MdOutlineCancel, MdOutlineCheckBox, MdOutlineDelete, MdOutlineInsertLink, MdOutlineKey, MdOutlineRefresh, MdOutlineRocketLaunch } from 'react-icons/md';
-import { ConsoleLog } from '@/components/ConsoleLog';
+import { MdOutlineCancel, MdOutlineCheckBox, MdOutlineDelete, MdOutlineInsertLink, MdOutlineKey, MdOutlineRocketLaunch } from 'react-icons/md';
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
+import { DeploymentInstanceList } from '@/components/deploy/DeploymentInstanceList';
+import { DeploymentInstanceDetail } from '@/components/deploy/DeploymentInstanceDetail';
+import { isInProgressState } from '@/components/deploy/DeploymentStateBadge';
 import { deployQueueStatusFor } from '@/utils/deployQueue';
 import { useAPI } from '@/utils/api';
+
+const LIST_REFRESH_INTERVAL_MS = 5000;
 
 const ProjectDeployPage = () => {
     const api = useAPI();
@@ -21,28 +25,43 @@ const ProjectDeployPage = () => {
     const clusterCtx = useCluster();
     const [project, setProject] = useState<Project | undefined | null>(undefined);
     const [modal, setModal] = useState<'reset-key' | 'deploy' | 'teardown' | 'cancel' | null>(null);
-    const [openProjectInstance, setOpenProjectInstance] = useState<string | null>(null);
-    const [currentProjectInstanceId, setCurrentProjectInstanceId] = useState<string | undefined>(undefined);
-    const [currentProjectInstance, setCurrentProjectInstance] = useState<ProjectInstance | undefined>(undefined);
+    const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
+    const [pendingHeader, setPendingHeader] = useState<ProjectInstanceHeader | null>(null);
 
     useEffect(() => {
         const foundProject = projectCtx.projects.find((proj) => proj.id === projectId);
         setProject(foundProject);
     }, [projectId, projectCtx.projects]);
 
+    const serverHeaders = useMemo(() => [...(project?.instances ?? [])].sort((a, b) => b.created - a.created), [project?.instances]);
+
+    // Include a freshly-triggered deployment before the project list has caught up with it.
+    const headers = useMemo(() => {
+        if (pendingHeader && !serverHeaders.some((h) => h.id === pendingHeader.id)) return [pendingHeader, ...serverHeaders];
+        return serverHeaders;
+    }, [pendingHeader, serverHeaders]);
+
+    // Drop the placeholder once the real instance shows up in the project list.
     useEffect(() => {
-        const intervalId = setInterval(async () => {
-            if (currentProjectInstanceId) {
-                const instance = await api.get(API_ROUTES.GET_PROJECT_INSTANCE, { projectInstanceId: currentProjectInstanceId });
-                if (!instance) return;
-                setCurrentProjectInstance({ ...instance });
-                if (instance?.state !== DeploymentState.DEPLOYING && instance?.state !== DeploymentState.QUEUED) {
-                    clearInterval(intervalId);
-                }
-            }
-        }, 2000);
-        return () => clearInterval(intervalId);
-    }, [currentProjectInstanceId]);
+        if (pendingHeader && serverHeaders.some((h) => h.id === pendingHeader.id)) setPendingHeader(null);
+    }, [serverHeaders, pendingHeader]);
+
+    // Keep the selection valid, defaulting to the newest deployment.
+    useEffect(() => {
+        if (headers.length === 0) {
+            setSelectedInstanceId(null);
+            return;
+        }
+        setSelectedInstanceId((prev) => (prev && headers.some((h) => h.id === prev) ? prev : headers[0].id));
+    }, [headers]);
+
+    // Refresh the deployment list while anything is in flight so its state badges stay current.
+    const anyInProgress = headers.some((h) => isInProgressState(h.state));
+    useEffect(() => {
+        if (!anyInProgress) return;
+        const id = setInterval(() => void projectCtx.refresh(), LIST_REFRESH_INTERVAL_MS);
+        return () => clearInterval(id);
+    }, [anyInProgress]); // eslint-disable-line react-hooks/exhaustive-deps
 
     if (project === undefined) {
         return (
@@ -69,10 +88,21 @@ const ProjectDeployPage = () => {
         if (!newLogId) {
             notifications.show({ message: 'Failed to get deployment log ID. Reload to see log', color: 'yellow' });
         } else {
-            setOpenProjectInstance(newLogId);
-            setCurrentProjectInstanceId(newLogId);
+            const now = Date.now();
+            setPendingHeader({
+                id: newLogId,
+                projectId: project.id,
+                workerNodeId: project.workerNodeId ?? '',
+                state: DeploymentState.QUEUED,
+                created: now,
+                lastUpdated: now,
+                active: false,
+                directories: {} as FullDirectoryMap,
+            });
+            setSelectedInstanceId(newLogId);
         }
         projectCtx.update(project.id, { dirtyConfig: false }, true);
+        void projectCtx.refresh();
     };
 
     const handleResetDeployKey = async () => {
@@ -111,6 +141,8 @@ const ProjectDeployPage = () => {
     const canDeploy = project.hasDockerCompose && clusterCtx.hasLeader && !inQueue && project.state !== DeploymentState.DEPLOYING && project.state !== DeploymentState.DESTROYING;
 
     const deployUrl = `${window.location.origin}/deploy/${project.id}/${project.deploymentKey}`;
+
+    const selectedHeader = headers.find((h) => h.id === selectedInstanceId) ?? null;
 
     return (
         <Stack>
@@ -211,25 +243,58 @@ const ProjectDeployPage = () => {
                 </Stack>
             </Modal>
             <ProjectHeader project={project} section="Deployment" />
-            <Group>
-                <Button onClick={() => setModal('deploy')} variant="light" color="green" leftSection={<MdOutlineRocketLaunch />} disabled={!canDeploy}>
-                    Deploy
-                </Button>
-                <DeployQueueBadge projectId={project.id} />
-                {inQueue && (
-                    <Text size="sm" c="dimmed">
-                        {queueStatus.state === 'active' ? 'Deploying now.' : `Waiting in queue (position ${queueStatus.position}).`}
-                    </Text>
-                )}
-                {inQueue && (
-                    <Button onClick={() => setModal('cancel')} variant="light" color="orange" leftSection={<MdOutlineCancel />}>
-                        Cancel Deploy
-                    </Button>
-                )}
-                <Button onClick={() => setModal('teardown')} variant="light" color="red" leftSection={<MdOutlineDelete />} disabled={!clusterCtx.hasLeader || project.state === DeploymentState.DESTROYING}>
-                    Teardown
-                </Button>
-            </Group>
+
+            <Card withBorder>
+                <Stack>
+                    <Group>
+                        <Button onClick={() => setModal('deploy')} variant="light" color="green" leftSection={<MdOutlineRocketLaunch />} disabled={!canDeploy}>
+                            Deploy
+                        </Button>
+                        <DeployQueueBadge projectId={project.id} />
+                        {inQueue && (
+                            <Text size="sm" c="dimmed">
+                                {queueStatus.state === 'active' ? 'Deploying now.' : `Waiting in queue (position ${queueStatus.position}).`}
+                            </Text>
+                        )}
+                        {inQueue && (
+                            <Button onClick={() => setModal('cancel')} variant="light" color="orange" leftSection={<MdOutlineCancel />}>
+                                Cancel Deploy
+                            </Button>
+                        )}
+                        <Button onClick={() => setModal('teardown')} variant="light" color="red" leftSection={<MdOutlineDelete />} disabled={!clusterCtx.hasLeader || project.state === DeploymentState.DESTROYING}>
+                            Teardown
+                        </Button>
+                    </Group>
+                    <Group align="flex-end" wrap="nowrap">
+                        <PasswordInput label="Deployment Key" value={project.deploymentKey} readOnly w={'32ch'} />
+                        <CopyButton value={project.deploymentKey ?? ''}>
+                            {({ copied, copy }) => (
+                                <Tooltip label={'Copy key'} withArrow>
+                                    <ActionIcon variant={copied ? 'filled' : 'light'} onClick={copy} size="input-sm">
+                                        {copied ? <MdOutlineCheckBox /> : <MdOutlineKey />}
+                                    </ActionIcon>
+                                </Tooltip>
+                            )}
+                        </CopyButton>
+                        <CopyButton value={deployUrl}>
+                            {({ copied, copy }) => (
+                                <Tooltip label={'Copy Deploy URL'} withArrow>
+                                    <ActionIcon variant={copied ? 'filled' : 'light'} onClick={copy} size="input-sm">
+                                        {copied ? <MdOutlineCheckBox /> : <MdOutlineInsertLink />}
+                                    </ActionIcon>
+                                </Tooltip>
+                            )}
+                        </CopyButton>
+                        <Box flex={1} h="md">
+                            <Divider />
+                        </Box>
+                        <Button color="red" variant="light" onClick={() => setModal('reset-key')}>
+                            Reset Key
+                        </Button>
+                    </Group>
+                </Stack>
+            </Card>
+
             {!project.hasDockerCompose && (
                 <Alert color="red" variant="filled" title="Undeployable Project">
                     This project does not have a Docker Compose file configured.
@@ -253,114 +318,18 @@ const ProjectDeployPage = () => {
                     before deploying.
                 </Alert>
             )}
-            <Group align="flex-end" wrap="nowrap">
-                <PasswordInput label="Deployment Key" value={project.deploymentKey} readOnly w={'32ch'} />
-                <CopyButton value={project.deploymentKey ?? ''}>
-                    {({ copied, copy }) => (
-                        <Tooltip label={'Copy key'} withArrow>
-                            <ActionIcon variant={copied ? 'filled' : 'light'} onClick={copy} size="input-sm">
-                                {copied ? <MdOutlineCheckBox /> : <MdOutlineKey />}
-                            </ActionIcon>
-                        </Tooltip>
-                    )}
-                </CopyButton>
-                <CopyButton value={deployUrl}>
-                    {({ copied, copy }) => (
-                        <Tooltip label={'Copy Deploy URL'} withArrow>
-                            <ActionIcon variant={copied ? 'filled' : 'light'} onClick={copy} size="input-sm">
-                                {copied ? <MdOutlineCheckBox /> : <MdOutlineInsertLink />}
-                            </ActionIcon>
-                        </Tooltip>
-                    )}
-                </CopyButton>
-                <Box flex={1} h="md">
-                    <Divider />
-                </Box>
 
-                <Button color="red" variant="light" onClick={() => setModal('reset-key')}>
-                    Reset Key
-                </Button>
-            </Group>
             <Divider />
-            <Title order={5}>Deployment Instances</Title>
-            <Accordion value={openProjectInstance} onChange={setOpenProjectInstance}>
-                {[currentProjectInstance, ...(project.instances ?? [])].map((instance) => instance && <ProjectInstanceItem key={instance.id} header={instance} />)}
-            </Accordion>
-        </Stack>
-    );
-};
-
-interface ProjectInstanceItemProps {
-    header: ProjectInstanceHeader;
-}
-const ProjectInstanceItem = (props: ProjectInstanceItemProps) => {
-    const api = useAPI();
-    const [instance, setInstance] = useState<ProjectInstance | null>(null);
-
-    const handleGetProjectInstance = async () => {
-        try {
-            const instance = await api.get(API_ROUTES.GET_PROJECT_INSTANCE, { projectInstanceId: props.header.id });
-            if (!instance?.deploymentLog) {
-                return;
-            }
-            setInstance(instance);
-        } catch (error) {
-            setInstance(null);
-        }
-    };
-
-    const date = new Date(instance?.created ?? props.header.created).toLocaleString();
-
-    return (
-        <Accordion.Item value={props.header.id}>
-            <Accordion.Control
-                onClick={() => {
-                    handleGetProjectInstance();
-                }}
-            >
-                <Group justify="space-between">
-                    <Text>{date}</Text>
-                    <Text>({instance?.state ?? props.header.state})</Text>
+            <Title order={5}>Deployments</Title>
+            {headers.length === 0 ? (
+                <Text c="dimmed">No deployments yet. Trigger a deploy to get started.</Text>
+            ) : (
+                <Group align="flex-start" wrap="nowrap" gap="md">
+                    <DeploymentInstanceList instances={headers} selectedId={selectedInstanceId} onSelect={setSelectedInstanceId} />
+                    {selectedHeader && <DeploymentInstanceDetail key={selectedHeader.id} header={selectedHeader} />}
                 </Group>
-            </Accordion.Control>
-
-            <Accordion.Panel>
-                <Stack>
-                    <Group>
-                        <ActionIcon size="xs" onClick={handleGetProjectInstance}>
-                            <MdOutlineRefresh />
-                        </ActionIcon>
-                    </Group>
-                    <Stack>
-                        <Text>Services</Text>
-                        {instance?.services.map((service) => {
-                            return (
-                                <Fieldset
-                                    legend={service.serviceName}
-                                    key={service.serviceName}
-                                    style={{
-                                        width: '100%',
-                                    }}
-                                >
-                                    <Alert color={service.actualContainerState === service.expectedContainerState ? 'green' : 'red'} title={service.actualContainerState === service.expectedContainerState ? 'Service Healthy' : 'Service Unhealthy'}>
-                                        <Stack gap={0}>
-                                            <Text fz={'.75rem'} c="dimmed">
-                                                Expected {service.expectedContainerState}
-                                            </Text>
-                                            <Text>
-                                                {service.actualContainerState} as of {new Date(service.lastUpdated).toLocaleString()}
-                                            </Text>
-                                        </Stack>
-                                    </Alert>
-                                    <ConsoleLog title="Container Log" log={service.containerLogs} />
-                                </Fieldset>
-                            );
-                        })}
-                    </Stack>
-                    <ConsoleLog title="Deployment Log" log={instance?.deploymentLog} />
-                </Stack>
-            </Accordion.Panel>
-        </Accordion.Item>
+            )}
+        </Stack>
     );
 };
 
