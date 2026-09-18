@@ -6,6 +6,7 @@ import '@/persistence/projectInstancePersistence';
 import '@/persistence/serviceInstancePersistence';
 import '@/persistence/userPersistence';
 import '@/persistence/pushSubscriptionPersistence';
+import '@/persistence/notificationMutePersistence';
 import '@/persistence/allowedEntitiesPersistence';
 import '@/persistence/teamConfigPersistence';
 import '@/persistence/teamOverridePersistence';

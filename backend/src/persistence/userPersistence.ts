@@ -30,6 +30,12 @@ export const getUserByAuthTokenModel = async (authToken: string): Promise<User |
     return userInstance.toJSON() as User;
 };
 
+export const getUserByGithubIdModel = async (githubId: string): Promise<User | null> => {
+    const userInstance = await UserModel.findByPk(githubId);
+    if (!userInstance) return null;
+    return userInstance.toJSON() as User;
+};
+
 export const updateUserModel = async (user: Partial<User> & { githubId: string }): Promise<void> => {
     const existingUser = await UserModel.findOne({ where: { githubId: user.githubId } });
     if (!existingUser) throw new Error('User not found');

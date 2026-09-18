@@ -12,7 +12,7 @@ import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
 import { MdOutlineWarningAmber } from 'react-icons/md';
 import { rawApiGetNoHook, useAPI } from '@/utils/api';
-import { disablePush, enablePush, isPushSubscribed, isPushSupported, regeneratePushKeys } from '@/utils/push';
+import { isPushSupported, regeneratePushKeys } from '@/utils/push';
 
 const emptyProject: Project = {
     id: '',
@@ -30,7 +30,6 @@ const Layout = (props: { children: React.ReactNode }) => {
     const navigate = useNavigate();
     const [modal, setModal] = useState<'create' | null>(null);
     const [creatingProject, setCreatingProject] = useState(false);
-    const [pushOn, setPushOn] = useState(false);
     const [pushBusy, setPushBusy] = useState(false);
     const [legacyFile, setLegacyFile] = useState<File | null>(null);
     const [newProject, setNewProject] = useState<Project>(emptyProject);
@@ -126,43 +125,6 @@ const Layout = (props: { children: React.ReactNode }) => {
         };
     }, [modal, debouncedOwner, debouncedRepo, token]);
 
-    // Reflect whether this browser already has a push subscription once the user is signed in.
-    useEffect(() => {
-        if (!userCtx.user || !isPushSupported()) return;
-        let cancelled = false;
-        void isPushSubscribed().then((subscribed) => {
-            if (!cancelled) setPushOn(subscribed);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [userCtx.user]);
-
-    const togglePush = async (enabled: boolean) => {
-        if (!token) return;
-        setPushBusy(true);
-        try {
-            if (enabled) {
-                await enablePush(token);
-                setPushOn(true);
-                notifications.show({ title: 'Notifications enabled', message: 'You will be notified about deploy events.', color: 'green' });
-            } else {
-                await disablePush(token);
-                setPushOn(false);
-                notifications.show({ title: 'Notifications disabled', message: 'You will no longer receive deploy notifications.', color: 'gray' });
-            }
-        } catch (error) {
-            setPushOn(false);
-            notifications.show({
-                title: 'Could not enable notifications',
-                message: error instanceof Error ? error.message : 'Failed to update notification settings',
-                color: 'red',
-            });
-        } finally {
-            setPushBusy(false);
-        }
-    };
-
     const regeneratePush = async () => {
         if (!token) return;
         if (!window.confirm('Regenerate push notification keys? Every browser (including this one) will need to re-enable notifications.')) return;
@@ -170,7 +132,6 @@ const Layout = (props: { children: React.ReactNode }) => {
         try {
             const result = await regeneratePushKeys(token);
             if (!result.ok) throw new Error(result.reason);
-            setPushOn(await isPushSubscribed());
             notifications.show({ title: 'Push keys regenerated', message: 'A new key pair was generated. Existing subscriptions were reset.', color: 'green' });
         } catch (error) {
             notifications.show({
@@ -293,9 +254,6 @@ const Layout = (props: { children: React.ReactNode }) => {
                         </Text>
                     </Group>
                     <Group align="center" gap="md">
-                        {userCtx.user && isPushSupported() && (
-                            <Switch label="Notifications" checked={pushOn} disabled={pushBusy} onChange={(e) => togglePush(e.currentTarget.checked)} />
-                        )}
                         <Menu>
                             <Menu.Target>
                                 <Avatar

@@ -1,9 +1,11 @@
 import webpush from 'web-push';
-import { DeploymentState, Project, PushSubscriptionJSON } from '@mosaiq/nsm-common/types';
+import { Capability, DeploymentState, Project, PushSubscriptionJSON } from '@mosaiq/nsm-common/types';
 import { config } from '@/config';
 import { cluster } from '@/cluster/node';
-import { getUserByAuthTokenModel } from '@/persistence/userPersistence';
-import { createPushSubscriptionModel, deleteAllPushSubscriptionsModel, deletePushSubscriptionByEndpointModel, getAllPushSubscriptionsModel } from '@/persistence/pushSubscriptionPersistence';
+import { getUserByAuthTokenModel, getUserByGithubIdModel } from '@/persistence/userPersistence';
+import { createPushSubscriptionModel, deleteAllPushSubscriptionsModel, deletePushSubscriptionByEndpointModel, getAllPushSubscriptionsModel, StoredPushSubscription } from '@/persistence/pushSubscriptionPersistence';
+import { getMutingGithubIdsForProjectModel, muteProjectModel, unmuteProjectModel, isProjectMutedModel } from '@/persistence/notificationMutePersistence';
+import { getEffectiveCapabilitiesForProject } from '@/controllers/authz';
 import { getMeta, setMeta } from '@/persistence/clusterMetaPersistence';
 import { areaLog } from '@/utils/log';
 
@@ -111,6 +113,27 @@ export const unsubscribe = async (endpoint: string): Promise<void> => {
     pushLog.info({ action: 'subscription_removed', endpoint: truncEndpoint(endpoint) }, 'push subscription removed');
 };
 
+// Whether the user identified by authToken currently receives notifications for a project.
+// Opt-out: enabled unless the user has explicitly muted the project.
+export const getProjectNotificationEnabled = async (authToken: string, projectId: string): Promise<boolean> => {
+    const user = await getUserByAuthTokenModel(authToken);
+    if (!user) return false;
+    return !(await isProjectMutedModel(user.githubId, projectId));
+};
+
+// Enable or mute a project's notifications for the user identified by authToken.
+export const setProjectNotification = async (authToken: string, projectId: string, enabled: boolean): Promise<boolean> => {
+    const user = await getUserByAuthTokenModel(authToken);
+    if (!user) return false;
+    if (enabled) {
+        await unmuteProjectModel(user.githubId, projectId);
+    } else {
+        await muteProjectModel(user.githubId, projectId);
+    }
+    pushLog.info({ action: 'notification_preference_set', githubId: user.githubId, projectId, enabled }, `notifications ${enabled ? 'enabled' : 'muted'} for ${user.name} on ${projectId}`);
+    return true;
+};
+
 interface NotificationCopy {
     title: string;
     body: string;
@@ -153,10 +176,48 @@ export const sendDeploymentNotification = async (project: Project, state: Deploy
         });
 
         const subs = await getAllPushSubscriptionsModel();
+
+        // Group subscriptions by owning user so each recipient's mute preference and current access
+        // are resolved once, not per browser/endpoint.
+        const byUser = new Map<string, StoredPushSubscription[]>();
+        for (const sub of subs) {
+            const list = byUser.get(sub.githubId) ?? [];
+            list.push(sub);
+            byUser.set(sub.githubId, list);
+        }
+
+        const muted = await getMutingGithubIdsForProjectModel(project.id);
+
+        // Decide, per user, whether they should receive this notification: not muted, still known,
+        // and still holding VIEW on the project (a removed team member drops out here).
+        const eligibleGithubIds: string[] = [];
+        let mutedCount = 0;
+        let noAccessCount = 0;
+        await Promise.all(
+            [...byUser.keys()].map(async (githubId) => {
+                if (muted.has(githubId)) {
+                    mutedCount++;
+                    return;
+                }
+                const user = await getUserByGithubIdModel(githubId);
+                if (!user) {
+                    noAccessCount++;
+                    return;
+                }
+                const caps = await getEffectiveCapabilitiesForProject(user, { repoOwner: project.repoOwner });
+                if (!caps.includes(Capability.VIEW)) {
+                    noAccessCount++;
+                    return;
+                }
+                eligibleGithubIds.push(githubId);
+            })
+        );
+
+        const targets = eligibleGithubIds.flatMap((githubId) => byUser.get(githubId) ?? []);
         let sentCount = 0;
         let prunedCount = 0;
         await Promise.allSettled(
-            subs.map(async (sub) => {
+            targets.map(async (sub) => {
                 try {
                     await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, payload);
                     sentCount++;
@@ -173,8 +234,8 @@ export const sendDeploymentNotification = async (project: Project, state: Deploy
             })
         );
         pushLog.info(
-            { action: 'notification_dispatched', projectId: project.id, state, subscriberCount: subs.length, sentCount, prunedCount },
-            `dispatched ${state} notification for ${project.id} to ${sentCount}/${subs.length} subscriber(s)`
+            { action: 'notification_dispatched', projectId: project.id, state, userCount: byUser.size, eligibleUserCount: eligibleGithubIds.length, mutedCount, noAccessCount, subscriberCount: targets.length, sentCount, prunedCount },
+            `dispatched ${state} notification for ${project.id} to ${sentCount}/${targets.length} subscriber(s)`
         );
     } catch (e: any) {
         pushLog.error({ action: 'notification_dispatch_failed', projectId: project.id, state, err: e?.message || String(e) }, 'failed to send deployment notification');

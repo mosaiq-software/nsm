@@ -26,6 +26,7 @@ export enum API_ROUTES {
     GET_GITHUB_REPOS = '/github/repos',
     GET_GITHUB_BRANCHES = '/github/branches',
     GET_VAPID_PUBLIC_KEY = '/push/vapid-public-key',
+    GET_PROJECT_NOTIFICATION = '/push/preference/:projectId',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -50,6 +51,7 @@ export enum API_ROUTES {
     POST_LOGGER = '/logger/:logKey',
     POST_PUSH_SUBSCRIBE = '/push/subscribe',
     POST_PUSH_UNSUBSCRIBE = '/push/unsubscribe',
+    POST_SET_PROJECT_NOTIFICATION = '/push/preference/:projectId/set',
     POST_REGENERATE_VAPID = '/push/vapid/regenerate',
     POST_LOG_QUERY = '/observability/query',
     POST_LOG_FACETS = '/observability/facets',
@@ -80,6 +82,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_GITHUB_REPOS]: {};
     [API_ROUTES.GET_GITHUB_BRANCHES]: {};
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: {};
+    [API_ROUTES.GET_PROJECT_NOTIFICATION]: { projectId: string };
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -104,6 +107,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_LOGGER]: { logKey: string };
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: {};
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: {};
+    [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: { projectId: string };
     [API_ROUTES.POST_REGENERATE_VAPID]: {};
     [API_ROUTES.POST_LOG_QUERY]: {};
     [API_ROUTES.POST_LOG_FACETS]: {};
@@ -135,6 +139,7 @@ export interface API_BODY {
     [API_ROUTES.GET_GITHUB_REPOS]: undefined;
     [API_ROUTES.GET_GITHUB_BRANCHES]: undefined;
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: undefined;
+    [API_ROUTES.GET_PROJECT_NOTIFICATION]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -159,6 +164,7 @@ export interface API_BODY {
     [API_ROUTES.POST_LOGGER]: LogMessage;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: PushSubscriptionJSON;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: { endpoint: string };
+    [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: { enabled: boolean };
     [API_ROUTES.POST_REGENERATE_VAPID]: {};
     [API_ROUTES.POST_LOG_QUERY]: LogQueryRequest;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsRequest;
@@ -189,6 +195,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_GITHUB_REPOS]: string[];
     [API_ROUTES.GET_GITHUB_BRANCHES]: string[];
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
+    [API_ROUTES.GET_PROJECT_NOTIFICATION]: { enabled: boolean };
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -213,6 +220,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_LOGGER]: undefined;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: undefined;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: undefined;
+    [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: undefined;
     [API_ROUTES.POST_REGENERATE_VAPID]: { ok: boolean; reason?: string };
     [API_ROUTES.POST_LOG_QUERY]: LogQueryResult | undefined;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsResult | undefined;
@@ -245,6 +253,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_GITHUB_REPOS]: string;
     [API_ROUTES.GET_GITHUB_BRANCHES]: string;
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
+    [API_ROUTES.GET_PROJECT_NOTIFICATION]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;
@@ -269,6 +278,7 @@ export interface API_AUTH {
     [API_ROUTES.POST_LOGGER]: undefined;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: string;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: string;
+    [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: string;
     [API_ROUTES.POST_REGENERATE_VAPID]: string;
     [API_ROUTES.POST_LOG_QUERY]: string;
     [API_ROUTES.POST_LOG_FACETS]: string;

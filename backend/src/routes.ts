@@ -20,7 +20,7 @@ import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requi
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
 import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
 import { removeManagedCd, setupManagedCd } from '@/controllers/cicdController';
-import { getVapidPublicKey, regenerateVapidKeys, subscribe, unsubscribe } from '@/controllers/pushController';
+import { getProjectNotificationEnabled, getVapidPublicKey, regenerateVapidKeys, setProjectNotification, subscribe, unsubscribe } from '@/controllers/pushController';
 import { getAllNodesModel, getNodeByIdModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { mintInstallationToken, listInstallationOwners, listInstallationRepos, listRepoBranches } from '@/utils/githubApp';
@@ -762,6 +762,38 @@ privateRouter.post(API_ROUTES.POST_PUSH_UNSUBSCRIBE, async (req, res) => {
         res.status(200).json(undefined);
     } catch (e) {
         routeLog.error({ action: 'push_unsubscribe_error', err: (e as any)?.message }, 'error removing push subscription');
+        res.status(500).send();
+    }
+});
+
+// Read whether the signed-in user currently receives notifications for a project (opt-out default).
+privateRouter.get(API_ROUTES.GET_PROJECT_NOTIFICATION, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_NOTIFICATION];
+    try {
+        if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
+        const token = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
+        res.status(200).json({ enabled: await getProjectNotificationEnabled(token, params.projectId) });
+    } catch (e) {
+        routeLog.error({ action: 'get_project_notification_error', err: (e as any)?.message }, 'error reading notification preference');
+        res.status(500).send();
+    }
+});
+
+// Enable or mute a project's notifications for the signed-in user.
+privateRouter.post(API_ROUTES.POST_SET_PROJECT_NOTIFICATION, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_SET_PROJECT_NOTIFICATION];
+    const body = req.body as API_BODY[API_ROUTES.POST_SET_PROJECT_NOTIFICATION];
+    try {
+        if (typeof body?.enabled !== 'boolean') return void res.status(400).send('enabled required');
+        if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
+        const token = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
+        const ok = await setProjectNotification(token, params.projectId, body.enabled);
+        if (!ok) return void res.status(400).send('Could not set preference');
+        res.status(200).json(undefined);
+    } catch (e) {
+        routeLog.error({ action: 'set_project_notification_error', err: (e as any)?.message }, 'error setting notification preference');
         res.status(500).send();
     }
 });

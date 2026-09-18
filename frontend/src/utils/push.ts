@@ -72,6 +72,23 @@ export const disablePush = async (token: string): Promise<void> => {
     await sub.unsubscribe().catch(() => {});
 };
 
+// Read whether the signed-in user currently receives notifications for a project. This is the
+// server-side per-user preference (opt-out); it does not account for whether this browser has an
+// active push subscription.
+export const getProjectNotificationEnabled = async (token: string, projectId: string): Promise<boolean> => {
+    const result = await rawApiGetNoHook(API_ROUTES.GET_PROJECT_NOTIFICATION, { projectId }, token);
+    return Boolean(result?.enabled);
+};
+
+// Set the per-user notification preference for a project. When enabling, first ensure this browser
+// has a push subscription (requesting permission if needed) so notifications can actually arrive.
+export const setProjectNotificationEnabled = async (token: string, projectId: string, enabled: boolean): Promise<void> => {
+    if (enabled && !(await isPushSubscribed())) {
+        await enablePush(token);
+    }
+    await rawApiPostNoHook(API_ROUTES.POST_SET_PROJECT_NOTIFICATION, { projectId }, { enabled }, token);
+};
+
 // Regenerate the server-side VAPID key pair. This invalidates every existing subscription (all
 // browsers must re-subscribe), so if this browser was subscribed we drop the now-stale local
 // subscription and re-subscribe against the new key. Returns the server result.
