@@ -6,6 +6,7 @@ import { config } from '@/config';
 import { cluster } from '@/cluster/node';
 import { leaderEnsureCerts } from '@/reconcile/certs';
 import { runSelfUpdateRolloutIfLeader } from '@/cluster/selfUpdate';
+import { collectDiskUsage } from '@/reconcile/diskUsage';
 import { areaLog } from '@/utils/log';
 
 const initLog = areaLog('startup');
@@ -70,5 +71,10 @@ export const registerCronJobs = () => {
         initLog.debug({ action: 'cron_fired', job: 'self_update', isLeader: cluster.isLeader() }, 'self-update cron fired');
         if (cluster.isLeader()) void runSelfUpdateRolloutIfLeader();
     });
-    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*'] }, 'cron jobs registered');
+    // Every node: sample per-project disk usage into the Prometheus gauge every 30 minutes.
+    cron.schedule('*/30 * * * *', () => {
+        initLog.debug({ action: 'cron_fired', job: 'disk_usage' }, 'disk usage cron fired');
+        void collectDiskUsage().catch((e) => initLog.error({ action: 'disk_usage_failed', err: e?.message }, 'disk usage collection failed'));
+    });
+    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30'] }, 'cron jobs registered');
 };

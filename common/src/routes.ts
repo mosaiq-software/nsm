@@ -1,4 +1,4 @@
-import { Admin, Capability, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
+import { Admin, Capability, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -18,6 +18,9 @@ export enum API_ROUTES {
     GET_ADMINS = '/admins',
     GET_OBSERVABILITY_LOGS = '/observability/logs',
     GET_OBSERVABILITY_METRICS = '/observability/metrics',
+    GET_NODE_METRICS = '/observability/node-metrics',
+    GET_NODE_STORAGE = '/observability/node-storage',
+    GET_NODE_STORAGE_SERIES = '/observability/node-storage/series',
     GET_NSM_LOGS = '/observability/nsm-logs',
     GET_GITHUB_OWNERS = '/github/owners',
     GET_GITHUB_REPOS = '/github/repos',
@@ -48,6 +51,7 @@ export enum API_ROUTES {
     POST_REGENERATE_VAPID = '/push/vapid/regenerate',
     POST_LOG_QUERY = '/observability/query',
     POST_LOG_FACETS = '/observability/facets',
+    POST_NODE_STORAGE_SNAPSHOT = '/observability/node-storage/snapshot',
 }
 export interface API_PARAMS {
     //GET
@@ -66,6 +70,9 @@ export interface API_PARAMS {
     [API_ROUTES.GET_ADMINS]: {};
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: {};
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: {};
+    [API_ROUTES.GET_NODE_METRICS]: {};
+    [API_ROUTES.GET_NODE_STORAGE]: {};
+    [API_ROUTES.GET_NODE_STORAGE_SERIES]: {};
     [API_ROUTES.GET_NSM_LOGS]: {};
     [API_ROUTES.GET_GITHUB_OWNERS]: {};
     [API_ROUTES.GET_GITHUB_REPOS]: {};
@@ -96,6 +103,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_REGENERATE_VAPID]: {};
     [API_ROUTES.POST_LOG_QUERY]: {};
     [API_ROUTES.POST_LOG_FACETS]: {};
+    [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: {};
 }
 export interface API_BODY {
     // Only POST
@@ -115,6 +123,9 @@ export interface API_BODY {
     [API_ROUTES.GET_ADMINS]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: undefined;
+    [API_ROUTES.GET_NODE_METRICS]: undefined;
+    [API_ROUTES.GET_NODE_STORAGE]: undefined;
+    [API_ROUTES.GET_NODE_STORAGE_SERIES]: undefined;
     [API_ROUTES.GET_NSM_LOGS]: undefined;
     [API_ROUTES.GET_GITHUB_OWNERS]: undefined;
     [API_ROUTES.GET_GITHUB_REPOS]: undefined;
@@ -145,6 +156,7 @@ export interface API_BODY {
     [API_ROUTES.POST_REGENERATE_VAPID]: {};
     [API_ROUTES.POST_LOG_QUERY]: LogQueryRequest;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsRequest;
+    [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: { nodeId: string };
 }
 export interface API_RETURN {
     //GET
@@ -163,6 +175,9 @@ export interface API_RETURN {
     [API_ROUTES.GET_ADMINS]: { admins: Admin[]; superAdminLogin: string | null } | undefined;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: ObservabilityLogsResult | undefined;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: ObservabilityMetricsResult | undefined;
+    [API_ROUTES.GET_NODE_METRICS]: ObservabilityMetricsResult | undefined;
+    [API_ROUTES.GET_NODE_STORAGE]: NodeStorageSpec | undefined;
+    [API_ROUTES.GET_NODE_STORAGE_SERIES]: ObservabilityMetricsResult | undefined;
     [API_ROUTES.GET_NSM_LOGS]: ObservabilityLogsResult | undefined;
     [API_ROUTES.GET_GITHUB_OWNERS]: GithubOwner[];
     [API_ROUTES.GET_GITHUB_REPOS]: string[];
@@ -193,6 +208,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_REGENERATE_VAPID]: { ok: boolean; reason?: string };
     [API_ROUTES.POST_LOG_QUERY]: LogQueryResult | undefined;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsResult | undefined;
+    [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: NodeStorageSpec | undefined;
 }
 
 export interface API_AUTH {
@@ -213,6 +229,9 @@ export interface API_AUTH {
     [API_ROUTES.GET_ADMINS]: string;
     [API_ROUTES.GET_OBSERVABILITY_LOGS]: string;
     [API_ROUTES.GET_OBSERVABILITY_METRICS]: string;
+    [API_ROUTES.GET_NODE_METRICS]: string;
+    [API_ROUTES.GET_NODE_STORAGE]: string;
+    [API_ROUTES.GET_NODE_STORAGE_SERIES]: string;
     [API_ROUTES.GET_NSM_LOGS]: string;
     [API_ROUTES.GET_GITHUB_OWNERS]: string;
     [API_ROUTES.GET_GITHUB_REPOS]: string;
@@ -243,4 +262,5 @@ export interface API_AUTH {
     [API_ROUTES.POST_REGENERATE_VAPID]: string;
     [API_ROUTES.POST_LOG_QUERY]: string;
     [API_ROUTES.POST_LOG_FACETS]: string;
+    [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: string;
 }

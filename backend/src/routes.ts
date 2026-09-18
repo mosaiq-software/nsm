@@ -10,7 +10,9 @@ import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
-import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, MetricKind } from '@/controllers/observabilityController';
+import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, queryNodeMetric, getNodeStorageSpec, queryNodeStorageSeries, MetricKind } from '@/controllers/observabilityController';
+import { NodeMetricKind } from '@mosaiq/nsm-common/types';
+import { collectDiskUsage } from '@/reconcile/diskUsage';
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { Capability } from '@mosaiq/nsm-common/types';
@@ -18,11 +20,11 @@ import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requi
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
 import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
 import { getVapidPublicKey, regenerateVapidKeys, subscribe, unsubscribe } from '@/controllers/pushController';
-import { getAllNodesModel } from '@/persistence/nodePersistence';
+import { getAllNodesModel, getNodeByIdModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { mintInstallationToken, listInstallationOwners, listInstallationRepos, listRepoBranches } from '@/utils/githubApp';
 import { cluster } from '@/cluster/node';
-import { CLUSTER_SECRET_HEADER, forwardToLeader } from '@/cluster/leaderClient';
+import { CLUSTER_SECRET_HEADER, forwardToLeader, postToNode } from '@/cluster/leaderClient';
 import { ingestReport } from '@/cluster/statusGossip';
 import { registerNode, deregisterNode, getRegistry } from '@/cluster/registry';
 import { getDesiredDeploymentsAssignedToModel } from '@/persistence/desiredDeploymentPersistence';
@@ -310,6 +312,61 @@ privateRouter.get(API_ROUTES.GET_OBSERVABILITY_METRICS, async (req, res) => {
     try {
         const { projectInstanceId, serviceInstanceId, projectId, metric, start, end, step } = req.query as Record<string, string>;
         res.status(200).json(await queryMetric({ projectInstanceId, serviceInstanceId, projectId }, (metric as MetricKind) || 'cpu', start, end, step || '30s'));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Host-level CPU/mem/net/disk time series for one node (from node_exporter). Leader-only.
+privateRouter.get(API_ROUTES.GET_NODE_METRICS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const { nodeId, metric, start, end, step } = req.query as Record<string, string>;
+        if (!nodeId) return void res.status(400).send('nodeId required');
+        res.status(200).json(await queryNodeMetric(nodeId, (metric as NodeMetricKind) || 'cpu', start, end, step || '30s'));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Latest per-node storage spec (filesystems + per-project volume/code breakdown), read from
+// Prometheus without triggering a live disk scan. Leader-only.
+privateRouter.get(API_ROUTES.GET_NODE_STORAGE, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const { nodeId } = req.query as Record<string, string>;
+        if (!nodeId) return void res.status(400).send('nodeId required');
+        res.status(200).json(await getNodeStorageSpec(nodeId));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Per-project disk usage over time for a node (plus a node-summed series). Leader-only.
+privateRouter.get(API_ROUTES.GET_NODE_STORAGE_SERIES, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const { nodeId, start, end, step } = req.query as Record<string, string>;
+        if (!nodeId) return void res.status(400).send('nodeId required');
+        res.status(200).json(await queryNodeStorageSeries(nodeId, start, end, step || '30s'));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// On-demand disk snapshot: run a fresh scan on the target node and return the live storage spec.
+// The scan also updates the node's gauge, so the fresh values land in Prometheus at the next scrape.
+privateRouter.post(API_ROUTES.POST_NODE_STORAGE_SNAPSHOT, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const { nodeId } = (req.body || {}) as { nodeId?: string };
+        if (!nodeId) return void res.status(400).send('nodeId required');
+        if (nodeId === config.nodeId) return void res.status(200).json(await collectDiskUsage());
+        const node = await getNodeByIdModel(nodeId);
+        if (!node) return void res.status(404).send('node not found');
+        const spec = await postToNode(node.address, node.apiPort, '/node/disk-snapshot', {}, 120000);
+        if (!spec) return void res.status(502).send('failed to reach node for snapshot');
+        res.status(200).json(spec);
     } catch (e: any) {
         res.status(400).send(e.message);
     }
@@ -793,6 +850,17 @@ internalRouter.post('/node/teardown-project', requireClusterSecret, async (req, 
     const { projectId } = req.body || {};
     res.status(200).json(undefined);
     if (projectId) void teardownProjectLocal(String(projectId));
+});
+
+// Leader asks a node to run a fresh disk-usage scan now and return its storage spec. The scan also
+// refreshes this node's Prometheus gauge so the on-demand snapshot lands in the time series.
+internalRouter.post('/node/disk-snapshot', requireClusterSecret, async (_req, res) => {
+    try {
+        res.status(200).json(await collectDiskUsage());
+    } catch (e: any) {
+        routeLog.error({ action: 'disk_snapshot_error', err: e?.message }, 'error collecting disk snapshot');
+        res.status(500).send(e?.message);
+    }
 });
 
 // Leader asks the owning node to cancel an in-flight deployment: SIGKILL the build so it stops

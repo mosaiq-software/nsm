@@ -33,3 +33,14 @@ export const errorsTotal = new client.Counter({
     labelNames: ['area'] as const,
     registers: [registry],
 });
+
+// Per-project disk usage on this node, split by kind (volume vs deployed code) and by the
+// filesystem (device + mountpoint) the data lives on. nodeId comes free from the registry's
+// default labels. Populated by the disk-usage collector and scraped into Prometheus so per-project
+// storage becomes a time series alongside CPU/mem/net.
+export const projectDiskUsageBytes = new client.Gauge({
+    name: 'nsm_project_disk_usage_bytes',
+    help: 'Disk bytes used per project split by kind, filesystem',
+    labelNames: ['projectId', 'kind', 'device', 'mountpoint'] as const,
+    registers: [registry],
+});

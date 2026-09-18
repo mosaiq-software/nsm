@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Alert, Badge, Button, Center, Code, CopyButton, Group, Loader, Paper, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Center, Code, CopyButton, Group, Loader, Paper, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { Link } from 'react-router-dom';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useCluster } from '@/contexts/cluster-context';
 import { useAPI } from '@/utils/api';
@@ -120,7 +121,9 @@ const NodesPage = () => {
                                                     </span>
                                                 </Tooltip>
                                             )}
-                                            <Text fw={600}>{node.nodeId}</Text>
+                                            <Anchor component={Link} to={`/nodes/${node.nodeId}`} fw={600}>
+                                                {node.nodeId}
+                                            </Anchor>
                                         </Group>
                                     </Table.Td>
                                     <Table.Td>{node.address}</Table.Td>

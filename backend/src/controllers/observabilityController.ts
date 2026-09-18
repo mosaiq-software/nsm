@@ -1,5 +1,5 @@
 import { config } from '@/config';
-import { LogEntry, LogFacet, LogFacetsRequest, LogFacetsResult, LogFilter, LogQueryRequest, LogQueryResult, LogSelector, ObservabilityLogsResult, ObservabilityMetricsResult } from '@mosaiq/nsm-common/types';
+import { LogEntry, LogFacet, LogFacetsRequest, LogFacetsResult, LogFilter, LogQueryRequest, LogQueryResult, LogSelector, NodeFilesystemUsage, NodeMetricKind, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, ProjectDiskUsage } from '@mosaiq/nsm-common/types';
 
 // Selector identifying a deployment (in precedence order). All queries run on the leader, where
 // the Loki/Prometheus stack lives.
@@ -67,6 +67,117 @@ export const queryMetric = async (s: ObservabilitySelector, metric: MetricKind, 
         values: (r.values || []).map(([t, v]: [number, string]) => ({ t, v: Number(v) })),
     }));
     return { metric, series };
+};
+
+// === Node-level metrics + storage spec ===
+
+// Escape a value for use inside a PromQL double-quoted label matcher.
+const escapePromLabel = (v: string): string => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+// Real (non-pseudo) filesystems only: excludes tmpfs/overlay/cgroup/etc so per-drive totals reflect
+// actual storage. Applied to node_exporter node_filesystem_* series.
+const REAL_FS_FILTER = `fstype!~"tmpfs|overlay|squashfs|devtmpfs|ramfs|autofs|mqueue|debugfs|tracefs|securityfs|pstore|bpf|nsfs|fusectl|binfmt_misc|configfs|hugetlbfs|devpts|rpc_pipefs|proc|sysfs|cgroup|cgroup2"`;
+
+// Generic Prometheus range query -> ObservabilityMetricsResult (metric left blank; callers set it).
+const promQueryRange = async (expr: string, startS: string, endS: string, step: string): Promise<ObservabilityMetricsResult> => {
+    const url = `${config.prometheusUrl}/api/v1/query_range?query=${encodeURIComponent(expr)}&start=${startS}&end=${endS}&step=${step}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`prometheus ${res.status}`);
+    const body: any = await res.json();
+    const series = (body?.data?.result || []).map((r: any) => ({
+        labels: r.metric || {},
+        values: (r.values || []).map(([t, v]: [number, string]) => ({ t, v: Number(v) })),
+    }));
+    return { metric: '', series };
+};
+
+// Generic Prometheus instant query -> flat list of labelled samples.
+const promQueryInstant = async (expr: string): Promise<{ metric: Record<string, string>; value: number }[]> => {
+    const url = `${config.prometheusUrl}/api/v1/query?query=${encodeURIComponent(expr)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`prometheus ${res.status}`);
+    const body: any = await res.json();
+    return (body?.data?.result || []).map((r: any) => ({ metric: r.metric || {}, value: Number(r.value?.[1] ?? 0) }));
+};
+
+// Host-level PromQL from node_exporter for one node. CPU is utilization (fraction of cores),
+// memory is used bytes, network is total rx+tx bytes/s, disk is total used bytes across real FSes.
+const nodeMetricExpr = (metric: NodeMetricKind, nodeSel: string): string => {
+    switch (metric) {
+        case 'cpu':
+            return `(1 - avg(rate(node_cpu_seconds_total{mode="idle",${nodeSel}}[1m])))`;
+        case 'mem':
+            return `(node_memory_MemTotal_bytes{${nodeSel}} - node_memory_MemAvailable_bytes{${nodeSel}})`;
+        case 'net':
+            return `(sum(rate(node_network_receive_bytes_total{${nodeSel}}[1m])) + sum(rate(node_network_transmit_bytes_total{${nodeSel}}[1m])))`;
+        case 'disk':
+            return `(sum(node_filesystem_size_bytes{${nodeSel},${REAL_FS_FILTER}}) - sum(node_filesystem_avail_bytes{${nodeSel},${REAL_FS_FILTER}}))`;
+    }
+};
+
+export const queryNodeMetric = async (nodeId: string, metric: NodeMetricKind, startS: string, endS: string, step = '30s'): Promise<ObservabilityMetricsResult> => {
+    if (!nodeId) throw new Error('nodeId is required');
+    const nodeSel = `nodeId="${escapePromLabel(nodeId)}"`;
+    const result = await promQueryRange(nodeMetricExpr(metric, nodeSel), startS, endS, step);
+    return { ...result, metric };
+};
+
+// Latest storage tree for a node, assembled from Prometheus instant queries (no live disk scan):
+// per-filesystem capacity from node_exporter, per-project volume/code from the nsmd gauge.
+export const getNodeStorageSpec = async (nodeId: string): Promise<NodeStorageSpec> => {
+    if (!nodeId) throw new Error('nodeId is required');
+    const nodeSel = `nodeId="${escapePromLabel(nodeId)}"`;
+    const [sizeVec, availVec, projVec] = await Promise.all([
+        promQueryInstant(`node_filesystem_size_bytes{${nodeSel},${REAL_FS_FILTER}}`),
+        promQueryInstant(`node_filesystem_avail_bytes{${nodeSel},${REAL_FS_FILTER}}`),
+        promQueryInstant(`nsm_project_disk_usage_bytes{${nodeSel}}`),
+    ]);
+
+    const fsKey = (m: Record<string, string>) => `${m.device || ''}|${m.mountpoint || ''}`;
+    const fsMap = new Map<string, NodeFilesystemUsage>();
+    const ensureFs = (m: Record<string, string>): NodeFilesystemUsage => {
+        const key = fsKey(m);
+        let entry = fsMap.get(key);
+        if (!entry) {
+            entry = { device: m.device || '', mountpoint: m.mountpoint || '', fstype: m.fstype || '', sizeBytes: 0, usedBytes: 0, availBytes: 0 };
+            fsMap.set(key, entry);
+        }
+        return entry;
+    };
+    for (const s of sizeVec) ensureFs(s.metric).sizeBytes = s.value;
+    for (const a of availVec) ensureFs(a.metric).availBytes = a.value;
+    for (const fs of fsMap.values()) fs.usedBytes = Math.max(0, fs.sizeBytes - fs.availBytes);
+
+    const projMap = new Map<string, ProjectDiskUsage>();
+    for (const p of projVec) {
+        const projectId = p.metric.projectId || '';
+        const device = p.metric.device || '';
+        const mountpoint = p.metric.mountpoint || '';
+        const key = `${projectId}|${device}|${mountpoint}`;
+        let entry = projMap.get(key);
+        if (!entry) {
+            entry = { projectId, device, mountpoint, volumeBytes: 0, codeBytes: 0, totalBytes: 0 };
+            projMap.set(key, entry);
+        }
+        if (p.metric.kind === 'volume') entry.volumeBytes = p.value;
+        else if (p.metric.kind === 'code') entry.codeBytes = p.value;
+        entry.totalBytes = entry.volumeBytes + entry.codeBytes;
+    }
+
+    return { nodeId, capturedAt: Date.now(), filesystems: [...fsMap.values()], projects: [...projMap.values()] };
+};
+
+// Per-project disk usage over time for a node (one series per project) plus a node-summed series
+// (projectId="__total__"), so the UI can chart how storage changes per project and in aggregate.
+export const queryNodeStorageSeries = async (nodeId: string, startS: string, endS: string, step = '30s'): Promise<ObservabilityMetricsResult> => {
+    if (!nodeId) throw new Error('nodeId is required');
+    const nodeSel = `nodeId="${escapePromLabel(nodeId)}"`;
+    const [perProject, total] = await Promise.all([
+        promQueryRange(`sum by (projectId) (nsm_project_disk_usage_bytes{${nodeSel}})`, startS, endS, step),
+        promQueryRange(`sum(nsm_project_disk_usage_bytes{${nodeSel}})`, startS, endS, step),
+    ]);
+    const totalSeries = total.series.map((s) => ({ labels: { projectId: '__total__' }, values: s.values }));
+    return { metric: 'disk', series: [...perProject.series, ...totalSeries] };
 };
 
 // === Structured log query (Datadog-style viewer) ===

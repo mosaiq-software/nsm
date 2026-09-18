@@ -444,6 +444,39 @@ export interface ObservabilityMetricsResult {
     series: { labels: { [k: string]: string }; values: ObservabilityMetricSample[] }[];
 }
 
+// === Per-node storage spec ===
+// Host-level metric kinds charted per node. 'disk' is total used bytes across real filesystems.
+export type NodeMetricKind = 'cpu' | 'mem' | 'net' | 'disk';
+
+// One mounted filesystem ("hard drive") on a node and its capacity/usage.
+export interface NodeFilesystemUsage {
+    device: string;
+    mountpoint: string;
+    fstype: string;
+    sizeBytes: number;
+    usedBytes: number;
+    availBytes: number;
+}
+
+// A single project's disk footprint on one filesystem, split into its persistent volume and its
+// deployed code. totalBytes is volumeBytes + codeBytes.
+export interface ProjectDiskUsage {
+    projectId: string;
+    device: string;
+    mountpoint: string;
+    volumeBytes: number;
+    codeBytes: number;
+    totalBytes: number;
+}
+
+// Full storage picture for one node: every filesystem plus the per-project breakdown on each.
+export interface NodeStorageSpec {
+    nodeId: string;
+    capturedAt: number; // unix ms
+    filesystems: NodeFilesystemUsage[];
+    projects: ProjectDiskUsage[];
+}
+
 // === Structured log query (Datadog-style viewer) ===
 // Identifies which log stream to query. `source: 'nsmd'` targets the control-plane (pino JSON) logs;
 // the project selectors target a deployment's app-container logs (raw text). Mutually exclusive in

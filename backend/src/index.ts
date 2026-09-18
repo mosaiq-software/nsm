@@ -10,6 +10,7 @@ import { ensureObservabilityStack, ensureAgentStack } from './reconcile/observab
 import { runMigrations } from './db/migrator';
 import { recoverDeployQueue } from './controllers/deployQueue';
 import { initWebPush } from './controllers/pushController';
+import { collectDiskUsage } from './reconcile/diskUsage';
 import { areaLog } from './utils/log';
 
 const bootLog = areaLog('startup');
@@ -57,6 +58,10 @@ const start = async () => {
     // Converge local host toward desired state; report status/IP to the leader.
     startReconciler();
     startStatusReporting();
+
+    // Seed the per-project disk-usage gauge once at startup so the storage view has data before the
+    // first 30-minute cron tick. Fire-and-forget: a slow scan must not delay the daemon coming up.
+    void collectDiskUsage().catch((e) => bootLog.error({ action: 'initial_disk_usage_failed', err: e?.message }, 'initial disk usage collection failed'));
 
     const app = await initApp();
     const server = app.listen(config.apiPort, () => {
