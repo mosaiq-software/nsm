@@ -3,7 +3,7 @@ import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
 import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, FileInput, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import RouterLink from '@/components/RouterLink';
-import { DeployQueueBadge } from '@/components/DeployQueueBadge';
+import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { useProjects } from '@/contexts/project-context';
 import { useMe } from '@/contexts/me-context';
 import { Link, useNavigate } from 'react-router-dom';
@@ -360,7 +360,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                 team.projects
                                     .filter((p) => p.capabilities.includes(Capability.VIEW))
                                     .map((project) => (
-                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive rightSection={<DeployQueueBadge projectId={project.id} size="xs" />}>
+                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive rightSection={<ProjectStatusChip projectId={project.id} />}>
                                             {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />}

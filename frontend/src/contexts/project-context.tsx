@@ -1,11 +1,13 @@
 import { useAPI } from '@/utils/api';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { Project, Secret } from '@mosaiq/nsm-common/types';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { DeploymentState, Project, Secret } from '@mosaiq/nsm-common/types';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { deriveProjectState } from '@/utils/projectStatus';
 
 type ProjectContextType = {
     projects: Project[];
+    statusById: Record<string, DeploymentState>;
     refresh: () => Promise<void>;
     create: (newProject: Project) => Promise<void>;
     update: (id: string, updatedProject: Partial<Project>, clientOnly?: boolean) => Promise<void>;
@@ -16,9 +18,20 @@ type ProjectContextType = {
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
+const STATUS_POLL_MS = 5000;
+
+const deriveStatusMap = (projects: Project[]): Record<string, DeploymentState> => {
+    const map: Record<string, DeploymentState> = {};
+    for (const project of projects) map[project.id] = deriveProjectState(project);
+    return map;
+};
+
 const ProjectProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
     const [projects, setProjects] = useState<Project[]>([]);
+    const [statusById, setStatusById] = useState<Record<string, DeploymentState>>({});
     const api = useAPI();
+    const tokenRef = useRef<string | undefined>(api.token);
+    tokenRef.current = api.token;
 
     const refresh = async () => {
         try {
@@ -27,6 +40,7 @@ const ProjectProvider: React.FC<{ children?: React.ReactNode }> = ({ children })
                 return;
             }
             setProjects(response);
+            setStatusById(deriveStatusMap(response));
         } catch (error) {
             notifications.show({
                 title: 'Error',
@@ -36,8 +50,24 @@ const ProjectProvider: React.FC<{ children?: React.ReactNode }> = ({ children })
         }
     };
 
+    // Keep the sidebar status chips fresh without replacing `projects` (which would clobber
+    // unsaved edits on the config page). Only the derived status map is updated here.
+    const fetchStatuses = async () => {
+        const response = await api.get(API_ROUTES.GET_PROJECTS, {});
+        if (response) setStatusById(deriveStatusMap(response));
+    };
+
     useEffect(() => {
+        if (!api.token) {
+            setProjects([]);
+            setStatusById({});
+            return;
+        }
         refresh();
+        const interval = setInterval(() => {
+            if (tokenRef.current) fetchStatuses();
+        }, STATUS_POLL_MS);
+        return () => clearInterval(interval);
     }, [api.token]);
 
     const handleCreateProject = async (newProject: Project) => {
@@ -131,6 +161,7 @@ const ProjectProvider: React.FC<{ children?: React.ReactNode }> = ({ children })
         <ProjectContext.Provider
             value={{
                 projects,
+                statusById,
                 refresh,
                 create: handleCreateProject,
                 update: handleUpdateProject,
