@@ -4,8 +4,8 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { API_BODY, API_PARAMS, API_RETURN, API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeStatusReport } from '@mosaiq/nsm-common/types';
-import { createProject, deleteProject, getAllProjects, getProject, resetDeploymentKey, setProjectAssignment, syncProjectToRepoData, updateProject, verifyDeploymentKey } from '@/controllers/projectController';
-import { planLocally, teardownProject, updateDeploymentLog, promoteDeployment, cancelDeploy } from '@/controllers/deployController';
+import { createProject, deleteProject, getAllProjects, getProject, resetDeploymentKey, setProjectAssignment, syncProjectToRepoData, teardownProjectWithCleanup, updateProject, verifyDeploymentKey } from '@/controllers/projectController';
+import { planLocally, updateDeploymentLog, promoteDeployment, cancelDeploy } from '@/controllers/deployController';
 import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
@@ -24,7 +24,7 @@ import { ingestReport } from '@/cluster/statusGossip';
 import { registerNode, deregisterNode, getRegistry } from '@/cluster/registry';
 import { getDesiredDeploymentsAssignedToModel } from '@/persistence/desiredDeploymentPersistence';
 import { applyUpdateInstruction, setDesiredNsmVersion } from '@/cluster/selfUpdate';
-import { purgeProjectLocal } from '@/reconcile/teardown';
+import { purgeProjectLocal, teardownProjectLocal } from '@/reconcile/teardown';
 import { cancelLocalDeployment } from '@/reconcile/deploy';
 import { registry } from '@/utils/metrics';
 import { areaLog } from '@/utils/log';
@@ -423,7 +423,7 @@ privateRouter.post(API_ROUTES.POST_TEARDOWN_PROJECT, async (req, res) => {
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!requireLeader(req, res)) return;
-        await teardownProject(params.projectId);
+        await teardownProjectWithCleanup(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
         routeLog.error({ action: 'teardown_project_error', err: (e as any)?.message }, 'error tearing down project');
@@ -644,6 +644,14 @@ internalRouter.post('/node/purge-project', requireClusterSecret, async (req, res
     const { projectId } = req.body || {};
     res.status(200).json(undefined);
     if (projectId) void purgeProjectLocal(String(projectId));
+});
+
+// Leader asks a node to tear down a project without archiving its persistent dir (teardown, not
+// delete). Fire-and-forget: teardown can take minutes, past the RPC timeout.
+internalRouter.post('/node/teardown-project', requireClusterSecret, async (req, res) => {
+    const { projectId } = req.body || {};
+    res.status(200).json(undefined);
+    if (projectId) void teardownProjectLocal(String(projectId));
 });
 
 // Leader asks the owning node to cancel an in-flight deployment: SIGKILL the build so it stops

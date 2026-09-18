@@ -4,7 +4,7 @@ import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { applyLegacyOverlay, applyRepoData, getAllSecretsForProject } from './secretController';
 import { getRepoData } from '@/utils/repositoryUtils';
 import { getProjectInstancesByProjectIdModel } from '@/persistence/projectInstancePersistence';
-import { purgeProjectOnAssignedNode, teardownProject } from './deployController';
+import { purgeProjectOnAssignedNode, teardownProject, teardownProjectOnAssignedNode } from './deployController';
 import { deleteProjectInstancesForProject } from './projectInstanceController';
 import { renderAllNginx } from '@/reconcile/nginxRender';
 import { removeCertsForDomains } from '@/reconcile/certs';
@@ -142,6 +142,23 @@ export const generate32CharKey = (): string => crypto.randomUUID().replace(/-/g,
 
 export const setProjectAssignment = async (projectId: string, nodeId: string): Promise<void> => {
     await cluster.propose({ type: OpType.SET_PROJECT_ASSIGNMENT, projectId, nodeId });
+};
+
+// Teardown (not deletion): take the project offline and clean up like a delete - remove the
+// deployed code, nginx conf, and certs - but leave the persistent volume in place and keep the
+// project (and its instance history) in the DB so it can be redeployed later.
+export const teardownProjectWithCleanup = async (projectId: string): Promise<void> => {
+    projectLog.info({ action: 'project_teardown_started', projectId }, `tearing down project ${projectId}`);
+    const project = await getProject(projectId);
+    const domains = (project?.nginxConfig?.servers || []).map((s) => s.domain).filter(Boolean);
+    // Node-side teardown: containers + deploy dir removed, persistent dir left in place (no archive).
+    if (project) await teardownProjectOnAssignedNode(project);
+    await teardownProject(projectId);
+    // Drop the project's nginx conf before removing its certs, so no conf references a deleted
+    // fullchain.pem while nginx reloads.
+    await renderAllNginx();
+    await removeCertsForDomains(domains);
+    projectLog.info({ action: 'project_torn_down', projectId }, `project ${projectId} torn down`);
 };
 
 export const deleteProject = async (projectId: string): Promise<boolean> => {

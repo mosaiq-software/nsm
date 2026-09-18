@@ -11,8 +11,8 @@ vi.mock('@/persistence/desiredDeploymentPersistence', () => ({ getDesiredDeploym
 vi.mock('@/controllers/observabilityController', () => ({ queryLogs: vi.fn(async () => ({ lines: [] })), queryMetric: vi.fn(async () => ({ metric: 'cpu', series: [] })), queryNsmLogs: vi.fn(async () => ({ lines: [] })), queryStructuredLogs: vi.fn(async () => ({ entries: [] })), queryLogFacets: vi.fn(async () => ({ facets: [], total: 0 })) }));
 vi.mock('@/cluster/selfUpdate', () => ({ applyUpdateInstruction: vi.fn(), setDesiredNsmVersion: vi.fn() }));
 vi.mock('@/controllers/userController', () => ({ verifyAuthToken: vi.fn(async () => true), signInUser: vi.fn(), signOutUser: vi.fn() }));
-vi.mock('@/controllers/projectController', () => ({ getProject: vi.fn(async () => ({ id: 'p1' })), getAllProjects: vi.fn(async () => []), verifyDeploymentKey: vi.fn(async () => true), createProject: vi.fn(), updateProject: vi.fn(), deleteProject: vi.fn(), resetDeploymentKey: vi.fn(), setProjectAssignment: vi.fn(), syncProjectToRepoData: vi.fn() }));
-vi.mock('@/controllers/deployController', () => ({ deployProject: vi.fn(async () => 'log1'), planLocally: vi.fn(async () => ({ ports: [1], dirs: {} })), teardownProject: vi.fn(), updateDeploymentLog: vi.fn() }));
+vi.mock('@/controllers/projectController', () => ({ getProject: vi.fn(async () => ({ id: 'p1' })), getAllProjects: vi.fn(async () => []), verifyDeploymentKey: vi.fn(async () => true), createProject: vi.fn(), updateProject: vi.fn(), deleteProject: vi.fn(), teardownProjectWithCleanup: vi.fn(), resetDeploymentKey: vi.fn(), setProjectAssignment: vi.fn(), syncProjectToRepoData: vi.fn() }));
+vi.mock('@/controllers/deployController', () => ({ deployProject: vi.fn(async () => 'log1'), planLocally: vi.fn(async () => ({ ports: [1], dirs: {} })), updateDeploymentLog: vi.fn() }));
 vi.mock('@/controllers/deployQueue', () => ({ enqueueDeploy: vi.fn(async () => 'log1') }));
 vi.mock('@/controllers/secretController', () => ({ updateEnvironmentVariable: vi.fn() }));
 vi.mock('@/controllers/projectInstanceController', () => ({ getProjectInstance: vi.fn() }));

@@ -27,7 +27,7 @@ import { cluster } from '@/cluster/node';
 import { postToNode } from '@/cluster/leaderClient';
 import { getNextFreePorts } from '@/reconcile/ports';
 import { ensureDirectories } from '@/reconcile/directories';
-import { purgeProjectLocal } from '@/reconcile/teardown';
+import { purgeProjectLocal, teardownProjectLocal } from '@/reconcile/teardown';
 import { cancelLocalDeployment } from '@/reconcile/deploy';
 import { cancelQueuedDeploy, isInstanceCanceled, clearInstanceCanceled } from './deployQueue';
 import { config } from '@/config';
@@ -73,6 +73,21 @@ export const purgeProjectOnAssignedNode = async (project: Project): Promise<void
     const node = await getNodeByIdModel(nodeId);
     if (!node) return;
     await postToNode(node.address, node.apiPort, '/node/purge-project', { projectId: project.id });
+};
+
+// Teardown (not deletion): ask the project's assigned node to tear down containers + deploy dir
+// WITHOUT archiving the persistent dir, so the data survives for a later redeploy. Best-effort - a
+// missing/unreachable node never blocks teardown.
+export const teardownProjectOnAssignedNode = async (project: Project): Promise<void> => {
+    const nodeId = project.workerNodeId;
+    if (!nodeId) return;
+    if (nodeId === config.nodeId) {
+        await teardownProjectLocal(project.id);
+        return;
+    }
+    const node = await getNodeByIdModel(nodeId);
+    if (!node) return;
+    await postToNode(node.address, node.apiPort, '/node/teardown-project', { projectId: project.id });
 };
 
 // Leader-only: render a project into a self-contained DesiredDeployment and replicate it.
