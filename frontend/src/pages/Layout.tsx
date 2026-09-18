@@ -12,6 +12,14 @@ import { useUser } from '@/contexts/user-context';
 import { rawApiGetNoHook, useAPI } from '@/utils/api';
 import { disablePush, enablePush, isPushSubscribed, isPushSupported, regeneratePushKeys } from '@/utils/push';
 
+const emptyProject: Project = {
+    id: '',
+    repoOwner: '',
+    repoName: '',
+    repoBranch: '',
+    allowCICD: false,
+};
+
 const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle }] = useDisclosure();
     const projectCtx = useProjects();
@@ -22,13 +30,13 @@ const Layout = (props: { children: React.ReactNode }) => {
     const [pushOn, setPushOn] = useState(false);
     const [pushBusy, setPushBusy] = useState(false);
     const [legacyFile, setLegacyFile] = useState<File | null>(null);
-    const [newProject, setNewProject] = useState<Project>({
-        id: '',
-        repoOwner: 'mosaiq-software',
-        repoName: '',
-        repoBranch: '',
-        allowCICD: false,
-    });
+    const [newProject, setNewProject] = useState<Project>(emptyProject);
+
+    const closeCreateModal = () => {
+        setModal(null);
+        setNewProject(emptyProject);
+        setLegacyFile(null);
+    };
 
     const handleLegacyFile = async (file: File | null) => {
         setLegacyFile(file);
@@ -174,7 +182,7 @@ const Layout = (props: { children: React.ReactNode }) => {
 
     return (
         <>
-            <Modal opened={modal === 'create'} onClose={() => setModal(null)} withCloseButton={false} closeOnClickOutside={!creatingProject}>
+            <Modal opened={modal === 'create'} onClose={closeCreateModal} withCloseButton={false} closeOnClickOutside={!creatingProject}>
                 {creatingProject ? (
                     <Center>
                         <Stack align="center">
@@ -232,23 +240,20 @@ const Layout = (props: { children: React.ReactNode }) => {
                         <Group justify="space-between">
                             <Button
                                 variant="outline"
-                                onClick={() => {
-                                    setModal(null);
-                                    setLegacyFile(null);
-                                }}
+                                onClick={closeCreateModal}
                             >
                                 Cancel
                             </Button>
                             <Button
                                 variant="filled"
                                 onClick={async () => {
+                                    const createdId = newProject.id;
                                     setCreatingProject(true);
                                     await projectCtx.create(newProject);
                                     await new Promise((resolve) => setTimeout(resolve, 1000));
                                     setCreatingProject(false);
-                                    setModal(null);
-                                    setLegacyFile(null);
-                                    navigate(`/p/${newProject.id}`);
+                                    closeCreateModal();
+                                    navigate(`/p/${createdId}`);
                                 }}
                             >
                                 Create
