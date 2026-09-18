@@ -68,6 +68,7 @@ const projectToRow = (p: Project): ProjectModelType => ({
     hasDockerCompose: p.hasDockerCompose,
     hasDotenv: p.hasDotenv,
     zeroDowntime: p.zeroDowntime,
+    cicdConfigJson: p.cicd ? JSON.stringify(p.cicd) : '',
 });
 
 // Deterministic, idempotent application of an op onto the leader's source-of-truth SQLite DB.

@@ -1,4 +1,4 @@
-import { Admin, Capability, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
+import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -37,6 +37,8 @@ export enum API_ROUTES {
     POST_TEARDOWN_PROJECT = '/project/:projectId/teardown',
     POST_CANCEL_DEPLOY = '/project/:projectId/cancel-deploy',
     POST_SET_PROJECT_ASSIGNMENT = '/project/:projectId/assign',
+    POST_CICD_SETUP = '/project/:projectId/cicd/setup',
+    POST_CICD_REMOVE = '/project/:projectId/cicd/remove',
     POST_DEPLOYMENT_LOG_UPDATE = '/deploy/update',
     POST_GITHUB_LOGIN = '/login/github/:token',
     POST_GITHUB_LOGOUT = '/logout/github/:token',
@@ -89,6 +91,8 @@ export interface API_PARAMS {
     [API_ROUTES.POST_TEARDOWN_PROJECT]: { projectId: string };
     [API_ROUTES.POST_CANCEL_DEPLOY]: { projectId: string };
     [API_ROUTES.POST_SET_PROJECT_ASSIGNMENT]: { projectId: string };
+    [API_ROUTES.POST_CICD_SETUP]: { projectId: string };
+    [API_ROUTES.POST_CICD_REMOVE]: { projectId: string };
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: {};
     [API_ROUTES.POST_GITHUB_LOGIN]: { token: string };
     [API_ROUTES.POST_GITHUB_LOGOUT]: { token: string };
@@ -142,6 +146,8 @@ export interface API_BODY {
     [API_ROUTES.POST_TEARDOWN_PROJECT]: {};
     [API_ROUTES.POST_CANCEL_DEPLOY]: {};
     [API_ROUTES.POST_SET_PROJECT_ASSIGNMENT]: { nodeId: string };
+    [API_ROUTES.POST_CICD_SETUP]: CdSetupRequest;
+    [API_ROUTES.POST_CICD_REMOVE]: {};
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: DeploymentLogUpdate;
     [API_ROUTES.POST_GITHUB_LOGIN]: {};
     [API_ROUTES.POST_GITHUB_LOGOUT]: {};
@@ -194,6 +200,8 @@ export interface API_RETURN {
     [API_ROUTES.POST_TEARDOWN_PROJECT]: undefined;
     [API_ROUTES.POST_CANCEL_DEPLOY]: undefined;
     [API_ROUTES.POST_SET_PROJECT_ASSIGNMENT]: undefined;
+    [API_ROUTES.POST_CICD_SETUP]: Project | undefined;
+    [API_ROUTES.POST_CICD_REMOVE]: Project | undefined;
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: undefined;
     [API_ROUTES.POST_GITHUB_LOGIN]: User | undefined;
     [API_ROUTES.POST_GITHUB_LOGOUT]: undefined;
@@ -248,6 +256,8 @@ export interface API_AUTH {
     [API_ROUTES.POST_TEARDOWN_PROJECT]: string;
     [API_ROUTES.POST_CANCEL_DEPLOY]: string;
     [API_ROUTES.POST_SET_PROJECT_ASSIGNMENT]: string;
+    [API_ROUTES.POST_CICD_SETUP]: string;
+    [API_ROUTES.POST_CICD_REMOVE]: string;
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: string;
     [API_ROUTES.POST_GITHUB_LOGIN]: undefined;
     [API_ROUTES.POST_GITHUB_LOGOUT]: string;

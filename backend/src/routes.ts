@@ -19,6 +19,7 @@ import { Capability } from '@mosaiq/nsm-common/types';
 import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requireCreateProjectForOwner, requireOwnerInstalledForProject, requireProjectCapability, requireSuperAdmin, requireTeamManage } from '@/controllers/authz';
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
 import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
+import { removeManagedCd, setupManagedCd } from '@/controllers/cicdController';
 import { getVapidPublicKey, regenerateVapidKeys, subscribe, unsubscribe } from '@/controllers/pushController';
 import { getAllNodesModel, getNodeByIdModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
@@ -591,6 +592,40 @@ privateRouter.post(API_ROUTES.POST_SET_PROJECT_ASSIGNMENT, async (req, res) => {
     } catch (e) {
         routeLog.error({ action: 'assign_project_error', err: (e as any)?.message }, 'error assigning project');
         res.status(500).send();
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_CICD_SETUP, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_CICD_SETUP];
+    const body = req.body as API_BODY[API_ROUTES.POST_CICD_SETUP];
+    try {
+        if (!params.projectId) return void res.status(400).send('No projectId');
+        if (!body.branch || !body.triggers?.length) return void res.status(400).send('A branch and at least one trigger are required');
+        if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+        if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
+        const project = await setupManagedCd(params.projectId, body);
+        if (!project) return void res.status(404).send('Project not found');
+        res.status(200).json(project);
+    } catch (e) {
+        routeLog.error({ action: 'cicd_setup_error', err: (e as any)?.message }, 'error setting up managed CI/CD');
+        res.status(500).send((e as any)?.message || 'Failed to set up CI/CD');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_CICD_REMOVE, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_CICD_REMOVE];
+    try {
+        if (!params.projectId) return void res.status(400).send('No projectId');
+        if (!requireLeader(req, res)) return;
+        if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+        if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
+        const project = await removeManagedCd(params.projectId);
+        if (!project) return void res.status(404).send('Project not found');
+        res.status(200).json(project);
+    } catch (e) {
+        routeLog.error({ action: 'cicd_remove_error', err: (e as any)?.message }, 'error removing managed CI/CD');
+        res.status(500).send((e as any)?.message || 'Failed to remove CI/CD');
     }
 });
 

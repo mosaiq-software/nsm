@@ -18,6 +18,7 @@ export interface ProjectModelType {
     hasDockerCompose?: boolean;
     hasDotenv?: boolean;
     zeroDowntime?: boolean;
+    cicdConfigJson: string;
     createdAt?: string;
     updatedAt?: string;
 }
@@ -43,6 +44,7 @@ ProjectModel.init(
         hasDockerCompose: DataTypes.BOOLEAN,
         hasDotenv: DataTypes.BOOLEAN,
         zeroDowntime: DataTypes.BOOLEAN,
+        cicdConfigJson: DataTypes.TEXT,
     },
     { sequelize }
 );

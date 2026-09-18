@@ -155,9 +155,10 @@ echo
 # --- GitHub App ---------------------------------------------------------------------------------
 c_hd "4) GitHub App (repo access + teams)"
 echo "Create it at GitHub -> Settings -> Developer settings -> GitHub Apps with Repository"
-echo "'Contents: Read-only' AND Organization 'Members: Read-only' (Members lets NSM discover teams"
-echo "and per-member permissions). Install it on the orgs/repos you deploy; each installed org/user"
-echo "becomes an NSM team. Have the App ID and downloaded .pem ready."
+echo "'Contents: Read and write', 'Secrets: Read and write' and 'Workflows: Write' AND Organization"
+echo "'Members: Read-only'. Contents/Secrets/Workflows let NSM provision managed CI/CD; Members lets"
+echo "NSM discover teams and per-member permissions. Install it on the orgs/repos you deploy; each"
+echo "installed org/user becomes an NSM team. Have the App ID and downloaded .pem ready."
 ask app_id "GitHub App ID (number; blank = use SSH deploy key instead)" "$(get_env GITHUB_APP_ID)"
 set_env GITHUB_APP_ID "$app_id"
 ask app_inst "Installation ID (optional; blank = auto-resolve per repo)" "$(get_env GITHUB_APP_INSTALLATION_ID)"

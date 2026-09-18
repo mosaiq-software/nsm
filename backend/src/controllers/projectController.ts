@@ -10,6 +10,7 @@ import { renderAllNginx } from '@/reconcile/nginxRender';
 import { removeCertsForDomains } from '@/reconcile/certs';
 import { cluster } from '@/cluster/node';
 import { areaLog } from '@/utils/log';
+import { putRepoSecret } from '@/utils/githubApp';
 
 const projectLog = areaLog('project');
 
@@ -52,6 +53,7 @@ export const getProject = async (projectId: string): Promise<Project | undefined
         hasDockerCompose: projectData.hasDockerCompose,
         hasDotenv: projectData.hasDotenv,
         zeroDowntime: projectData.zeroDowntime,
+        cicd: projectData.cicdConfigJson ? JSON.parse(projectData.cicdConfigJson) : undefined,
     };
 };
 
@@ -134,6 +136,14 @@ export const resetDeploymentKey = async (projectId: string): Promise<string | nu
     if (!project) return null;
     const newKey = generate32CharKey();
     await updateProjectNoDirty(projectId, { deploymentKey: newKey });
+    // Keep a managed CI/CD pipeline working by re-writing the repo secret with the new key.
+    if (project.cicd?.managed) {
+        try {
+            await putRepoSecret(project.repoOwner, project.repoName, project.cicd.secretName, newKey);
+        } catch (e: any) {
+            projectLog.warn({ action: 'deployment_key_secret_update_failed', projectId, err: e?.message }, `failed to update CI/CD secret for ${projectId}`);
+        }
+    }
     projectLog.info({ action: 'deployment_key_reset', projectId }, `deployment key reset for ${projectId}`);
     return newKey;
 };

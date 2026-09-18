@@ -23,6 +23,55 @@ export interface Project {
     // Per-project opt-out for zero-downtime (blue-green) deploys. Undefined inherits the global
     // default (ZERO_DOWNTIME_DEPLOYS, on by default); set to false to force in-place recreation.
     zeroDowntime?: boolean;
+    // Snapshot of the managed CI/CD (GitHub Actions) workflow NSM provisioned for this project.
+    // Absent when no managed workflow exists.
+    cicd?: CdConfig;
+}
+
+// Trigger types a managed GitHub Actions workflow can react to.
+export enum CdTrigger {
+    PUSH = 'push',
+    PR_MERGE = 'pr_merge',
+    RELEASE = 'release',
+    TAG = 'tag',
+    MANUAL = 'manual',
+    SCHEDULE = 'schedule',
+}
+
+// Snapshot of the managed CI/CD workflow that NSM committed to a project's repository. Stored on the
+// project so the UI can render current state and the backend can clean up on removal.
+export interface CdConfig {
+    managed: boolean;
+    // Branch the workflow file is committed to (and, for PUSH, the branch that triggers deploys).
+    branch: string;
+    triggers: CdTrigger[];
+    // Branches watched for PUSH / PR_MERGE triggers. Defaults to [branch] when omitted.
+    branches?: string[];
+    // Glob for TAG triggers (e.g. "v*").
+    tagPattern?: string;
+    // Cron expression for SCHEDULE triggers.
+    cron?: string;
+    // When true, the workflow was committed via a pull request rather than pushed directly.
+    viaPr: boolean;
+    // Path of the committed workflow file within the repo.
+    workflowPath: string;
+    // Name of the repo secret holding the deploy key.
+    secretName: string;
+    // URL of the pull request opened when viaPr is true.
+    prUrl?: string;
+    // SHA of the commit that added the workflow file (direct-push mode).
+    commitSha?: string;
+    setupAt: number;
+}
+
+// Body for POST /project/:projectId/cicd/setup.
+export interface CdSetupRequest {
+    branch: string;
+    triggers: CdTrigger[];
+    branches?: string[];
+    tagPattern?: string;
+    cron?: string;
+    viaPr: boolean;
 }
 
 export interface Secret {
