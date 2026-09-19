@@ -54,6 +54,7 @@ export const getProject = async (projectId: string): Promise<Project | undefined
         hasDotenv: projectData.hasDotenv,
         zeroDowntime: projectData.zeroDowntime,
         cicd: projectData.cicdConfigJson ? JSON.parse(projectData.cicdConfigJson) : undefined,
+        resourceQuota: projectData.resourceQuotaJson ? JSON.parse(projectData.resourceQuotaJson) : undefined,
     };
 };
 
@@ -101,6 +102,9 @@ export const updateProject = async (id: string, updates: Partial<Project>): Prom
     const merged: Project = { ...current, ...updates, id, dirtyConfig: true };
     // secrets/instances are stored separately; do not let stale copies ride along.
     delete (merged as any).instances;
+    // Resource allocation is admin-only and set via the dedicated quota endpoint; never let the
+    // generic (CONFIGURE-gated) update route change it. Preserve the current value.
+    merged.resourceQuota = current.resourceQuota;
     await proposeProjectUpsert(merged);
 };
 

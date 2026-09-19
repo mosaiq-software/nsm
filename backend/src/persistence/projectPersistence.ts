@@ -19,6 +19,7 @@ export interface ProjectModelType {
     hasDotenv?: boolean;
     zeroDowntime?: boolean;
     cicdConfigJson: string;
+    resourceQuotaJson: string;
     createdAt?: string;
     updatedAt?: string;
 }
@@ -45,6 +46,7 @@ ProjectModel.init(
         hasDotenv: DataTypes.BOOLEAN,
         zeroDowntime: DataTypes.BOOLEAN,
         cicdConfigJson: DataTypes.TEXT,
+        resourceQuotaJson: DataTypes.TEXT,
     },
     { sequelize }
 );

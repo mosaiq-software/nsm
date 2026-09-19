@@ -15,3 +15,4 @@ import '@/persistence/nodePersistence';
 import '@/persistence/desiredDeploymentPersistence';
 import '@/persistence/certPersistence';
 import '@/persistence/clusterMetaPersistence';
+import '@/persistence/quotaBreachPersistence';

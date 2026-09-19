@@ -26,6 +26,32 @@ export interface Project {
     // Snapshot of the managed CI/CD (GitHub Actions) workflow NSM provisioned for this project.
     // Absent when no managed workflow exists.
     cicd?: CdConfig;
+    // Per-project resource allocation set by NSM admins. Advisory only (never enforced/blocked);
+    // exceeding it notifies admins and team members. Absent means no allocation configured.
+    resourceQuota?: ProjectResourceQuota;
+}
+
+// Admin-set advisory resource allocation for a project. Any subset may be set; an unset field means
+// that resource is not capped. Canonical units: CPU cores, bytes for memory and storage.
+export interface ProjectResourceQuota {
+    cpuCores?: number;
+    memoryBytes?: number;
+    storageBytes?: number;
+}
+
+// Current measured resource usage for a project (CPU cores, bytes for memory and storage).
+export interface ProjectResourceUsage {
+    cpuCores: number;
+    memoryBytes: number;
+    storageBytes: number;
+}
+
+// A project's allocation alongside its current usage, for the admin allocations overview.
+export interface ResourceAllocation {
+    projectId: string;
+    repoOwner: string;
+    quota: ProjectResourceQuota;
+    usage: ProjectResourceUsage;
 }
 
 // Trigger types a managed GitHub Actions workflow can react to.

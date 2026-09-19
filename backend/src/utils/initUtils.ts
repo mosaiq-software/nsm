@@ -7,6 +7,7 @@ import { cluster } from '@/cluster/node';
 import { leaderEnsureCerts } from '@/reconcile/certs';
 import { runSelfUpdateRolloutIfLeader } from '@/cluster/selfUpdate';
 import { collectDiskUsage } from '@/reconcile/diskUsage';
+import { checkAllQuotas } from '@/controllers/quotaController';
 import { areaLog } from '@/utils/log';
 
 const initLog = areaLog('startup');
@@ -76,5 +77,10 @@ export const registerCronJobs = () => {
         initLog.debug({ action: 'cron_fired', job: 'disk_usage' }, 'disk usage cron fired');
         void collectDiskUsage().catch((e) => initLog.error({ action: 'disk_usage_failed', err: e?.message }, 'disk usage collection failed'));
     });
-    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30'] }, 'cron jobs registered');
+    // Leader-only: compare each allocated project's live usage to its allocation and notify on breach.
+    cron.schedule('*/5 * * * *', () => {
+        initLog.debug({ action: 'cron_fired', job: 'quota_check', isLeader: cluster.isLeader() }, 'quota check cron fired');
+        if (cluster.isLeader()) void checkAllQuotas().catch((e) => initLog.error({ action: 'quota_check_failed', err: e?.message }, 'quota check failed'));
+    });
+    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30', 'quota_check:*/5'] }, 'cron jobs registered');
 };

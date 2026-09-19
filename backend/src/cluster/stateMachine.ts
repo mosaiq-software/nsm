@@ -69,6 +69,7 @@ const projectToRow = (p: Project): ProjectModelType => ({
     hasDotenv: p.hasDotenv,
     zeroDowntime: p.zeroDowntime,
     cicdConfigJson: p.cicd ? JSON.stringify(p.cicd) : '',
+    resourceQuotaJson: p.resourceQuota ? JSON.stringify(p.resourceQuota) : '',
 });
 
 // Deterministic, idempotent application of an op onto the leader's source-of-truth SQLite DB.

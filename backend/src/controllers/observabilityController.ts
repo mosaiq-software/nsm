@@ -1,5 +1,5 @@
 import { config } from '@/config';
-import { LogEntry, LogFacet, LogFacetsRequest, LogFacetsResult, LogFilter, LogQueryRequest, LogQueryResult, LogSelector, NodeFilesystemUsage, NodeMetricKind, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, ProjectDiskUsage } from '@mosaiq/nsm-common/types';
+import { LogEntry, LogFacet, LogFacetsRequest, LogFacetsResult, LogFilter, LogQueryRequest, LogQueryResult, LogSelector, NodeFilesystemUsage, NodeMetricKind, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, ProjectDiskUsage, ProjectResourceUsage } from '@mosaiq/nsm-common/types';
 
 // Selector identifying a deployment (in precedence order). All queries run on the leader, where
 // the Loki/Prometheus stack lives.
@@ -178,6 +178,23 @@ export const queryNodeStorageSeries = async (nodeId: string, startS: string, end
     ]);
     const totalSeries = total.series.map((s) => ({ labels: { projectId: '__total__' }, values: s.values }));
     return { metric: 'disk', series: [...perProject.series, ...totalSeries] };
+};
+
+// === Per-project resource usage (for allocation checks and the allocation UIs) ===
+
+// Current usage for a project across the cluster: CPU as cores (5m-smoothed cAdvisor rate),
+// memory as instantaneous used bytes, storage as the summed nsmd per-project disk gauge
+// (volume + deployed code across nodes). Missing series read as 0.
+export const getProjectResourceUsage = async (projectId: string): Promise<ProjectResourceUsage> => {
+    if (!projectId) throw new Error('projectId is required');
+    const sel = `projectId="${escapePromLabel(projectId)}"`;
+    const [cpuVec, memVec, storageVec] = await Promise.all([
+        promQueryInstant(`sum(rate(container_cpu_usage_seconds_total{${sel}}[5m]))`),
+        promQueryInstant(`sum(container_memory_usage_bytes{${sel}})`),
+        promQueryInstant(`sum(nsm_project_disk_usage_bytes{${sel}})`),
+    ]);
+    const first = (v: { value: number }[]): number => (v.length ? v[0].value : 0);
+    return { cpuCores: first(cpuVec), memoryBytes: first(memVec), storageBytes: first(storageVec) };
 };
 
 // === Structured log query (Datadog-style viewer) ===

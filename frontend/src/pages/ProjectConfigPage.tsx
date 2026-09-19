@@ -1,4 +1,4 @@
-import { ActionIcon, ActionIconGroup, Alert, Button, Center, Code, Combobox, Divider, Fieldset, Grid, Group, HoverCard, List, Loader, Modal, NumberInput, ScrollArea, Select, Space, Stack, Switch, Text, Textarea, TextInput, Title, Tooltip, useCombobox } from '@mantine/core';
+import { ActionIcon, ActionIconGroup, Alert, Button, Card, Center, Code, Combobox, Divider, Fieldset, Grid, Group, HoverCard, List, Loader, Modal, NumberInput, ScrollArea, Select, Space, Stack, Switch, Text, Textarea, TextInput, Title, Tooltip, useCombobox } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { DockerStatus, DynamicEnvVariable, NginxConfigLocationType, Project, ProjectService, Secret, UpperDynamicEnvVariableType } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
@@ -12,6 +12,7 @@ import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { assembleDotenv, extractVariables, parseDynamicVariablePath } from '@mosaiq/nsm-common/secretUtil';
 import { NginxEditor } from '@/components/NginxEditor';
+import { ResourceAllocationEditor } from '@/components/ResourceAllocation';
 import { MdOutlineCode, MdOutlineDns, MdOutlineDownload, MdOutlineInfo, MdOutlineLan, MdOutlineLaunch, MdOutlineLink, MdOutlineLinkOff, MdOutlineRefresh, MdOutlineUmbrella, MdOutlineUpload, MdOutlineWeb } from 'react-icons/md';
 import { useWindowEvent } from '@mantine/hooks';
 
@@ -424,6 +425,15 @@ const ProjectConfigPage = () => {
                         ))}
                     </Group>
                 </Stack>
+                <Space h="xl" />
+                {meCtx.isAdmin && (
+                    <Card withBorder>
+                        <Stack gap="sm">
+                            <Title order={5}>Resource Allocation</Title>
+                            <ResourceAllocationEditor projectId={project.id} quota={project.resourceQuota} onSaved={() => projectCtx.refresh()} />
+                        </Stack>
+                    </Card>
+                )}
                 <Space h="xl" />
                 {meCtx.canProject(project.id, Capability.DELETE) && (
                     <Alert color="red" variant="light" title="Danger Zone">

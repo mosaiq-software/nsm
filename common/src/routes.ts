@@ -1,4 +1,4 @@
-import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
+import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, ResourceAllocation, Secret, Team, TeamDetail, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -27,6 +27,8 @@ export enum API_ROUTES {
     GET_GITHUB_BRANCHES = '/github/branches',
     GET_VAPID_PUBLIC_KEY = '/push/vapid-public-key',
     GET_PROJECT_NOTIFICATION = '/push/preference/:projectId',
+    GET_RESOURCE_ALLOCATIONS = '/allocations',
+    GET_PROJECT_RESOURCE_USAGE = '/project/:projectId/resource-usage',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -56,6 +58,7 @@ export enum API_ROUTES {
     POST_LOG_QUERY = '/observability/query',
     POST_LOG_FACETS = '/observability/facets',
     POST_NODE_STORAGE_SNAPSHOT = '/observability/node-storage/snapshot',
+    POST_SET_PROJECT_QUOTA = '/project/:projectId/quota',
 }
 export interface API_PARAMS {
     //GET
@@ -83,6 +86,8 @@ export interface API_PARAMS {
     [API_ROUTES.GET_GITHUB_BRANCHES]: {};
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: {};
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { projectId: string };
+    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: {};
+    [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: { projectId: string };
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -112,6 +117,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_LOG_QUERY]: {};
     [API_ROUTES.POST_LOG_FACETS]: {};
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: {};
+    [API_ROUTES.POST_SET_PROJECT_QUOTA]: { projectId: string };
 }
 export interface API_BODY {
     // Only POST
@@ -140,6 +146,8 @@ export interface API_BODY {
     [API_ROUTES.GET_GITHUB_BRANCHES]: undefined;
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: undefined;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: undefined;
+    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: undefined;
+    [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -169,6 +177,7 @@ export interface API_BODY {
     [API_ROUTES.POST_LOG_QUERY]: LogQueryRequest;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsRequest;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: { nodeId: string };
+    [API_ROUTES.POST_SET_PROJECT_QUOTA]: ProjectResourceQuota;
 }
 export interface API_RETURN {
     //GET
@@ -196,6 +205,8 @@ export interface API_RETURN {
     [API_ROUTES.GET_GITHUB_BRANCHES]: string[];
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { enabled: boolean };
+    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: ResourceAllocation[];
+    [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: ProjectResourceUsage | undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -225,6 +236,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_LOG_QUERY]: LogQueryResult | undefined;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsResult | undefined;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: NodeStorageSpec | undefined;
+    [API_ROUTES.POST_SET_PROJECT_QUOTA]: undefined;
 }
 
 export interface API_AUTH {
@@ -254,6 +266,8 @@ export interface API_AUTH {
     [API_ROUTES.GET_GITHUB_BRANCHES]: string;
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: string;
+    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: string;
+    [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;
@@ -283,4 +297,5 @@ export interface API_AUTH {
     [API_ROUTES.POST_LOG_QUERY]: string;
     [API_ROUTES.POST_LOG_FACETS]: string;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: string;
+    [API_ROUTES.POST_SET_PROJECT_QUOTA]: string;
 }

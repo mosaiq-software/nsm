@@ -13,7 +13,7 @@ beforeEach(async () => {
 describe('migrator', () => {
     it('runs pending migrations, records them, and is idempotent', async () => {
         const first = await migrator.up();
-        expect(first.map((m) => m.name)).toEqual(['0001-secrets-add-comment', '0002-projects-add-additive-columns', '0003-access-control-migrate-admins', '0004-projects-add-cicd-column']);
+        expect(first.map((m) => m.name)).toEqual(['0001-secrets-add-comment', '0002-projects-add-additive-columns', '0003-access-control-migrate-admins', '0004-projects-add-cicd-column', '0005-projects-add-resource-quota-column']);
 
         const executed = (await migrator.executed()).map((m) => m.name);
         expect(executed).toContain('0002-projects-add-additive-columns');

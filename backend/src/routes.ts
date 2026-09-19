@@ -10,7 +10,8 @@ import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
-import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, queryNodeMetric, getNodeStorageSpec, queryNodeStorageSeries, MetricKind } from '@/controllers/observabilityController';
+import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, queryNodeMetric, getNodeStorageSpec, queryNodeStorageSeries, getProjectResourceUsage, MetricKind } from '@/controllers/observabilityController';
+import { listResourceAllocations, setProjectQuota } from '@/controllers/quotaController';
 import { NodeMetricKind } from '@mosaiq/nsm-common/types';
 import { collectDiskUsage } from '@/reconcile/diskUsage';
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
@@ -368,6 +369,46 @@ privateRouter.post(API_ROUTES.POST_NODE_STORAGE_SNAPSHOT, async (req, res) => {
         const spec = await postToNode(node.address, node.apiPort, '/node/disk-snapshot', {}, 120000);
         if (!spec) return void res.status(502).send('failed to reach node for snapshot');
         res.status(200).json(spec);
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Per-project resource allocations with current usage, for the admin allocations overview.
+// Leader-only (Prometheus lives on the leader) and admin-gated.
+privateRouter.get(API_ROUTES.GET_RESOURCE_ALLOCATIONS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    try {
+        res.status(200).json(await listResourceAllocations());
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Live resource usage for a single project. Visible to anyone with VIEW on the project so team
+// members can see usage-vs-allocation on the Logs & Metrics page.
+privateRouter.get(API_ROUTES.GET_PROJECT_RESOURCE_USAGE, async (req, res) => {
+    const params = req.params as unknown as API_PARAMS[API_ROUTES.GET_PROJECT_RESOURCE_USAGE];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
+    try {
+        res.status(200).json(await getProjectResourceUsage(params.projectId));
+    } catch (e: any) {
+        res.status(400).send(e.message);
+    }
+});
+
+// Set (or clear) a project's advisory resource allocation. Admin-only; the sole writer of the
+// project's resourceQuota. Leader-only.
+privateRouter.post(API_ROUTES.POST_SET_PROJECT_QUOTA, async (req, res) => {
+    const params = req.params as unknown as API_PARAMS[API_ROUTES.POST_SET_PROJECT_QUOTA];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    try {
+        const body = (req.body || {}) as API_BODY[API_ROUTES.POST_SET_PROJECT_QUOTA];
+        await setProjectQuota(params.projectId, body);
+        res.status(200).end();
     } catch (e: any) {
         res.status(400).send(e.message);
     }

@@ -1,12 +1,14 @@
-import { ActionIcon, Alert, Card, Center, Group, Loader, SegmentedControl, Select, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Anchor, Card, Center, Group, Loader, SegmentedControl, Select, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { LineChart } from '@mantine/charts';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { LogSelector, ObservabilityMetricsResult, Project, ProjectInstance } from '@mosaiq/nsm-common/types';
+import { LogSelector, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceUsage } from '@mosaiq/nsm-common/types';
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
+import { useMe } from '@/contexts/me-context';
 import { useAPI } from '@/utils/api';
+import { ResourceUsageBars } from '@/components/ResourceAllocation';
 import { formatAxisTime, formatBytes, formatBytesPerSec, formatCores } from '@/utils/format';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { LogViewer } from '@/components/LogViewer/LogViewer';
@@ -62,6 +64,7 @@ const ProjectLogsPage = () => {
     const projectId = params.projectId;
     const projectCtx = useProjects();
     const clusterCtx = useCluster();
+    const meCtx = useMe();
     const api = useAPI();
 
     const [project, setProject] = useState<Project | undefined | null>(undefined);
@@ -71,6 +74,7 @@ const ProjectLogsPage = () => {
     const [metric, setMetric] = useState<MetricKind>('cpu');
     const [metrics, setMetrics] = useState<ObservabilityMetricsResult | null>(null);
     const [loading, setLoading] = useState(false);
+    const [resourceUsage, setResourceUsage] = useState<ProjectResourceUsage | null>(null);
 
     useEffect(() => {
         const foundProject = projectCtx.projects.find((proj) => proj.id === projectId);
@@ -118,6 +122,23 @@ const ProjectLogsPage = () => {
         const interval = setInterval(refresh, 15000);
         return () => clearInterval(interval);
     }, [project, scope, rangeMs, metric]);
+
+    // Current resource usage for the usage-vs-allocation card (project-wide, independent of scope).
+    useEffect(() => {
+        if (!projectId) return;
+        let cancelled = false;
+        const load = () => {
+            api.get(API_ROUTES.GET_PROJECT_RESOURCE_USAGE, { projectId }).then((res) => {
+                if (!cancelled && res) setResourceUsage(res);
+            });
+        };
+        load();
+        const interval = setInterval(load, 15000);
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [projectId]);
 
     // The metric expressions are aggregated with sum() on the backend, so the result is a single
     // unlabelled line; collapse any returned series into one { time, value } line per timestamp.
@@ -216,6 +237,18 @@ const ProjectLogsPage = () => {
                         valueFormatter={metricFormatter(metric)}
                     />
                 )}
+            </Card>
+
+            <Card withBorder>
+                <Group justify="space-between" align="center" mb="sm">
+                    <Title order={5}>Resource Allocation</Title>
+                    {meCtx.isAdmin && (
+                        <Anchor component={Link} to={`/p/${project.id}/config`} fz="sm">
+                            Edit allocation
+                        </Anchor>
+                    )}
+                </Group>
+                <ResourceUsageBars quota={project.resourceQuota} usage={resourceUsage ?? undefined} />
             </Card>
 
             <Title order={5}>Logs</Title>

@@ -298,6 +298,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                     {meCtx.isAdmin && (
                         <>
                             <RouterLink to="/nodes" label="Nodes" showActive />
+                            <RouterLink to="/allocations" label="Allocations" showActive />
                             <RouterLink to="/status" label="Cluster Status" showActive />
                             <RouterLink to="/logs" label="NSM Logs" showActive />
                             <RouterLink to="/teams" label="Teams" showActive />
