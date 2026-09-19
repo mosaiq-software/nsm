@@ -1,7 +1,8 @@
-import { ActionIcon, Tooltip } from '@mantine/core';
+import { Button, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useEffect, useState } from 'react';
 import { MdOutlineNotificationsActive, MdOutlineNotificationsOff } from 'react-icons/md';
+import { Link } from 'react-router-dom';
 import { useAPI } from '@/utils/api';
 import { getProjectNotificationEnabled, isPushSubscribed, isPushSupported, setProjectNotificationEnabled } from '@/utils/push';
 
@@ -31,7 +32,19 @@ export const NotificationBell = ({ projectId }: NotificationBellProps) => {
         };
     }, [token, projectId]);
 
-    if (!isPushSupported() || !token) return null;
+    if (!token) return null;
+
+    // Push is unavailable in this context (e.g. an uninstalled iOS Safari tab). Point the user to
+    // Settings, where the mobile setup instructions live, instead of hiding the control entirely.
+    if (!isPushSupported()) {
+        return (
+            <Tooltip label="Notifications need setup on this device">
+                <Button component={Link} to="/settings" variant="light" color="gray" leftSection={<MdOutlineNotificationsOff />}>
+                    Set up notifications
+                </Button>
+            </Tooltip>
+        );
+    }
 
     const toggle = async () => {
         const next = !enabled;
@@ -58,9 +71,16 @@ export const NotificationBell = ({ projectId }: NotificationBellProps) => {
 
     return (
         <Tooltip label={enabled ? 'Notifications on for this project' : 'Notifications off for this project'}>
-            <ActionIcon variant="subtle" color={enabled ? 'blue' : 'gray'} loading={busy} onClick={toggle} aria-label="Toggle project notifications">
-                {enabled ? <MdOutlineNotificationsActive /> : <MdOutlineNotificationsOff />}
-            </ActionIcon>
+            <Button
+                variant={enabled ? 'light' : 'default'}
+                color={enabled ? 'blue' : 'gray'}
+                loading={busy}
+                onClick={toggle}
+                leftSection={enabled ? <MdOutlineNotificationsActive /> : <MdOutlineNotificationsOff />}
+                aria-label="Toggle project notifications"
+            >
+                {enabled ? 'Notifications on' : 'Notifications off'}
+            </Button>
         </Tooltip>
     );
 };

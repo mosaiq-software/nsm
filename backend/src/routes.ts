@@ -24,7 +24,7 @@ import { applyLocalConfig, applyNodeConfig, readLocalConfig, readNodeConfig } fr
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
 import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
 import { removeManagedCd, setupManagedCd } from '@/controllers/cicdController';
-import { getProjectNotificationEnabled, getVapidPublicKey, regenerateVapidKeys, setProjectNotification, subscribe, unsubscribe } from '@/controllers/pushController';
+import { getProjectNotificationEnabled, getVapidPublicKey, sendTestNotification, setProjectNotification, subscribe, unsubscribe } from '@/controllers/pushController';
 import { getAllNodesModel, getNodeByIdModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { mintInstallationToken, listInstallationOwners, listInstallationRepos, listRepoBranches } from '@/utils/githubApp';
@@ -757,18 +757,6 @@ privateRouter.get(API_ROUTES.GET_VAPID_PUBLIC_KEY, async (req, res) => {
     res.status(200).json(getVapidPublicKey());
 });
 
-// Regenerate the VAPID key pair (leader-owned). Clears existing subscriptions; refused when keys
-// are pinned via environment config.
-privateRouter.post(API_ROUTES.POST_REGENERATE_VAPID, async (req, res) => {
-    try {
-        if (!requireLeader(req, res)) return;
-        res.status(200).json(await regenerateVapidKeys());
-    } catch (e) {
-        routeLog.error({ action: 'regenerate_vapid_error', err: (e as any)?.message }, 'error regenerating VAPID keys');
-        res.status(500).send();
-    }
-});
-
 // Store a browser push subscription for the signed-in user. Writes replicated user-scoped state,
 // so it must land on the leader.
 privateRouter.post(API_ROUTES.POST_PUSH_SUBSCRIBE, async (req, res) => {
@@ -826,6 +814,18 @@ privateRouter.post(API_ROUTES.POST_SET_PROJECT_NOTIFICATION, async (req, res) =>
         res.status(200).json(undefined);
     } catch (e) {
         routeLog.error({ action: 'set_project_notification_error', err: (e as any)?.message }, 'error setting notification preference');
+        res.status(500).send();
+    }
+});
+
+// Send a test push to the signed-in user's own subscriptions so they can confirm delivery works.
+privateRouter.post(API_ROUTES.POST_PUSH_TEST, async (req, res) => {
+    try {
+        if (!requireLeader(req, res)) return;
+        const token = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
+        res.status(200).json(await sendTestNotification(token));
+    } catch (e) {
+        routeLog.error({ action: 'push_test_error', err: (e as any)?.message }, 'error sending test notification');
         res.status(500).send();
     }
 });

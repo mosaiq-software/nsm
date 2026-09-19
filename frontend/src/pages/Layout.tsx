@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
 import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, Group, Loader, Menu, Modal, Space, Stack, Text, TextInput, Title } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import RouterLink, { pathMatchesShape } from '@/components/RouterLink';
 import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { useProjects } from '@/contexts/project-context';
@@ -12,7 +11,6 @@ import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
 import { MdOutlineWarningAmber } from 'react-icons/md';
 import { rawApiGetNoHook, useAPI } from '@/utils/api';
-import { isPushSupported, regeneratePushKeys } from '@/utils/push';
 
 const emptyProject: Project = {
     id: '',
@@ -31,7 +29,6 @@ const Layout = (props: { children: React.ReactNode }) => {
     const location = useLocation();
     const [modal, setModal] = useState<'create' | null>(null);
     const [creatingProject, setCreatingProject] = useState(false);
-    const [pushBusy, setPushBusy] = useState(false);
     const [newProject, setNewProject] = useState<Project>(emptyProject);
 
     const closeCreateModal = () => {
@@ -75,25 +72,6 @@ const Layout = (props: { children: React.ReactNode }) => {
             cancelled = true;
         };
     }, [modal, debouncedOwner, debouncedRepo, token]);
-
-    const regeneratePush = async () => {
-        if (!token) return;
-        if (!window.confirm('Regenerate push notification keys? Every browser (including this one) will need to re-enable notifications.')) return;
-        setPushBusy(true);
-        try {
-            const result = await regeneratePushKeys(token);
-            if (!result.ok) throw new Error(result.reason);
-            notifications.show({ title: 'Push keys regenerated', message: 'A new key pair was generated. Existing subscriptions were reset.', color: 'green' });
-        } catch (error) {
-            notifications.show({
-                title: 'Could not regenerate push keys',
-                message: error instanceof Error ? error.message : 'Failed to regenerate push keys',
-                color: 'red',
-            });
-        } finally {
-            setPushBusy(false);
-        }
-    };
 
     return (
         <>
@@ -201,11 +179,9 @@ const Layout = (props: { children: React.ReactNode }) => {
                             </Menu.Target>
                             {userCtx.user && (
                                 <Menu.Dropdown>
-                                    {isPushSupported() && (
-                                        <Menu.Item component="a" disabled={pushBusy} onClick={regeneratePush}>
-                                            Regenerate push keys
-                                        </Menu.Item>
-                                    )}
+                                    <Menu.Item component={Link} to="/settings">
+                                        Settings
+                                    </Menu.Item>
                                     <Menu.Item
                                         component="a"
                                         onClick={() => {

@@ -10,6 +10,7 @@ import DomainsPage from '@/pages/DomainsPage';
 import NsmLogsPage from '@/pages/NsmLogsPage';
 import LandingPage from '@/pages/LandingPage';
 import UserManagementPage from '@/pages/UserManagementPage';
+import SettingsPage from '@/pages/SettingsPage';
 import TeamDetailPage from '@/pages/TeamDetailPage';
 import NoAccessPage from '@/pages/NoAccessPage';
 import { Center, Loader } from '@mantine/core';
@@ -54,6 +55,7 @@ const Router = () => {
         <Layout>
             <Routes>
                 <Route path="/" element={<DashboardPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/p/:projectId" element={<ProjectPage />} />
                 <Route path="/p/:projectId/deploy" element={<ProjectDeployPage />} />
                 <Route path="/p/:projectId/config" element={<ProjectConfigPage />} />

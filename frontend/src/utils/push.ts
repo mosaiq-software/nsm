@@ -89,23 +89,13 @@ export const setProjectNotificationEnabled = async (token: string, projectId: st
     await rawApiPostNoHook(API_ROUTES.POST_SET_PROJECT_NOTIFICATION, { projectId }, { enabled }, token);
 };
 
-// Regenerate the server-side VAPID key pair. This invalidates every existing subscription (all
-// browsers must re-subscribe), so if this browser was subscribed we drop the now-stale local
-// subscription and re-subscribe against the new key. Returns the server result.
-export const regeneratePushKeys = async (token: string): Promise<{ ok: boolean; reason?: string }> => {
-    const result = await rawApiPostNoHook(API_ROUTES.POST_REGENERATE_VAPID, {}, {}, token);
-    if (!result || !result.ok) {
-        return { ok: false, reason: result?.reason || 'Failed to regenerate push keys' };
+// Send a test notification to the signed-in user's own subscriptions. Ensures this browser is
+// subscribed first (requesting permission if needed) so there is at least one device to deliver to.
+// Returns how many pushes the server actually dispatched.
+export const sendTestNotification = async (token: string): Promise<{ ok: boolean; sent: number }> => {
+    if (!(await isPushSubscribed())) {
+        await enablePush(token);
     }
-
-    if (isPushSupported()) {
-        const reg = await navigator.serviceWorker.ready;
-        const existing = await reg.pushManager.getSubscription();
-        if (existing) {
-            // The old subscription can no longer receive pushes; replace it with a fresh one.
-            await existing.unsubscribe().catch(() => {});
-            await enablePush(token).catch(() => {});
-        }
-    }
-    return { ok: true };
+    const result = await rawApiPostNoHook(API_ROUTES.POST_PUSH_TEST, {}, {}, token);
+    return { ok: Boolean(result?.ok), sent: Number(result?.sent ?? 0) };
 };

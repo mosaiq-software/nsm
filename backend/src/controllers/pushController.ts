@@ -3,7 +3,7 @@ import { Capability, DeploymentState, Project, PushSubscriptionJSON, TeamType } 
 import { config } from '@/config';
 import { cluster } from '@/cluster/node';
 import { getUserByAuthTokenModel, getUserByGithubIdModel, getUserByLoginModel } from '@/persistence/userPersistence';
-import { createPushSubscriptionModel, deleteAllPushSubscriptionsModel, deletePushSubscriptionByEndpointModel, getAllPushSubscriptionsModel, StoredPushSubscription } from '@/persistence/pushSubscriptionPersistence';
+import { createPushSubscriptionModel, deletePushSubscriptionByEndpointModel, getAllPushSubscriptionsModel, StoredPushSubscription } from '@/persistence/pushSubscriptionPersistence';
 import { getMutingGithubIdsForProjectModel, muteProjectModel, unmuteProjectModel, isProjectMutedModel } from '@/persistence/notificationMutePersistence';
 import { getEffectiveCapabilitiesForProject, listOrgMembersForTeam, resolveTeamForProject } from '@/controllers/authz';
 import { getAllAdminsModel } from '@/persistence/adminPersistence';
@@ -82,21 +82,6 @@ export const initWebPush = async (): Promise<void> => {
 };
 
 export const getVapidPublicKey = (): string => vapidKeys?.publicKey ?? '';
-
-// Generate and persist a brand-new VAPID key pair, then drop all existing subscriptions (they were
-// created against the old key and can no longer receive pushes; browsers must re-subscribe).
-// Refused when keys are pinned via environment config.
-export const regenerateVapidKeys = async (): Promise<{ ok: boolean; reason?: string }> => {
-    if (envKeysPinned()) {
-        return { ok: false, reason: 'VAPID keys are pinned via environment configuration and cannot be regenerated.' };
-    }
-    vapidKeys = webpush.generateVAPIDKeys();
-    await setMeta(VAPID_META_KEY, JSON.stringify(vapidKeys));
-    applyVapidDetails();
-    await deleteAllPushSubscriptionsModel();
-    pushLog.info({ action: 'vapid_regenerated', subscriptionsCleared: true }, 'regenerated VAPID key pair and cleared existing subscriptions');
-    return { ok: true };
-};
 
 // Store a browser's push subscription against the signed-in user identified by their auth token.
 export const subscribe = async (authToken: string, sub: PushSubscriptionJSON): Promise<boolean> => {
@@ -215,6 +200,25 @@ export const sendPushToGithubIds = async (
         })
     );
     return { userCount: byUser.size, targetCount: targets.length, sentCount, prunedCount, mutedCount };
+};
+
+// Send a test notification to every browser subscription owned by the signed-in user. Bypasses the
+// per-project mute (no projectIdForMute) so the user always sees it. Returns the number of pushes
+// actually sent so the caller can tell the user whether any device is subscribed. Leader-only.
+export const sendTestNotification = async (authToken: string): Promise<{ ok: boolean; sent: number }> => {
+    const user = await getUserByAuthTokenModel(authToken);
+    if (!user) return { ok: false, sent: 0 };
+
+    const payload = JSON.stringify({
+        title: 'NSM test notification',
+        body: 'Notifications are working on this device.',
+        url: '/settings',
+        tag: 'nsm-test',
+    });
+
+    const res = await sendPushToGithubIds([user.githubId], payload);
+    pushLog.info({ action: 'test_notification_sent', githubId: user.githubId, sentCount: res.sentCount, targetCount: res.targetCount }, `sent test notification to ${res.sentCount}/${res.targetCount} subscription(s) for ${user.name}`);
+    return { ok: true, sent: res.sentCount };
 };
 
 // Push a deployment notification to every opted-in browser. Leader-only (all deploy state lives on

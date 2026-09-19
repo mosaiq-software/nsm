@@ -8,7 +8,6 @@ import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useMe } from '@/contexts/me-context';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { NotificationBell } from '@/components/deploy/NotificationBell';
 import { CdWizard } from '@/components/cicd/CdWizard';
 import { MdOutlineCancel, MdOutlineCheckBox, MdOutlineDelete, MdOutlineInsertLink, MdOutlineKey, MdOutlineRocketLaunch, MdOutlineSync } from 'react-icons/md';
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
@@ -305,10 +304,7 @@ const ProjectDeployPage = () => {
                     </Group>
                 </Stack>
             </Modal>
-            <Group justify="space-between" align="flex-start" wrap="nowrap">
-                <ProjectHeader project={project} section="Deployment" />
-                <NotificationBell projectId={project.id} />
-            </Group>
+            <ProjectHeader project={project} section="Deployment" />
 
             <Card withBorder>
                 <Stack>

@@ -61,7 +61,7 @@ export enum API_ROUTES {
     POST_PUSH_SUBSCRIBE = '/push/subscribe',
     POST_PUSH_UNSUBSCRIBE = '/push/unsubscribe',
     POST_SET_PROJECT_NOTIFICATION = '/push/preference/:projectId/set',
-    POST_REGENERATE_VAPID = '/push/vapid/regenerate',
+    POST_PUSH_TEST = '/push/test',
     POST_LOG_QUERY = '/observability/query',
     POST_LOG_FACETS = '/observability/facets',
     POST_NODE_STORAGE_SNAPSHOT = '/observability/node-storage/snapshot',
@@ -138,7 +138,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: {};
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: {};
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: { projectId: string };
-    [API_ROUTES.POST_REGENERATE_VAPID]: {};
+    [API_ROUTES.POST_PUSH_TEST]: {};
     [API_ROUTES.POST_LOG_QUERY]: {};
     [API_ROUTES.POST_LOG_FACETS]: {};
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: {};
@@ -216,7 +216,7 @@ export interface API_BODY {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: PushSubscriptionJSON;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: { endpoint: string };
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: { enabled: boolean };
-    [API_ROUTES.POST_REGENERATE_VAPID]: {};
+    [API_ROUTES.POST_PUSH_TEST]: {};
     [API_ROUTES.POST_LOG_QUERY]: LogQueryRequest;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsRequest;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: { nodeId: string };
@@ -293,7 +293,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: undefined;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: undefined;
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: undefined;
-    [API_ROUTES.POST_REGENERATE_VAPID]: { ok: boolean; reason?: string };
+    [API_ROUTES.POST_PUSH_TEST]: { ok: boolean; sent: number };
     [API_ROUTES.POST_LOG_QUERY]: LogQueryResult | undefined;
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsResult | undefined;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: NodeStorageSpec | undefined;
@@ -372,7 +372,7 @@ export interface API_AUTH {
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: string;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: string;
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: string;
-    [API_ROUTES.POST_REGENERATE_VAPID]: string;
+    [API_ROUTES.POST_PUSH_TEST]: string;
     [API_ROUTES.POST_LOG_QUERY]: string;
     [API_ROUTES.POST_LOG_FACETS]: string;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: string;
