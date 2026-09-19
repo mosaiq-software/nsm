@@ -2,8 +2,11 @@ import { DeploymentState, DeployQueueEntry, DeployQueueState } from '@mosaiq/nsm
 import { cluster } from '@/cluster/node';
 import { getProject } from './projectController';
 import { deployProject, updateDeploymentLog } from './deployController';
+import { waitForDeployCompletion } from './deployCompletion';
 import { sendDeploymentNotification } from './pushController';
 import { createProjectInstanceModel, getAllActiveProjectInstancesModel } from '@/persistence/projectInstancePersistence';
+import { config } from '@/config';
+import { DEFAULT_TIMEOUT } from '@/constants';
 import { areaLog } from '@/utils/log';
 
 const queueLog = areaLog('deployQueue');
@@ -26,8 +29,14 @@ export const clearInstanceCanceled = (instanceId: string): void => {
     canceledInstances.delete(instanceId);
 };
 
-// Delay inserted between consecutive deploys to space out queue processing.
-const INTER_DEPLOY_DELAY_MS = 30_000;
+// Settle buffer inserted between consecutive deploys. Because the queue now waits for each deploy to
+// fully finish, this is dead time between one deploy completing and the next starting; the ETA math
+// (statusController) adds the same value per queued item so estimates match real behavior.
+export const INTER_DEPLOY_DELAY_MS = 30_000;
+
+// Safety margin added on top of a project's build timeout + readiness gate when waiting for a deploy
+// to report terminal, so a node that never reports back cannot stall the queue indefinitely.
+const COMPLETION_TIMEOUT_MARGIN_MS = 60_000;
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -86,13 +95,27 @@ const drainQueue = async (): Promise<void> => {
             active = { ...entry, startedAt: Date.now() };
             queueLog.info({ action: 'deploy_dequeued', projectId: entry.projectId, instanceId: entry.instanceId, queueDepth: queue.length }, `dequeued deploy for ${entry.projectId}`);
             try {
-                await deployProject(entry.projectId, entry.instanceId);
-                queueLog.info({ action: 'deploy_drain_completed', projectId: entry.projectId, instanceId: entry.instanceId, durationMs: Date.now() - active.startedAt }, `deploy drain completed for ${entry.projectId}`);
-            } catch (error: any) {
-                // deployProject already records FAILED on its own errors; this is a backstop for
-                // anything thrown before that (e.g. project vanished between enqueue and drain).
-                queueLog.error({ action: 'deploy_drain_failed', projectId: entry.projectId, instanceId: entry.instanceId, err: error?.message }, `deploy drain failed for ${entry.projectId}`);
-                await updateDeploymentLog(entry.instanceId, DeploymentState.FAILED, `Deploy failed: ${error?.message}\n`).catch(() => {});
+                // Register the completion waiter before proposing so an early terminal transition (e.g.
+                // a planning failure or a cancel before propose) is never missed.
+                const project = await getProject(entry.projectId).catch(() => undefined);
+                const completionTimeoutMs = (project?.timeout || DEFAULT_TIMEOUT) + config.readinessTimeoutMs + COMPLETION_TIMEOUT_MARGIN_MS;
+                const completion = waitForDeployCompletion(entry.instanceId, completionTimeoutMs);
+                try {
+                    await deployProject(entry.projectId, entry.instanceId);
+                } catch (error: any) {
+                    // deployProject already records FAILED on its own errors; this is a backstop for
+                    // anything thrown before that (e.g. project vanished between enqueue and drain).
+                    // The FAILED transition resolves the completion waiter below.
+                    queueLog.error({ action: 'deploy_drain_failed', projectId: entry.projectId, instanceId: entry.instanceId, err: error?.message }, `deploy drain failed for ${entry.projectId}`);
+                    await updateDeploymentLog(entry.instanceId, DeploymentState.FAILED, `Deploy failed: ${error?.message}\n`).catch(() => {});
+                }
+                // Block until the owning node reports the deploy fully done (DEPLOYED) or failed/
+                // cancelled after tearing down its stack, so only one deploy is ever in flight.
+                const finalState = await completion;
+                queueLog.info(
+                    { action: 'deploy_drain_completed', projectId: entry.projectId, instanceId: entry.instanceId, finalState, durationMs: Date.now() - active.startedAt },
+                    `deploy drain completed for ${entry.projectId} (${finalState})`
+                );
             } finally {
                 active = null;
             }

@@ -34,6 +34,29 @@ export const teardownGenerationLocal = async (projectId: string, generation: num
     }
 };
 
+// Tears down the legacy in-place stack for a project (bare <projectId> compose project) and removes
+// its deploy dir. Used to clean up a failed non-zero-downtime deploy before the leader is told it
+// failed, so the serial deploy queue only advances once the broken stack is gone. Deliberately no
+// global prune (another project may be mid-build).
+export const teardownLegacyLocal = async (projectId: string): Promise<void> => {
+    if (!config.production) return;
+    const dir = baseDir(projectId);
+    const cmd = `(cd ${dir} 2>/dev/null; docker compose -p ${projectId} down)`;
+    teardownLog.info({ action: 'legacy_teardown_started', projectId, composeProject: projectId }, `tearing down legacy stack ${projectId}`);
+    try {
+        const { out, code } = await execStream(cmd, TEARDOWN_TIMEOUT_MS, undefined, composeChildEnv());
+        if (code !== 0) teardownLog.warn({ action: 'legacy_teardown_nonzero', projectId, exitCode: code, out }, `legacy teardown exited with code ${code}`);
+        else teardownLog.info({ action: 'legacy_teardown_completed', projectId }, `torn down legacy stack ${projectId}`);
+    } catch (e: any) {
+        teardownLog.error({ action: 'legacy_teardown_failed', projectId, err: e?.message }, `error tearing down legacy stack ${projectId}`);
+    }
+    try {
+        await fs.rm(dir, { recursive: true, force: true });
+    } catch {
+        /* ignore */
+    }
+};
+
 // Enumerates the compose projects belonging to a project on this host: every generation-scoped name
 // (<projectId>-g<n>) plus the bare <projectId> (legacy in-place). Exact-match by regex so a project
 // id that is a prefix of another (e.g. "app" vs "app2") never cross-matches.

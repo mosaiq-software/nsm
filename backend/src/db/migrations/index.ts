@@ -5,10 +5,11 @@ import * as addProjectCicdColumn from './0004-projects-add-cicd-column';
 import * as addProjectResourceQuotaColumn from './0005-projects-add-resource-quota-column';
 import * as dropServiceInstanceCollectLogs from './0006-service-instances-drop-collect-logs';
 import * as dnsRecordsAddPortReservation from './0007-dns-records-add-port-reservation';
+import * as projectInstancesAddDeployTiming from './0008-project-instances-add-deploy-timing';
 
 // Ordered list of migrations. Statically imported (rather than glob-loaded) so module resolution
 // is identical under tsx, the test runner, and production. Append new migrations to the end.
-export const migrations = [addSecretComment, addProjectColumns, migrateAdmins, addProjectCicdColumn, addProjectResourceQuotaColumn, dropServiceInstanceCollectLogs, dnsRecordsAddPortReservation].map((m) => ({
+export const migrations = [addSecretComment, addProjectColumns, migrateAdmins, addProjectCicdColumn, addProjectResourceQuotaColumn, dropServiceInstanceCollectLogs, dnsRecordsAddPortReservation, projectInstancesAddDeployTiming].map((m) => ({
     name: m.name,
     up: m.up,
     down: m.down,

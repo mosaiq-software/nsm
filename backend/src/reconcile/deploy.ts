@@ -10,7 +10,7 @@ import { execSafe, execStream } from '@/host/exec';
 import { reportDeploymentLog, reportDeployReady } from './report';
 import { markGenerationLive, markGenerationReady, removeLiveGeneration, setLocalGeneration } from './state';
 import { releasePorts, waitPortReady } from './ports';
-import { teardownGenerationLocal } from './teardown';
+import { teardownGenerationLocal, teardownLegacyLocal } from './teardown';
 import { deployLogger } from '@/utils/log';
 import { deploysTotal, deployDuration, errorsTotal } from '@/utils/metrics';
 
@@ -87,6 +87,28 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
         return true;
     } catch (error: any) {
         const canceled = canceledDeployProjects.has(dep.projectId);
+        // Tear down the failed/cancelled stack BEFORE reporting the terminal state. The leader's serial
+        // deploy queue advances on the terminal transition, so cleanup must finish first to guarantee
+        // "failed => fully torn down before the next deploy starts". teardown helpers are no-ops in dev.
+        if (zeroDowntime) {
+            // Roll back the failed/cancelled blue stack so it never lingers holding ports; the old
+            // generation is untouched and keeps serving (automatic rollback).
+            try {
+                await teardownGenerationLocal(dep.projectId, dep.generation);
+                await removeLiveGeneration(dep.projectId, dep.generation);
+            } catch (e: any) {
+                dlog.error({ action: 'blue_cleanup_failed', generation: dep.generation, err: e?.message }, 'failed to clean up failed blue stack');
+            }
+        } else {
+            // Legacy in-place deploy: there is no old generation to fall back to, so tear the broken
+            // stack down fully rather than leaving half-built containers behind.
+            try {
+                await teardownLegacyLocal(dep.projectId);
+            } catch (e: any) {
+                dlog.error({ action: 'legacy_cleanup_failed', generation: dep.generation, err: e?.message }, 'failed to clean up failed legacy stack');
+            }
+        }
+        releasePorts(allocatedPorts);
         if (canceled) {
             await reportDeploymentLog(dep.logId, DeploymentState.CANCELLED, 'Deployment cancelled.\n');
             deploysTotal.inc({ result: 'cancelled' });
@@ -97,18 +119,6 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
             errorsTotal.inc({ area: 'deploy' });
             dlog.error({ action: 'deploy_failed', generation: dep.generation, err: error?.message }, 'deployment failed');
         }
-        // Roll back the failed/cancelled blue stack so it never lingers holding ports; the old
-        // generation is untouched and keeps serving (automatic rollback). teardownGenerationLocal is
-        // a no-op in dev.
-        if (zeroDowntime) {
-            try {
-                await teardownGenerationLocal(dep.projectId, dep.generation);
-                await removeLiveGeneration(dep.projectId, dep.generation);
-            } catch (e: any) {
-                dlog.error({ action: 'blue_cleanup_failed', generation: dep.generation, err: e?.message }, 'failed to clean up failed blue stack');
-            }
-        }
-        releasePorts(allocatedPorts);
         return false;
     } finally {
         canceledDeployProjects.delete(dep.projectId);

@@ -1,6 +1,6 @@
 import { sequelize } from '@/utils/dbHelper';
-import { ProjectInstance, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
-import { DataTypes, Model } from 'sequelize';
+import { DeploymentState, ProjectInstance, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
+import { DataTypes, Model, Op } from 'sequelize';
 import { Mutex } from 'async-mutex';
 
 const mutex = new Mutex();
@@ -23,6 +23,8 @@ ProjectInstanceModel.init(
         deploymentLog: DataTypes.TEXT,
         active: DataTypes.BOOLEAN,
         directoriesJson: DataTypes.TEXT,
+        deployStartedAt: DataTypes.NUMBER,
+        deployDurationMs: DataTypes.NUMBER,
     },
     { sequelize, timestamps: false }
 );
@@ -67,6 +69,17 @@ export const updateProjectInstanceModel = async (id: string, projectInstanceData
 
 export const deleteProjectInstanceModel = async (id: string) => {
     return await ProjectInstanceModel.destroy({ where: { id } });
+};
+
+// Most recent successful deploy durations (ms) for a project, newest first, capped at `limit`. Only
+// DEPLOYED instances that recorded a duration are returned, so callers can average real deploy time.
+export const getRecentDeployDurationsModel = async (projectId: string, limit: number): Promise<number[]> => {
+    const rows = await ProjectInstanceModel.findAll({
+        where: { projectId, state: DeploymentState.DEPLOYED, deployDurationMs: { [Op.ne]: null } },
+        order: [['deployStartedAt', 'DESC']],
+        limit,
+    });
+    return rows.map((r) => r.toJSON().deployDurationMs as number).filter((d) => typeof d === 'number' && d >= 0);
 };
 
 export const appendToDeploymentLog = async (id: string, log: string) => {

@@ -14,7 +14,7 @@ import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 import { DeploymentInstanceList } from '@/components/deploy/DeploymentInstanceList';
 import { DeploymentInstanceDetail } from '@/components/deploy/DeploymentInstanceDetail';
 import { isInProgressState } from '@/components/deploy/DeploymentStateBadge';
-import { deployQueueStatusFor } from '@/utils/deployQueue';
+import { deployQueueStatusFor, formatDeployEta } from '@/utils/deployQueue';
 import { useAPI } from '@/utils/api';
 
 const LIST_REFRESH_INTERVAL_MS = 5000;
@@ -38,6 +38,17 @@ const ProjectDeployPage = () => {
     }, [projectId, projectCtx.projects]);
 
     const serverHeaders = useMemo(() => [...(project?.instances ?? [])].sort((a, b) => b.created - a.created), [project?.instances]);
+
+    // Rolling average of recent successful deploys, so the page can show roughly how long a deploy of
+    // this app takes. Mirrors the leader's estimate (newest first, capped at 10 samples).
+    const avgDeployMs = useMemo(() => {
+        const durations = serverHeaders
+            .filter((h) => h.state === DeploymentState.DEPLOYED && typeof h.deployDurationMs === 'number')
+            .slice(0, 10)
+            .map((h) => h.deployDurationMs as number);
+        if (!durations.length) return undefined;
+        return durations.reduce((a, b) => a + b, 0) / durations.length;
+    }, [serverHeaders]);
 
     // Include a freshly-triggered deployment before the project list has caught up with it.
     const headers = useMemo(() => {
@@ -313,6 +324,11 @@ const ProjectDeployPage = () => {
                             Deploy
                         </Button>
                         <DeployQueueBadge projectId={project.id} />
+                        {formatDeployEta(avgDeployMs) && (
+                            <Text size="sm" c="dimmed">
+                                Typically deploys in {formatDeployEta(avgDeployMs)}
+                            </Text>
+                        )}
                         {inQueue && (
                             <Text size="sm" c="dimmed">
                                 {queueStatus.state === 'active' ? 'Deploying now.' : `Waiting in queue (position ${queueStatus.position}).`}

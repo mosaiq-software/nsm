@@ -3,8 +3,8 @@ import { DeploymentState, User } from '@mosaiq/nsm-common/types';
 
 const status = { leaderId: 'a', nodes: [], health: [], desiredNsmVersion: null };
 vi.mock('@/cluster/node', () => ({ cluster: { status: vi.fn(async () => status) } }));
-vi.mock('@/controllers/deployQueue', () => ({ getDeployQueueState: vi.fn(() => ({ active: null, queued: [], deploying: [] })) }));
-vi.mock('@/persistence/projectInstancePersistence', () => ({ getAllActiveProjectInstancesModel: vi.fn(async () => []) }));
+vi.mock('@/controllers/deployQueue', () => ({ getDeployQueueState: vi.fn(() => ({ active: null, queued: [], deploying: [] })), INTER_DEPLOY_DELAY_MS: 30_000 }));
+vi.mock('@/persistence/projectInstancePersistence', () => ({ getAllActiveProjectInstancesModel: vi.fn(async () => []), getRecentDeployDurationsModel: vi.fn(async () => []) }));
 vi.mock('@/controllers/teamController', () => ({ getVisibleProjects: vi.fn(async () => []) }));
 
 import { getControlPlaneStatus } from '@/controllers/statusController';
@@ -28,7 +28,8 @@ describe('getControlPlaneStatus', () => {
         ]);
         mockVisible.mockResolvedValueOnce([{ id: 'p1' }, { id: 'p2' }]);
         const result = await getControlPlaneStatus(user);
-        expect(result.deployQueue?.deploying).toEqual([{ projectId: 'p1', instanceId: 'iDep', enqueuedAt: 100, startedAt: 100 }]);
+        // In-flight entries are annotated with no wait and (absent history) an undefined deploy estimate.
+        expect(result.deployQueue?.deploying).toEqual([{ projectId: 'p1', instanceId: 'iDep', enqueuedAt: 100, startedAt: 100, estimatedWaitMs: 0, avgSampleCount: 0 }]);
     });
 
     it('redacts queue entries for projects the user cannot see', async () => {
@@ -39,7 +40,7 @@ describe('getControlPlaneStatus', () => {
         mockVisible.mockResolvedValueOnce([{ id: 'p1' }]);
         const result = await getControlPlaneStatus(user);
         expect(result.deployQueue?.deploying).toEqual([
-            { projectId: 'p1', instanceId: 'iVis', enqueuedAt: 100, startedAt: 100 },
+            { projectId: 'p1', instanceId: 'iVis', enqueuedAt: 100, startedAt: 100, estimatedWaitMs: 0, avgSampleCount: 0 },
             { projectId: '', instanceId: '', enqueuedAt: 0, startedAt: 0, hidden: true },
         ]);
     });

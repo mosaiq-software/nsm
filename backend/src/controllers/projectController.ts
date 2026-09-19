@@ -33,6 +33,8 @@ export const getProject = async (projectId: string): Promise<Project | undefined
         lastUpdated: inst.lastUpdated,
         active: inst.active,
         directories: inst.directories,
+        deployStartedAt: inst.deployStartedAt,
+        deployDurationMs: inst.deployDurationMs,
     }));
 
     return {

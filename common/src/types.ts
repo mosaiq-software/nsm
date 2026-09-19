@@ -111,6 +111,12 @@ export interface ProjectInstanceHeader {
     lastUpdated: number;
     active: boolean;
     directories: FullDirectoryMap;
+    // Epoch ms when this instance entered DEPLOYING (build start). Set by the leader on the
+    // QUEUED -> DEPLOYING transition; used to compute deployDurationMs on success.
+    deployStartedAt?: number;
+    // Wall-clock build duration in ms (deployStartedAt -> DEPLOYED). Only set on a successful deploy,
+    // so per-project rolling averages reflect real deploy time.
+    deployDurationMs?: number;
 }
 export interface ProjectInstance extends ProjectInstanceHeader {
     deploymentLog: string;
@@ -216,6 +222,15 @@ export interface DeployQueueEntry {
     instanceId: string;
     enqueuedAt: number;
     hidden?: boolean;
+    // Estimates derived from per-project rolling averages of recent successful deploys. All optional:
+    // absent when the project has no deploy history yet (or the entry is redacted).
+    //   estimatedDeployMs - how long this item's own deploy is expected to take.
+    //   estimatedWaitMs   - time until this item reaches the top of the queue and begins deploying
+    //                       (0 for the item that is currently deploying).
+    //   avgSampleCount    - how many past deploys the estimate is based on (0 = fell back to a default).
+    estimatedDeployMs?: number;
+    estimatedWaitMs?: number;
+    avgSampleCount?: number;
 }
 
 // Snapshot of the leader's deploy queue: at most one entry occupies the leader's planning slot

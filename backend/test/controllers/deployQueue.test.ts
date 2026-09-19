@@ -8,6 +8,7 @@ vi.mock('@/controllers/deployController', () => ({ deployProject: vi.fn(), updat
 import { getProject } from '@/controllers/projectController';
 import { deployProject } from '@/controllers/deployController';
 import { cancelQueuedDeploy, enqueueDeploy, getDeployQueueState, recoverDeployQueue } from '@/controllers/deployQueue';
+import { notifyDeployTerminal } from '@/controllers/deployCompletion';
 import { updateDeploymentLog } from '@/controllers/deployController';
 import { createProjectInstanceModel, getProjectInstanceByIdModel } from '@/persistence/projectInstancePersistence';
 import { DeploymentState } from '@mosaiq/nsm-common/types';
@@ -21,10 +22,11 @@ const INTER_DEPLOY_DELAY_MS = 30_000;
 
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
-// Controllable deploys: each call parks until we resolve it, so we can observe queue state while a
-// deploy is "in flight" and assert that only one runs at a time.
+// The queue is strictly serial: it proposes a deploy (deployProject, mocked to resolve immediately
+// for the planning phase) and then blocks until the deploy reports terminal via notifyDeployTerminal.
+// `started` records deploy order; activeCount tracks how many deploys are between "started" and their
+// terminal signal, so maxConcurrent proves only one is ever in flight.
 let started: string[] = [];
-let resolvers: Array<() => void> = [];
 let activeCount = 0;
 let maxConcurrent = 0;
 
@@ -32,40 +34,42 @@ beforeEach(async () => {
     vi.useFakeTimers();
     await resetDb();
     started = [];
-    resolvers = [];
     activeCount = 0;
     maxConcurrent = 0;
     mockGetProject.mockReset().mockResolvedValue({ id: 'x', workerNodeId: 'n1' });
-    mockDeploy.mockReset().mockImplementation((projectId: string) => {
+    mockDeploy.mockReset().mockImplementation(async (projectId: string) => {
         started.push(projectId);
         activeCount++;
         maxConcurrent = Math.max(maxConcurrent, activeCount);
-        return new Promise<void>((resolve) => {
-            resolvers.push(() => {
-                activeCount--;
-                resolve();
-            });
-        });
     });
 });
 
-// Drain anything still parked so the module-level singleton is idle for the next test. Resolving a
-// deploy can start the next one (which parks again), so loop until the queue is fully idle.
+// Drain anything still in flight so the module-level singleton is idle for the next test. Signalling
+// terminal can start the next deploy (which blocks again), so loop until the queue is fully idle.
 afterEach(async () => {
     for (let i = 0; i < 100; i++) {
-        while (resolvers.length) resolvers.shift()!();
+        const active = getDeployQueueState().active;
+        if (active) notifyDeployTerminal(active.instanceId, DeploymentState.DEPLOYED);
+        await flush();
         await vi.advanceTimersByTimeAsync(INTER_DEPLOY_DELAY_MS);
         const state = getDeployQueueState();
-        if (!state.active && state.queued.length === 0 && resolvers.length === 0) break;
+        if (!state.active && state.queued.length === 0) break;
     }
+    activeCount = 0;
     vi.useRealTimers();
 });
 
-// Finish the active deploy and let the queue advance past the inter-deploy delay so the next
-// deploy (if any) starts.
+// Finish the active deploy (report it DEPLOYED) and let the queue advance past the inter-deploy delay
+// so the next deploy (if any) starts.
 const resolveNext = async () => {
-    resolvers.shift()!();
+    const active = getDeployQueueState().active;
+    if (active) {
+        activeCount--;
+        notifyDeployTerminal(active.instanceId, DeploymentState.DEPLOYED);
+    }
+    await flush();
     await vi.advanceTimersByTimeAsync(INTER_DEPLOY_DELAY_MS);
+    await flush();
 };
 
 describe('deploy queue serialization', () => {
@@ -73,6 +77,7 @@ describe('deploy queue serialization', () => {
         await enqueueDeploy('p1');
         await enqueueDeploy('p2');
         await enqueueDeploy('p3');
+        await flush();
 
         // Only p1 is running; p2/p3 wait in order.
         expect(maxConcurrent).toBe(1);
@@ -96,9 +101,10 @@ describe('deploy queue serialization', () => {
     });
 
     it('creates a QUEUED instance immediately and returns its id', async () => {
-        // Park p0 so p1 stays queued (not yet active) while we inspect it.
+        // Keep p0 in flight so p1 stays queued (not yet active) while we inspect it.
         await enqueueDeploy('p0');
         const instanceId = await enqueueDeploy('p1');
+        await flush();
         expect(instanceId).toBeTruthy();
         const inst = await getProjectInstanceByIdModel(instanceId!);
         expect(inst?.state).toBe(DeploymentState.QUEUED);
@@ -106,6 +112,7 @@ describe('deploy queue serialization', () => {
 
     it('deduplicates a project already active or queued', async () => {
         const first = await enqueueDeploy('p1'); // becomes active
+        await flush();
         const again = await enqueueDeploy('p1'); // active dup -> same id, no new run
         expect(again).toBe(first);
 
@@ -128,8 +135,9 @@ describe('deploy queue serialization', () => {
 
 describe('deploy queue cancellation', () => {
     it('cancels a queued project: removes it and marks it CANCELLED', async () => {
-        await enqueueDeploy('p1'); // becomes active (parked)
+        await enqueueDeploy('p1'); // becomes active (in flight)
         const p2id = await enqueueDeploy('p2'); // queued behind p1
+        await flush();
         expect(getDeployQueueState().queued.map((e) => e.projectId)).toEqual(['p2']);
 
         const phase = await cancelQueuedDeploy('p2');
@@ -140,6 +148,7 @@ describe('deploy queue cancellation', () => {
 
     it('flags the actively-planning project as planning without touching the queue', async () => {
         await enqueueDeploy('p1'); // active/planning
+        await flush();
         const phase = await cancelQueuedDeploy('p1');
         expect(phase).toBe('planning');
         expect(getDeployQueueState().active?.projectId).toBe('p1');

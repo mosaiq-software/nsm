@@ -75,6 +75,8 @@ export interface NsmConfig {
     readinessTimeoutMs: number;
     // Poll interval used while waiting for the readiness gate to pass.
     readinessIntervalMs: number;
+    // How many of a project's most recent successful deploys are averaged for its deploy-time estimate.
+    deployDurationSampleSize: number;
     // Cloudflare integration (leader-only): DNS record + domain management. Empty token disables the
     // whole feature. accountId is required for registrar (domain search/buy) operations.
     cloudflare: { apiToken: string; accountId: string };
@@ -146,6 +148,7 @@ export const config: NsmConfig = {
     deployDrainMs: num(process.env.DEPLOY_DRAIN_MS, 10_000),
     readinessTimeoutMs: num(process.env.READINESS_TIMEOUT_MS, 120_000),
     readinessIntervalMs: num(process.env.READINESS_INTERVAL_MS, 2_000),
+    deployDurationSampleSize: num(process.env.DEPLOY_DURATION_SAMPLE_SIZE, 10),
     cloudflare: {
         apiToken: process.env.CLOUDFLARE_API_TOKEN || '',
         accountId: process.env.CLOUDFLARE_ACCOUNT_ID || '',

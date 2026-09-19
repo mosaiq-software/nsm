@@ -31,6 +31,7 @@ import { ensureDirectories } from '@/reconcile/directories';
 import { purgeProjectLocal, teardownProjectLocal } from '@/reconcile/teardown';
 import { cancelLocalDeployment } from '@/reconcile/deploy';
 import { cancelQueuedDeploy, isInstanceCanceled, clearInstanceCanceled } from './deployQueue';
+import { notifyDeployTerminal } from './deployCompletion';
 import { config } from '@/config';
 import { DEFAULT_TIMEOUT, NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_PROJECT_ID, NSM_LABEL_PROJECT_INSTANCE_ID, NSM_LABEL_SERVICE_NAME, NSM_LABEL_MANAGED } from '@/constants';
 import { leaderEnsureCerts } from '@/reconcile/certs';
@@ -111,7 +112,7 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
 
         if (existingInstanceId) {
             instanceId = existingInstanceId;
-            await updateProjectInstanceModel(instanceId, { state: DeploymentState.DEPLOYING, workerNodeId: project.workerNodeId });
+            await updateProjectInstanceModel(instanceId, { state: DeploymentState.DEPLOYING, workerNodeId: project.workerNodeId, deployStartedAt: Date.now() });
         } else {
             instanceId = crypto.randomUUID();
             const projectInstanceHeader: ProjectInstanceHeader = {
@@ -123,6 +124,7 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
                 lastUpdated: Date.now(),
                 active: true,
                 directories: {},
+                deployStartedAt: Date.now(),
             };
             await createProjectInstanceModel(projectInstanceHeader);
         }
@@ -266,17 +268,27 @@ export const updateDeploymentLog = async (instanceId: string, status: Deployment
     // Read the prior state first so we can fire a push notification only on the transition into a
     // terminal state (updateDeploymentLog is called repeatedly with the same state as logs append).
     const prev = await getProjectInstanceByIdModel(instanceId);
-    await updateProjectInstanceModel(instanceId, { state: status });
-    await appendToDeploymentLog(instanceId, logText);
-    if (prev && prev.state !== status) {
-        deployLog.info({ action: 'deploy_state_changed', instanceId, projectId: prev.projectId, prevState: prev.state, newState: status }, `deployment ${instanceId} -> ${status}`);
+    const transitioned = !!prev && prev.state !== status;
+    // On the first success, stamp how long the build took (from the DEPLOYING start). Only successful
+    // deploys record a duration, so the per-project rolling average reflects real deploy time.
+    const extra: Partial<ProjectInstanceHeader> = {};
+    if (transitioned && status === DeploymentState.DEPLOYED && prev?.deployStartedAt) {
+        extra.deployDurationMs = Date.now() - prev.deployStartedAt;
     }
-    if (TERMINAL_DEPLOY_STATES.includes(status) && prev && prev.state !== status) {
+    await updateProjectInstanceModel(instanceId, { state: status, ...extra });
+    await appendToDeploymentLog(instanceId, logText);
+    if (transitioned) {
+        deployLog.info({ action: 'deploy_state_changed', instanceId, projectId: prev!.projectId, prevState: prev!.state, newState: status }, `deployment ${instanceId} -> ${status}`);
+    }
+    if (TERMINAL_DEPLOY_STATES.includes(status) && transitioned) {
+        // Unblock the serial deploy queue: the node has reported this deploy fully done (and, on
+        // failure, torn down) so the next queued item may start.
+        notifyDeployTerminal(instanceId, status);
         try {
-            const project = await getProject(prev.projectId);
+            const project = await getProject(prev!.projectId);
             if (project) void sendDeploymentNotification(project, status);
         } catch (e: any) {
-            deployLog.error({ action: 'push_notification_failed', instanceId, projectId: prev.projectId, err: e?.message }, 'deployment notification failed');
+            deployLog.error({ action: 'push_notification_failed', instanceId, projectId: prev!.projectId, err: e?.message }, 'deployment notification failed');
         }
     }
 };

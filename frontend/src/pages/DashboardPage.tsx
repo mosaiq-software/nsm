@@ -10,7 +10,7 @@ import { useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { deriveProjectState } from '@/utils/projectStatus';
-import { summarizeDeployQueue } from '@/utils/deployQueue';
+import { summarizeDeployQueue, formatDeployEta } from '@/utils/deployQueue';
 import { useAPI } from '@/utils/api';
 
 const relativeTime = (ts: number): string => {
@@ -178,6 +178,7 @@ const DashboardPage = () => {
                                             <Table.Th w={110}>Position</Table.Th>
                                             <Table.Th>Project</Table.Th>
                                             <Table.Th>Since</Table.Th>
+                                            <Table.Th w={140}>Est. deploy time</Table.Th>
                                             <Table.Th w={110} />
                                         </Table.Tr>
                                     </Table.Thead>
@@ -196,6 +197,7 @@ const DashboardPage = () => {
                                                     <Text fw={600}>{entry.projectId}</Text>
                                                 </Table.Td>
                                                 <Table.Td>{relativeTime(entry.startedAt)}</Table.Td>
+                                                <Table.Td>{formatDeployEta(entry.estimatedDeployMs) ?? '—'}</Table.Td>
                                                 <Table.Td>
                                                     {canCancel(entry.projectId) && (
                                                         <Button
@@ -223,7 +225,17 @@ const DashboardPage = () => {
                                                 <Table.Td>
                                                     <Text fw={600}>{entry.projectId}</Text>
                                                 </Table.Td>
-                                                <Table.Td>queued {relativeTime(entry.enqueuedAt)}</Table.Td>
+                                                <Table.Td>
+                                                    <Stack gap={0}>
+                                                        <Text size="sm">queued {relativeTime(entry.enqueuedAt)}</Text>
+                                                        {formatDeployEta(entry.estimatedWaitMs) && (
+                                                            <Text size="xs" c="dimmed">
+                                                                starts in {formatDeployEta(entry.estimatedWaitMs)}
+                                                            </Text>
+                                                        )}
+                                                    </Stack>
+                                                </Table.Td>
+                                                <Table.Td>{formatDeployEta(entry.estimatedDeployMs) ?? '—'}</Table.Td>
                                                 <Table.Td>
                                                     {canCancel(entry.projectId) && (
                                                         <Button
