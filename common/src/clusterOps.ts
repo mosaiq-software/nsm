@@ -1,4 +1,4 @@
-import { Admin, AllowedGithubEntity, DomainRequest, PortReservation, Project, ProjectServiceInstance, Secret, TeamConfig, TeamMemberOverride, User } from './types';
+import { Admin, AllowedGithubEntity, ApiKey, DomainRequest, Incident, IncidentUpdate, PortReservation, Project, ProjectServiceInstance, Secret, TeamConfig, TeamMemberOverride, User } from './types';
 
 // Static description of a peer in the cluster. Identity is nodeId; address is the current IP.
 export interface NodeInfo {
@@ -82,6 +82,11 @@ export enum OpType {
     UPSERT_DOMAIN_REQUEST = 'UPSERT_DOMAIN_REQUEST',
     UPSERT_PORT_RESERVATION = 'UPSERT_PORT_RESERVATION',
     DELETE_PORT_RESERVATION = 'DELETE_PORT_RESERVATION',
+    UPSERT_INCIDENT = 'UPSERT_INCIDENT',
+    DELETE_INCIDENT = 'DELETE_INCIDENT',
+    ADD_INCIDENT_UPDATE = 'ADD_INCIDENT_UPDATE',
+    UPSERT_API_KEY = 'UPSERT_API_KEY',
+    REVOKE_API_KEY = 'REVOKE_API_KEY',
 }
 
 export type Op =
@@ -104,4 +109,9 @@ export type Op =
     | { type: OpType.SET_DOMAIN_ALLOCATIONS; zoneId: string; ownerIds: string[] }
     | { type: OpType.UPSERT_DOMAIN_REQUEST; request: DomainRequest }
     | { type: OpType.UPSERT_PORT_RESERVATION; reservation: PortReservation }
-    | { type: OpType.DELETE_PORT_RESERVATION; reservationId: string };
+    | { type: OpType.DELETE_PORT_RESERVATION; reservationId: string }
+    | { type: OpType.UPSERT_INCIDENT; incident: Incident }
+    | { type: OpType.DELETE_INCIDENT; incidentId: string }
+    | { type: OpType.ADD_INCIDENT_UPDATE; update: IncidentUpdate }
+    | { type: OpType.UPSERT_API_KEY; apiKey: ApiKey }
+    | { type: OpType.REVOKE_API_KEY; apiKeyId: string; revokedAt: number };

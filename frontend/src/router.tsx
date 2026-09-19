@@ -4,6 +4,7 @@ import ProjectPage from '@/pages/ProjectPage';
 import ProjectDeployPage from '@/pages/ProjectDeployPage';
 import ProjectConfigPage from '@/pages/ProjectConfigPage';
 import ProjectLogsPage from '@/pages/ProjectLogsPage';
+import ProjectStatusPage from '@/pages/ProjectStatusPage';
 import NodesPage from '@/pages/NodesPage';
 import NodeDetailPage from '@/pages/NodeDetailPage';
 import DomainsPage from '@/pages/DomainsPage';
@@ -60,6 +61,7 @@ const Router = () => {
                 <Route path="/p/:projectId/deploy" element={<ProjectDeployPage />} />
                 <Route path="/p/:projectId/config" element={<ProjectConfigPage />} />
                 <Route path="/p/:projectId/logs" element={<ProjectLogsPage />} />
+                <Route path="/p/:projectId/status" element={<ProjectStatusPage />} />
                 {meCtx.isAdmin && <Route path="/nodes" element={<NodesPage />} />}
                 {meCtx.isAdmin && <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />}
                 <Route path="/domains" element={<DomainsPage />} />

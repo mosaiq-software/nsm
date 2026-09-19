@@ -13,6 +13,8 @@ import { setZoneAssignmentModel } from '@/persistence/dnsZoneAssignmentPersisten
 import { setDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
 import { upsertDomainRequestModel } from '@/persistence/domainRequestPersistence';
 import { deletePortReservationModel, deletePortReservationsForProjectModel, upsertPortReservationModel } from '@/persistence/portReservationPersistence';
+import { addIncidentUpdateModel, deleteIncidentModel, upsertIncidentModel } from '@/persistence/incidentPersistence';
+import { revokeApiKeyModel, upsertApiKeyModel } from '@/persistence/apiKeyPersistence';
 import { areaLog } from '@/utils/log';
 
 const clusterLog = areaLog('cluster');
@@ -60,6 +62,16 @@ const opDetails = (op: Op): Record<string, unknown> => {
             return { reservationId: op.reservation.id, nodeId: op.reservation.nodeId, projectId: op.reservation.projectId, port: op.reservation.port, protocol: op.reservation.protocol };
         case OpType.DELETE_PORT_RESERVATION:
             return { reservationId: op.reservationId };
+        case OpType.UPSERT_INCIDENT:
+            return { incidentId: op.incident.id, projectId: op.incident.projectId, kind: op.incident.kind, status: op.incident.status };
+        case OpType.DELETE_INCIDENT:
+            return { incidentId: op.incidentId };
+        case OpType.ADD_INCIDENT_UPDATE:
+            return { incidentId: op.update.incidentId, updateId: op.update.id, status: op.update.status };
+        case OpType.UPSERT_API_KEY:
+            return { apiKeyId: op.apiKey.id, projectId: op.apiKey.projectId, permissions: op.apiKey.permissions };
+        case OpType.REVOKE_API_KEY:
+            return { apiKeyId: op.apiKeyId };
         default:
             return {};
     }
@@ -154,6 +166,21 @@ export const applyOp = async (op: Op): Promise<void> => {
             break;
         case OpType.DELETE_PORT_RESERVATION:
             await deletePortReservationModel(op.reservationId);
+            break;
+        case OpType.UPSERT_INCIDENT:
+            await upsertIncidentModel(op.incident);
+            break;
+        case OpType.DELETE_INCIDENT:
+            await deleteIncidentModel(op.incidentId);
+            break;
+        case OpType.ADD_INCIDENT_UPDATE:
+            await addIncidentUpdateModel(op.update);
+            break;
+        case OpType.UPSERT_API_KEY:
+            await upsertApiKeyModel(op.apiKey);
+            break;
+        case OpType.REVOKE_API_KEY:
+            await revokeApiKeyModel(op.apiKeyId, op.revokedAt);
             break;
         default:
             clusterLog.warn({ action: 'op_unknown', opType: (op as any).type }, 'unknown cluster op ignored');

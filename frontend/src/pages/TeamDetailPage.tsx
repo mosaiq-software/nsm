@@ -14,6 +14,7 @@ const CAPABILITY_LABELS: { cap: Capability; label: string }[] = [
     { cap: Capability.CONFIGURE, label: 'Configure & env' },
     { cap: Capability.DELETE, label: 'Delete' },
     { cap: Capability.CREATE_PROJECT, label: 'Create projects' },
+    { cap: Capability.MANAGE_INCIDENTS, label: 'Manage incidents' },
 ];
 
 const TeamDetailPage = () => {

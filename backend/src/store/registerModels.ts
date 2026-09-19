@@ -22,3 +22,6 @@ import '@/persistence/domainTeamAllocationPersistence';
 import '@/persistence/domainRequestPersistence';
 import '@/persistence/quotaBreachPersistence';
 import '@/persistence/portReservationPersistence';
+import '@/persistence/projectHealthPersistence';
+import '@/persistence/incidentPersistence';
+import '@/persistence/apiKeyPersistence';

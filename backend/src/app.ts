@@ -2,7 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
-import { privateRouter, publicRouter, internalRouter } from './routes';
+import { privateRouter, publicRouter, internalRouter, apiKeyRouter } from './routes';
 import { config } from './config';
 import { requestLogger } from './middleware/requestLog';
 
@@ -16,6 +16,9 @@ export const initApp = async () => {
 
     app.use(publicRouter);
     app.use(internalRouter);
+    // Public API-key-authenticated JSON API. Mounted before the static/SPA handlers so /api/v1 paths
+    // are never swallowed by the app-shell fallback.
+    app.use(apiKeyRouter);
 
     // The built UI and its assets are public: the sign-in page must load before a token exists.
     // Static file serving calls next() for non-file paths, so API routes below are unaffected.

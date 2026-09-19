@@ -12,6 +12,10 @@ import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
 import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, queryNodeMetric, getNodeStorageSpec, queryNodeStorageSeries, getProjectResourceUsage, MetricKind } from '@/controllers/observabilityController';
 import { setProjectQuota } from '@/controllers/quotaController';
+import { getProjectHealthSummary } from '@/controllers/healthController';
+import { addIncidentUpdate, createIncident, deleteIncident, getRecentIncidents, listIncidents, updateIncident } from '@/controllers/incidentController';
+import { authenticateApiKey, createApiKey, listApiKeys, revokeApiKey } from '@/controllers/apiKeyController';
+import { ApiKeyPermission } from '@mosaiq/nsm-common/types';
 import { NodeMetricKind } from '@mosaiq/nsm-common/types';
 import { collectDiskUsage } from '@/reconcile/diskUsage';
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
@@ -45,6 +49,10 @@ const routeLog = areaLog('routes');
 const publicRouter = express.Router();
 const privateRouter = express.Router();
 const internalRouter = express.Router();
+// Public, API-key-authenticated JSON API (external consumers, e.g. a status website). Auth is per
+// route via authenticateApiKey rather than a blanket middleware, so paths can require specific
+// permissions.
+const apiKeyRouter = express.Router();
 
 // The externally reachable base URL of this node, taken from trusted server config (config.publicUrl)
 // rather than request headers: this value is spliced into the root-executed install.sh and the
@@ -389,6 +397,20 @@ privateRouter.get(API_ROUTES.GET_PROJECT_RESOURCE_USAGE, async (req, res) => {
         res.status(200).json(await getProjectResourceUsage(params.projectId));
     } catch (e: any) {
         res.status(400).send(e.message);
+    }
+});
+
+// Project health/uptime summary: current per-check status, per-window uptime ("nines") and heatmap
+// buckets. Visible to anyone with VIEW on the project. Leader-only (samples live in the leader DB).
+privateRouter.get(API_ROUTES.GET_PROJECT_HEALTH, async (req, res) => {
+    const params = req.params as unknown as API_PARAMS[API_ROUTES.GET_PROJECT_HEALTH];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
+    try {
+        const { window } = req.query as Record<string, string>;
+        res.status(200).json(await getProjectHealthSummary(params.projectId, window));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to load project health');
     }
 });
 
@@ -1110,6 +1132,140 @@ privateRouter.post(API_ROUTES.POST_DNS_RECORD_DELETE, async (req, res) => {
     }
 });
 
+// === Incidents & scheduled maintenance ===
+// Viewing is gated on VIEW; all writes require the MANAGE_INCIDENTS capability. Leader-only (the
+// records are replicated state served from the leader's DB).
+privateRouter.get(API_ROUTES.GET_PROJECT_INCIDENTS, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_INCIDENTS];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
+    try {
+        res.status(200).json(await listIncidents(params.projectId));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to list incidents');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_CREATE_INCIDENT, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_CREATE_INCIDENT];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.MANAGE_INCIDENTS))) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        const body = req.body as API_BODY[API_ROUTES.POST_CREATE_INCIDENT];
+        res.status(200).json(await createIncident(params.projectId, body, user.name));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to create incident');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_ADD_INCIDENT_UPDATE, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_ADD_INCIDENT_UPDATE];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.MANAGE_INCIDENTS))) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        const body = req.body as API_BODY[API_ROUTES.POST_ADD_INCIDENT_UPDATE];
+        res.status(200).json(await addIncidentUpdate(params.projectId, params.incidentId, body, user.name));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to add incident update');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_UPDATE_INCIDENT, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_UPDATE_INCIDENT];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.MANAGE_INCIDENTS))) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        const body = req.body as API_BODY[API_ROUTES.POST_UPDATE_INCIDENT];
+        res.status(200).json(await updateIncident(params.projectId, params.incidentId, body, user.name));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to update incident');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_DELETE_INCIDENT, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_DELETE_INCIDENT];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.MANAGE_INCIDENTS))) return;
+    try {
+        await deleteIncident(params.projectId, params.incidentId);
+        res.status(200).json(undefined);
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to delete incident');
+    }
+});
+
+// === API key management (project settings) ===
+// Managing keys is gated on CONFIGURE (project settings). Listing returns metadata only (prefixes,
+// never the secret or its hash). Leader-only.
+privateRouter.get(API_ROUTES.GET_PROJECT_API_KEYS, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_API_KEYS];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        res.status(200).json(await listApiKeys(params.projectId));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to list API keys');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_CREATE_API_KEY, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_CREATE_API_KEY];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        const body = req.body as API_BODY[API_ROUTES.POST_CREATE_API_KEY];
+        res.status(200).json(await createApiKey(params.projectId, body, user.name));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to create API key');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_REVOKE_API_KEY, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_REVOKE_API_KEY];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        await revokeApiKey(params.projectId, params.apiKeyId);
+        res.status(200).json(undefined);
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to revoke API key');
+    }
+});
+
+// === Public API-key-authenticated JSON API (/api/v1) ===
+// Extract the raw key from either `Authorization: Bearer <key>` or the `x-nsm-api-key` header.
+const extractApiKey = (req: express.Request): string => {
+    const header = (req.headers['authorization'] || req.headers['Authorization']) as string | undefined;
+    if (header) return header.replace(/^Bearer\s+/i, '').trim();
+    const alt = req.headers['x-nsm-api-key'];
+    return typeof alt === 'string' ? alt.trim() : '';
+};
+
+// Current status + uptime + recent incidents for the key's project. Requires the GET_STATUS
+// permission. Leader-only (health samples and incidents live in the leader DB); followers forward.
+apiKeyRouter.get('/api/v1/status', async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    try {
+        const auth = await authenticateApiKey(extractApiKey(req));
+        if (!auth) return void res.status(401).json({ error: 'Invalid or revoked API key' });
+        if (!auth.permissions.includes(ApiKeyPermission.GET_STATUS)) return void res.status(403).json({ error: 'API key lacks the get_status permission' });
+        const { window } = req.query as Record<string, string>;
+        const health = await getProjectHealthSummary(auth.projectId, window);
+        const incidents = await getRecentIncidents(auth.projectId, 10);
+        res.status(200).json({ projectId: auth.projectId, health, incidents });
+    } catch (e: any) {
+        res.status(400).json({ error: e?.message || 'Failed to load status' });
+    }
+});
+
 // === Internal cluster routes (cluster-secret authenticated) ===
 // A node announces itself (and its current IP) to the leader; returns the registry snapshot.
 internalRouter.post('/cluster/register', requireClusterSecret, async (req, res) => {
@@ -1315,4 +1471,4 @@ internalRouter.get('/cluster/dev-dump', requireClusterSecret, async (_req, res) 
     res.status(200).json({ nodeId: config.nodeId, isLeader: cluster.isLeader(), leader: cluster.leaderAddress(), projectIds: projects.map((p) => p.id), nodeIds: nodes.map((n) => n.nodeId) });
 });
 
-export { publicRouter, privateRouter, internalRouter };
+export { publicRouter, privateRouter, internalRouter, apiKeyRouter };

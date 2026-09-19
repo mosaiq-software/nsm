@@ -231,6 +231,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                             {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />}
+                                            <RouterLink to={`/p/${project.id}/status`} label="Status" showActive />
                                         </RouterLink>
                                     ))}
                             {team.installed && team.capabilities.includes(Capability.CREATE_PROJECT) && (

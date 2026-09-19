@@ -364,6 +364,197 @@ export interface ProjectServiceInstance extends ProjectService {
     lastUpdated: number;
 }
 
+// === Project health / uptime tracking ===
+// Deliberately generic (not tied to a single consumer) so the same samples can later drive
+// deploy-readiness in addition to the status page and public API.
+export enum HealthCheckType {
+    URL = 'url', // HTTP/TLS probe of a public URL the project serves
+    CONTAINER = 'container', // container actual-vs-expected state (from status gossip)
+}
+
+export enum HealthStatus {
+    UP = 'up', // serving normally
+    DEGRADED = 'degraded', // answering but impaired (e.g. TLS cert problem)
+    DOWN = 'down', // not serving
+    UNKNOWN = 'unknown', // no data yet
+}
+
+// One recorded observation of a single check target at a point in time.
+export interface ProjectHealthSample {
+    id: string;
+    projectId: string;
+    checkType: HealthCheckType;
+    target: string; // full URL for URL checks; service name for container checks
+    status: HealthStatus;
+    latencyMs?: number;
+    detail?: string;
+    ts: number;
+}
+
+// The latest observed state of a single check target (drives the current-status cards).
+export interface ProjectHealthCheck {
+    checkType: HealthCheckType;
+    target: string;
+    status: HealthStatus;
+    latencyMs?: number;
+    detail?: string;
+    ts: number;
+}
+
+export type UptimeWindowKey = '24h' | '7d' | '30d' | '90d';
+
+// Uptime ratio ("nines") over a rolling window.
+export interface UptimeWindowSummary {
+    window: UptimeWindowKey;
+    uptimeRatio: number; // 0..1 (fraction of samples not DOWN)
+    sampleCount: number;
+}
+
+// One heatmap cell: aggregated health over a contiguous time bucket.
+export interface UptimeBucket {
+    start: number;
+    end: number;
+    status: HealthStatus;
+    upRatio: number; // 0..1
+    sampleCount: number;
+}
+
+// Everything the status page and public API need for one project.
+export interface ProjectHealthSummary {
+    projectId: string;
+    overall: HealthStatus;
+    checks: ProjectHealthCheck[];
+    windows: UptimeWindowSummary[];
+    buckets: UptimeBucket[];
+    bucketWindow: UptimeWindowKey;
+    generatedAt: number;
+}
+
+// === Incidents & scheduled maintenance ===
+// An incident is an unplanned disruption; a maintenance is a planned (often future-dated) one.
+export enum IncidentKind {
+    INCIDENT = 'incident',
+    MAINTENANCE = 'maintenance',
+}
+
+// Incident lifecycle mirrors incident.io-style status pages. The first four apply to incidents; the
+// last three to scheduled maintenance.
+export enum IncidentStatus {
+    INVESTIGATING = 'investigating',
+    IDENTIFIED = 'identified',
+    MONITORING = 'monitoring',
+    RESOLVED = 'resolved',
+    SCHEDULED = 'scheduled',
+    IN_PROGRESS = 'in_progress',
+    COMPLETED = 'completed',
+}
+
+export enum IncidentImpact {
+    NONE = 'none',
+    MINOR = 'minor',
+    MAJOR = 'major',
+    CRITICAL = 'critical',
+}
+
+export interface Incident {
+    id: string;
+    projectId: string;
+    kind: IncidentKind;
+    title: string;
+    status: IncidentStatus;
+    impact: IncidentImpact;
+    startedAt: number;
+    resolvedAt?: number;
+    // Planned maintenance window (only for kind === MAINTENANCE).
+    scheduledStart?: number;
+    scheduledEnd?: number;
+    createdBy: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+// A timeline entry appended to an incident (status change + human-readable note).
+export interface IncidentUpdate {
+    id: string;
+    incidentId: string;
+    status: IncidentStatus;
+    body: string;
+    createdBy: string;
+    createdAt: number;
+}
+
+export interface IncidentWithUpdates {
+    incident: Incident;
+    updates: IncidentUpdate[];
+}
+
+export interface CreateIncidentBody {
+    kind: IncidentKind;
+    title: string;
+    impact: IncidentImpact;
+    status: IncidentStatus;
+    body?: string; // optional initial timeline note
+    startedAt?: number;
+    scheduledStart?: number;
+    scheduledEnd?: number;
+}
+
+export interface AddIncidentUpdateBody {
+    status: IncidentStatus;
+    body: string;
+}
+
+export interface UpdateIncidentBody {
+    title?: string;
+    impact?: IncidentImpact;
+    status?: IncidentStatus;
+    scheduledStart?: number;
+    scheduledEnd?: number;
+}
+
+// === Project API keys ===
+// Fine-grained permissions a project API key can be granted. Only GET_STATUS exists today; this is
+// intentionally an enum so future capabilities (config edits, log access, etc.) can be added.
+export enum ApiKeyPermission {
+    GET_STATUS = 'get_status',
+}
+
+// Stored API key. The raw secret is never persisted - only a SHA-256 hash and a short display
+// prefix. The full key is shown to the creator exactly once.
+export interface ApiKey {
+    id: string;
+    projectId: string;
+    name: string;
+    prefix: string;
+    hashedKey: string;
+    permissions: ApiKeyPermission[];
+    createdBy: string;
+    createdAt: number;
+    lastUsedAt?: number;
+    revokedAt?: number;
+}
+
+// Safe projection sent to the UI (never includes the hash).
+export type ApiKeyView = Omit<ApiKey, 'hashedKey'>;
+
+export interface CreateApiKeyBody {
+    name: string;
+    permissions: ApiKeyPermission[];
+}
+
+// Returned once on creation: the metadata plus the plaintext secret to copy.
+export interface CreateApiKeyResult {
+    key: ApiKeyView;
+    secret: string;
+}
+
+// The public JSON payload served to authenticated API-key holders.
+export interface PublicProjectStatus {
+    projectId: string;
+    health: ProjectHealthSummary;
+    incidents: IncidentWithUpdates[];
+}
+
 export interface DockerContainerData {
     Command: string;
     CreatedAt: string;
@@ -429,10 +620,11 @@ export enum Capability {
     CONFIGURE = 'configure', // edit config + env vars + repo settings
     DELETE = 'delete', // delete the project
     CREATE_PROJECT = 'create_project', // create a project within the team
+    MANAGE_INCIDENTS = 'manage_incidents', // create/update incidents + scheduled maintenance
 }
 
 // Every capability, granted to admins / owners (absolute power).
-export const ALL_CAPABILITIES: Capability[] = [Capability.VIEW, Capability.DEPLOY, Capability.CONFIGURE, Capability.DELETE, Capability.CREATE_PROJECT];
+export const ALL_CAPABILITIES: Capability[] = [Capability.VIEW, Capability.DEPLOY, Capability.CONFIGURE, Capability.DELETE, Capability.CREATE_PROJECT, Capability.MANAGE_INCIDENTS];
 
 export enum TeamType {
     ORGANIZATION = 'organization',

@@ -1,4 +1,4 @@
-import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
+import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, User } from './types';
 import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
 import { CreatePortReservationBody, PortReservation } from './types';
 
@@ -30,6 +30,9 @@ export enum API_ROUTES {
     GET_VAPID_PUBLIC_KEY = '/push/vapid-public-key',
     GET_PROJECT_NOTIFICATION = '/push/preference/:projectId',
     GET_PROJECT_RESOURCE_USAGE = '/project/:projectId/resource-usage',
+    GET_PROJECT_HEALTH = '/project/:projectId/health',
+    GET_PROJECT_INCIDENTS = '/project/:projectId/incidents',
+    GET_PROJECT_API_KEYS = '/project/:projectId/api-keys',
     GET_DOMAINS = '/domains',
     GET_DOMAIN_REQUESTS = '/domains/requests',
     GET_DOMAIN_BILLING = '/domains/billing',
@@ -84,6 +87,12 @@ export enum API_ROUTES {
     POST_NODE_CONFIG = '/nodes/:nodeId/config/apply',
     POST_NODE_PORT_RESERVATION = '/nodes/:nodeId/port-reservations/create',
     POST_DELETE_NODE_PORT_RESERVATION = '/nodes/:nodeId/port-reservations/:reservationId/delete',
+    POST_CREATE_INCIDENT = '/project/:projectId/incidents/create',
+    POST_ADD_INCIDENT_UPDATE = '/project/:projectId/incidents/:incidentId/updates/create',
+    POST_UPDATE_INCIDENT = '/project/:projectId/incidents/:incidentId/update',
+    POST_DELETE_INCIDENT = '/project/:projectId/incidents/:incidentId/delete',
+    POST_CREATE_API_KEY = '/project/:projectId/api-keys/create',
+    POST_REVOKE_API_KEY = '/project/:projectId/api-keys/:apiKeyId/revoke',
 }
 export interface API_PARAMS {
     //GET
@@ -112,6 +121,9 @@ export interface API_PARAMS {
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: {};
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { projectId: string };
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: { projectId: string };
+    [API_ROUTES.GET_PROJECT_HEALTH]: { projectId: string };
+    [API_ROUTES.GET_PROJECT_INCIDENTS]: { projectId: string };
+    [API_ROUTES.GET_PROJECT_API_KEYS]: { projectId: string };
     [API_ROUTES.GET_DOMAINS]: {};
     [API_ROUTES.GET_DOMAIN_REQUESTS]: {};
     [API_ROUTES.GET_DOMAIN_BILLING]: {};
@@ -166,6 +178,12 @@ export interface API_PARAMS {
     [API_ROUTES.POST_NODE_CONFIG]: { nodeId: string };
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: { nodeId: string };
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: { nodeId: string; reservationId: string };
+    [API_ROUTES.POST_CREATE_INCIDENT]: { projectId: string };
+    [API_ROUTES.POST_ADD_INCIDENT_UPDATE]: { projectId: string; incidentId: string };
+    [API_ROUTES.POST_UPDATE_INCIDENT]: { projectId: string; incidentId: string };
+    [API_ROUTES.POST_DELETE_INCIDENT]: { projectId: string; incidentId: string };
+    [API_ROUTES.POST_CREATE_API_KEY]: { projectId: string };
+    [API_ROUTES.POST_REVOKE_API_KEY]: { projectId: string; apiKeyId: string };
 }
 
 export interface API_BODY {
@@ -196,6 +214,9 @@ export interface API_BODY {
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: undefined;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: undefined;
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: undefined;
+    [API_ROUTES.GET_PROJECT_HEALTH]: undefined;
+    [API_ROUTES.GET_PROJECT_INCIDENTS]: undefined;
+    [API_ROUTES.GET_PROJECT_API_KEYS]: undefined;
     [API_ROUTES.GET_DOMAINS]: undefined;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: undefined;
     [API_ROUTES.GET_DOMAIN_BILLING]: undefined;
@@ -250,6 +271,12 @@ export interface API_BODY {
     [API_ROUTES.POST_NODE_CONFIG]: NodeConfigUpdate;
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: CreatePortReservationBody;
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: {};
+    [API_ROUTES.POST_CREATE_INCIDENT]: CreateIncidentBody;
+    [API_ROUTES.POST_ADD_INCIDENT_UPDATE]: AddIncidentUpdateBody;
+    [API_ROUTES.POST_UPDATE_INCIDENT]: UpdateIncidentBody;
+    [API_ROUTES.POST_DELETE_INCIDENT]: {};
+    [API_ROUTES.POST_CREATE_API_KEY]: CreateApiKeyBody;
+    [API_ROUTES.POST_REVOKE_API_KEY]: {};
 }
 export interface API_RETURN {
     //GET
@@ -278,6 +305,9 @@ export interface API_RETURN {
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { enabled: boolean };
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: ProjectResourceUsage | undefined;
+    [API_ROUTES.GET_PROJECT_HEALTH]: ProjectHealthSummary | undefined;
+    [API_ROUTES.GET_PROJECT_INCIDENTS]: IncidentWithUpdates[];
+    [API_ROUTES.GET_PROJECT_API_KEYS]: ApiKeyView[];
     [API_ROUTES.GET_DOMAINS]: DnsZone[];
     [API_ROUTES.GET_DOMAIN_REQUESTS]: DomainRequest[];
     [API_ROUTES.GET_DOMAIN_BILLING]: DomainBillingSummary | undefined;
@@ -332,6 +362,12 @@ export interface API_RETURN {
     [API_ROUTES.POST_NODE_CONFIG]: { ok: boolean };
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: PortReservation;
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: undefined;
+    [API_ROUTES.POST_CREATE_INCIDENT]: IncidentWithUpdates | undefined;
+    [API_ROUTES.POST_ADD_INCIDENT_UPDATE]: IncidentWithUpdates | undefined;
+    [API_ROUTES.POST_UPDATE_INCIDENT]: IncidentWithUpdates | undefined;
+    [API_ROUTES.POST_DELETE_INCIDENT]: undefined;
+    [API_ROUTES.POST_CREATE_API_KEY]: CreateApiKeyResult | undefined;
+    [API_ROUTES.POST_REVOKE_API_KEY]: undefined;
 }
 
 export interface API_AUTH {
@@ -362,6 +398,9 @@ export interface API_AUTH {
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: string;
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: string;
+    [API_ROUTES.GET_PROJECT_HEALTH]: string;
+    [API_ROUTES.GET_PROJECT_INCIDENTS]: string;
+    [API_ROUTES.GET_PROJECT_API_KEYS]: string;
     [API_ROUTES.GET_DOMAINS]: string;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: string;
     [API_ROUTES.GET_DOMAIN_BILLING]: string;
@@ -416,4 +455,10 @@ export interface API_AUTH {
     [API_ROUTES.POST_NODE_CONFIG]: string;
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: string;
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: string;
+    [API_ROUTES.POST_CREATE_INCIDENT]: string;
+    [API_ROUTES.POST_ADD_INCIDENT_UPDATE]: string;
+    [API_ROUTES.POST_UPDATE_INCIDENT]: string;
+    [API_ROUTES.POST_DELETE_INCIDENT]: string;
+    [API_ROUTES.POST_CREATE_API_KEY]: string;
+    [API_ROUTES.POST_REVOKE_API_KEY]: string;
 }
