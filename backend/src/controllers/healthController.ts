@@ -4,6 +4,7 @@ import {
     HealthStatus,
     NginxConfigLocationType,
     ProjectHealthCheck,
+    ProjectHealthRollup,
     ProjectHealthSample,
     ProjectHealthSummary,
     ProjectNginxConfig,
@@ -14,7 +15,17 @@ import {
 import { getAllProjectsModel } from '@/persistence/projectPersistence';
 import { getProjectInstancesByProjectIdModel } from '@/persistence/projectInstancePersistence';
 import { getServiceInstancesByProjectInstanceIdModel } from '@/persistence/serviceInstancePersistence';
-import { deleteHealthSamplesForProjectModel, getLatestSamplesForProjectModel, getSamplesInRangeModel, insertHealthSamplesModel, pruneHealthSamplesModel } from '@/persistence/projectHealthPersistence';
+import {
+    deleteHealthRollupsForProjectModel,
+    deleteHealthSamplesForProjectModel,
+    getLatestSamplesForProjectModel,
+    getRollupsInRangeModel,
+    getSamplesInRangeModel,
+    insertHealthSamplesModel,
+    pruneHealthRollupsModel,
+    pruneHealthSamplesModel,
+    upsertHealthRollupsModel,
+} from '@/persistence/projectHealthPersistence';
 import { execSafe } from '@/host/exec';
 import { emitProjectEvent } from './webhookController';
 import { buildHealthTransitionEvent } from './webhooks/events';
@@ -22,9 +33,14 @@ import { areaLog } from '@/utils/log';
 
 const healthLog = areaLog('health');
 
-// How often the leader samples every project's health, and how long raw samples are retained.
+// How often the leader samples every project's health.
 export const HEALTH_SAMPLE_INTERVAL_MS = 30_000;
-export const HEALTH_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+// Raw 30s samples are kept only short-term; closed hours are rolled up into compact aggregates that
+// are retained far longer. The rollup interval (hourly) is far smaller than raw retention, so every
+// hour is rolled up many times before its raw is pruned - a rollup can never be missed.
+export const RAW_RETENTION_MS = 48 * 60 * 60 * 1000; // 48h
+export const ROLLUP_GRANULARITY_MS = 60 * 60 * 1000; // 1h buckets
+export const ROLLUP_RETENTION_MS = 400 * 24 * 60 * 60 * 1000; // ~400d
 
 const WINDOW_MS: Record<UptimeWindowKey, number> = {
     '24h': 24 * 60 * 60 * 1000,
@@ -166,12 +182,81 @@ export const sampleAllProjects = async (): Promise<void> => {
 };
 
 export const pruneHealthSamples = async (): Promise<void> => {
-    const removed = await pruneHealthSamplesModel(Date.now() - HEALTH_RETENTION_MS);
-    if (removed) healthLog.info({ action: 'health_pruned', removed }, `pruned ${removed} old health sample(s)`);
+    const removed = await pruneHealthSamplesModel(Date.now() - RAW_RETENTION_MS);
+    if (removed) healthLog.info({ action: 'health_pruned', removed }, `pruned ${removed} old raw health sample(s)`);
+};
+
+export const pruneHealthRollups = async (): Promise<void> => {
+    const removed = await pruneHealthRollupsModel(Date.now() - ROLLUP_RETENTION_MS);
+    if (removed) healthLog.info({ action: 'health_rollups_pruned', removed }, `pruned ${removed} old health rollup(s)`);
 };
 
 export const clearProjectHealth = async (projectId: string): Promise<void> => {
     await deleteHealthSamplesForProjectModel(projectId);
+    await deleteHealthRollupsForProjectModel(projectId);
+};
+
+// Aggregate one project's raw samples for a set of closed hourly buckets into rollup rows. Only
+// buckets that have fully elapsed (bucketStart + granularity <= now) are emitted, so the in-progress
+// hour is never prematurely frozen. Idempotent: re-running recomputes and overwrites the same rows.
+const buildRollupsForProject = (projectId: string, samples: ProjectHealthSample[], currentHourStart: number): ProjectHealthRollup[] => {
+    // key -> aggregate, key = `${checkType}|${target}|${bucketStart}`
+    const aggs = new Map<string, ProjectHealthRollup>();
+    for (const s of samples) {
+        const bucketStart = Math.floor(s.ts / ROLLUP_GRANULARITY_MS) * ROLLUP_GRANULARITY_MS;
+        if (bucketStart >= currentHourStart) continue; // skip the in-progress hour
+        const key = `${s.checkType}|${s.target}|${bucketStart}`;
+        let agg = aggs.get(key);
+        if (!agg) {
+            agg = {
+                id: `${projectId}|${s.checkType}|${s.target}|${bucketStart}`,
+                projectId,
+                checkType: s.checkType,
+                target: s.target,
+                bucketStart,
+                granularityMs: ROLLUP_GRANULARITY_MS,
+                total: 0,
+                upSamples: 0,
+                degradedSamples: 0,
+                downSamples: 0,
+                sumLatencyMs: 0,
+                latencyCount: 0,
+            };
+            aggs.set(key, agg);
+        }
+        agg.total += 1;
+        if (isUp(s.status)) agg.upSamples += 1;
+        if (s.status === HealthStatus.DEGRADED) agg.degradedSamples += 1;
+        if (s.status === HealthStatus.DOWN) agg.downSamples += 1;
+        if (typeof s.latencyMs === 'number') {
+            agg.sumLatencyMs += s.latencyMs;
+            agg.latencyCount += 1;
+        }
+    }
+    return [...aggs.values()];
+};
+
+// Leader cron entry point: roll up the last ~48h of closed hours for every project and upsert them.
+// Recomputing the whole raw-retention window each run (rather than tracking a watermark) keeps this
+// robust to leader restarts and out-of-order ticks.
+export const rollupHealthSamples = async (): Promise<void> => {
+    const projects = await getAllProjectsModel();
+    if (!projects.length) return;
+    const now = Date.now();
+    const currentHourStart = Math.floor(now / ROLLUP_GRANULARITY_MS) * ROLLUP_GRANULARITY_MS;
+    const since = now - RAW_RETENTION_MS;
+    let rollupCount = 0;
+    for (const p of projects) {
+        try {
+            const samples = await getSamplesInRangeModel(p.id, since);
+            const rollups = buildRollupsForProject(p.id, samples, currentHourStart);
+            await upsertHealthRollupsModel(rollups);
+            rollupCount += rollups.length;
+        } catch (e: any) {
+            healthLog.warn({ action: 'rollup_project_failed', projectId: p.id, err: e?.message }, `health rollup failed for ${p.id}`);
+        }
+    }
+    healthLog.debug({ action: 'health_rolled_up', projectCount: projects.length, rollupCount }, `rolled up ${projects.length} project(s)`);
 };
 
 const worstStatus = (statuses: HealthStatus[]): HealthStatus => {
@@ -191,11 +276,21 @@ const bucketStatus = (upRatio: number, sampleCount: number): HealthStatus => {
 
 const isValidWindow = (w: string): w is UptimeWindowKey => ALL_WINDOWS.includes(w as UptimeWindowKey);
 
+// An hour's worth of observations collapsed across all of a project's targets, used for uptime and
+// heatmap math. Closed hours come from rollups; the in-progress hour is synthesized from raw.
+interface HourAgg {
+    start: number;
+    up: number;
+    total: number;
+}
+
 // Build the full summary for one project: current per-check state, per-window uptime ratios, and
-// heatmap buckets for the requested window. All computed from a single 90d sample fetch.
+// heatmap buckets for the requested window. Reads are rollup-first (closed hours from the compact
+// rollup table) with the current partial hour taken from raw, so no long raw history is needed.
 export const getProjectHealthSummary = async (projectId: string, requestedWindow?: string): Promise<ProjectHealthSummary> => {
     const bucketWindow: UptimeWindowKey = requestedWindow && isValidWindow(requestedWindow) ? requestedWindow : '90d';
     const now = Date.now();
+    const currentHourStart = Math.floor(now / ROLLUP_GRANULARITY_MS) * ROLLUP_GRANULARITY_MS;
 
     const latest = await getLatestSamplesForProjectModel(projectId);
     const checks: ProjectHealthCheck[] = latest
@@ -203,21 +298,43 @@ export const getProjectHealthSummary = async (projectId: string, requestedWindow
         .sort((a, b) => (a.checkType === b.checkType ? a.target.localeCompare(b.target) : a.checkType.localeCompare(b.checkType)));
     const overall = worstStatus(checks.map((c) => c.status));
 
-    const samples = await getSamplesInRangeModel(projectId, now - WINDOW_MS['90d']);
+    // Closed hours from rollups (summed across targets), plus the in-progress hour from raw.
+    const rollups = await getRollupsInRangeModel(projectId, now - WINDOW_MS['90d']);
+    const rawCurrent = await getSamplesInRangeModel(projectId, currentHourStart);
+
+    const hourMap = new Map<number, HourAgg>();
+    for (const r of rollups) {
+        if (r.bucketStart >= currentHourStart) continue; // never let a stale rollup shadow the live hour
+        const h = hourMap.get(r.bucketStart) ?? { start: r.bucketStart, up: 0, total: 0 };
+        h.up += r.upSamples;
+        h.total += r.total;
+        hourMap.set(r.bucketStart, h);
+    }
+    let curUp = 0;
+    let curTotal = 0;
+    for (const s of rawCurrent) {
+        if (s.ts < currentHourStart) continue;
+        curTotal += 1;
+        if (isUp(s.status)) curUp += 1;
+    }
+    if (curTotal > 0) hourMap.set(currentHourStart, { start: currentHourStart, up: curUp, total: curTotal });
+
+    const hours = [...hourMap.values()].sort((a, b) => a.start - b.start);
 
     const windows: UptimeWindowSummary[] = ALL_WINDOWS.map((w) => {
         const since = now - WINDOW_MS[w];
-        const inWindow = samples.filter((s) => s.ts >= since);
-        const up = inWindow.filter((s) => isUp(s.status)).length;
-        return { window: w, uptimeRatio: inWindow.length ? up / inWindow.length : 1, sampleCount: inWindow.length };
+        const inWindow = hours.filter((h) => h.start >= since);
+        const up = inWindow.reduce((acc, h) => acc + h.up, 0);
+        const total = inWindow.reduce((acc, h) => acc + h.total, 0);
+        return { window: w, uptimeRatio: total ? up / total : 1, sampleCount: total };
     });
 
-    const buckets = buildBuckets(samples, now, bucketWindow);
+    const buckets = buildBuckets(hours, now, bucketWindow);
 
     return { projectId, overall, checks, windows, buckets, bucketWindow, generatedAt: now };
 };
 
-const buildBuckets = (samples: ProjectHealthSample[], now: number, window: UptimeWindowKey): UptimeBucket[] => {
+const buildBuckets = (hours: HourAgg[], now: number, window: UptimeWindowKey): UptimeBucket[] => {
     const bucketMs = BUCKET_MS[window];
     const windowMs = WINDOW_MS[window];
     const count = Math.ceil(windowMs / bucketMs);
@@ -230,12 +347,12 @@ const buildBuckets = (samples: ProjectHealthSample[], now: number, window: Uptim
         sampleCount: 0,
     }));
     const tallies = buckets.map(() => ({ up: 0, total: 0 }));
-    for (const s of samples) {
-        if (s.ts < firstStart) continue;
-        const idx = Math.floor((s.ts - firstStart) / bucketMs);
+    for (const h of hours) {
+        if (h.start < firstStart) continue;
+        const idx = Math.floor((h.start - firstStart) / bucketMs);
         if (idx < 0 || idx >= count) continue;
-        tallies[idx].total += 1;
-        if (isUp(s.status)) tallies[idx].up += 1;
+        tallies[idx].total += h.total;
+        tallies[idx].up += h.up;
     }
     for (let i = 0; i < count; i++) {
         const t = tallies[i];

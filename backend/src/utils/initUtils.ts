@@ -11,7 +11,7 @@ import { checkAllQuotas } from '@/controllers/quotaController';
 import { syncCloudflare } from '@/reconcile/cloudflareSync';
 import { checkPublicIp } from '@/reconcile/publicIpWatcher';
 import { isCloudflareConfigured } from '@/config';
-import { HEALTH_SAMPLE_INTERVAL_MS, pruneHealthSamples, sampleAllProjects } from '@/controllers/healthController';
+import { HEALTH_SAMPLE_INTERVAL_MS, pruneHealthRollups, pruneHealthSamples, rollupHealthSamples, sampleAllProjects } from '@/controllers/healthController';
 import { areaLog } from '@/utils/log';
 
 const initLog = areaLog('startup');
@@ -95,12 +95,21 @@ export const registerCronJobs = () => {
     cron.schedule(ipCron, () => {
         if (cluster.isLeader() && isCloudflareConfigured()) void checkPublicIp();
     });
-    // Leader-only: prune raw health samples past the retention window (node-cron min granularity is
-    // 1 minute; the frequent health sampling itself is a setInterval below).
+    // Leader-only: prune raw health samples and old rollups past their retention windows (node-cron
+    // min granularity is 1 minute; the frequent health sampling itself is a setInterval below).
     cron.schedule('0 3 * * *', () => {
-        if (cluster.isLeader()) void pruneHealthSamples().catch((e) => initLog.error({ action: 'health_prune_failed', err: e?.message }, 'health prune failed'));
+        if (cluster.isLeader()) {
+            void pruneHealthSamples().catch((e) => initLog.error({ action: 'health_prune_failed', err: e?.message }, 'health prune failed'));
+            void pruneHealthRollups().catch((e) => initLog.error({ action: 'health_rollup_prune_failed', err: e?.message }, 'health rollup prune failed'));
+        }
     });
-    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30', 'quota_check:*/5', 'cloudflare_sync:*/5', `public_ip:${ipCron}`, 'health_prune:0 3'] }, 'cron jobs registered');
+    // Leader-only: downsample closed hours of raw samples into compact rollups. Runs a few minutes
+    // past the hour so the just-elapsed hour is fully closed before aggregation.
+    cron.schedule('5 * * * *', () => {
+        initLog.debug({ action: 'cron_fired', job: 'health_rollup', isLeader: cluster.isLeader() }, 'health rollup cron fired');
+        if (cluster.isLeader()) void rollupHealthSamples().catch((e) => initLog.error({ action: 'health_rollup_failed', err: e?.message }, 'health rollup failed'));
+    });
+    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30', 'quota_check:*/5', 'cloudflare_sync:*/5', `public_ip:${ipCron}`, 'health_prune:0 3', 'health_rollup:5 *'] }, 'cron jobs registered');
 
     // Leader-only: sample every project's health on a sub-minute cadence (finer than node-cron
     // supports), feeding the uptime time series that powers the status page and public API.

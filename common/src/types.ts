@@ -406,6 +406,25 @@ export interface ProjectHealthSample {
     ts: number;
 }
 
+// A downsampled aggregate of many raw samples for one check target over a fixed time bucket
+// (hourly). Raw samples are kept only short-term; closed hours are rolled up into these compact
+// rows for long-term retention. `upSamples` uses the same "not DOWN/UNKNOWN" rule as live uptime,
+// so aggregated ratios match the raw calculation.
+export interface ProjectHealthRollup {
+    id: string; // deterministic: `${projectId}|${checkType}|${target}|${bucketStart}`
+    projectId: string;
+    checkType: HealthCheckType;
+    target: string;
+    bucketStart: number; // epoch ms of the bucket's start (aligned to granularityMs)
+    granularityMs: number;
+    total: number;
+    upSamples: number;
+    degradedSamples: number;
+    downSamples: number;
+    sumLatencyMs: number;
+    latencyCount: number;
+}
+
 // The latest observed state of a single check target (drives the current-status cards).
 export interface ProjectHealthCheck {
     checkType: HealthCheckType;

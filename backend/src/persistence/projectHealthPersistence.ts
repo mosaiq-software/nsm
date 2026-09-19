@@ -1,5 +1,5 @@
 import { sequelize } from '@/utils/dbHelper';
-import { HealthCheckType, HealthStatus, ProjectHealthSample } from '@mosaiq/nsm-common/types';
+import { HealthCheckType, HealthStatus, ProjectHealthRollup, ProjectHealthSample } from '@mosaiq/nsm-common/types';
 import { DataTypes, Model, Op, QueryTypes } from 'sequelize';
 
 // Time series of project health observations, one row per check target per sample tick. Leader-
@@ -67,4 +67,65 @@ export const pruneHealthSamplesModel = async (before: number): Promise<number> =
 
 export const deleteHealthSamplesForProjectModel = async (projectId: string): Promise<void> => {
     await ProjectHealthSampleModel.destroy({ where: { projectId } });
+};
+
+// Downsampled hourly aggregates of the raw samples above. Retained far longer than raw (raw is
+// pruned after a short window) so the status page and public API keep a full history cheaply.
+class ProjectHealthRollupModel extends Model {}
+ProjectHealthRollupModel.init(
+    {
+        id: { type: DataTypes.STRING, primaryKey: true },
+        projectId: DataTypes.STRING,
+        checkType: DataTypes.STRING,
+        target: DataTypes.STRING,
+        bucketStart: DataTypes.NUMBER,
+        granularityMs: DataTypes.NUMBER,
+        total: DataTypes.NUMBER,
+        upSamples: DataTypes.NUMBER,
+        degradedSamples: DataTypes.NUMBER,
+        downSamples: DataTypes.NUMBER,
+        sumLatencyMs: DataTypes.NUMBER,
+        latencyCount: DataTypes.NUMBER,
+    },
+    { sequelize, timestamps: false, indexes: [{ fields: ['projectId', 'bucketStart'] }] }
+);
+
+const toRollup = (row: any): ProjectHealthRollup => ({
+    id: row.id,
+    projectId: row.projectId,
+    checkType: row.checkType as HealthCheckType,
+    target: row.target,
+    bucketStart: row.bucketStart,
+    granularityMs: row.granularityMs,
+    total: row.total,
+    upSamples: row.upSamples,
+    degradedSamples: row.degradedSamples,
+    downSamples: row.downSamples,
+    sumLatencyMs: row.sumLatencyMs,
+    latencyCount: row.latencyCount,
+});
+
+// Idempotent upsert: recomputing a bucket from raw and re-writing it must overwrite the prior row.
+export const upsertHealthRollupsModel = async (rows: ProjectHealthRollup[]): Promise<void> => {
+    if (!rows.length) return;
+    await ProjectHealthRollupModel.bulkCreate(
+        rows.map((r) => ({ ...r })),
+        { updateOnDuplicate: ['total', 'upSamples', 'degradedSamples', 'downSamples', 'sumLatencyMs', 'latencyCount', 'granularityMs'] }
+    );
+};
+
+export const getRollupsInRangeModel = async (projectId: string, since: number): Promise<ProjectHealthRollup[]> => {
+    const rows = (await sequelize.query(`SELECT * FROM ProjectHealthRollupModels WHERE projectId = :projectId AND bucketStart >= :since ORDER BY bucketStart ASC`, {
+        replacements: { projectId, since },
+        type: QueryTypes.SELECT,
+    })) as any[];
+    return rows.map(toRollup);
+};
+
+export const pruneHealthRollupsModel = async (before: number): Promise<number> => {
+    return ProjectHealthRollupModel.destroy({ where: { bucketStart: { [Op.lt]: before } } });
+};
+
+export const deleteHealthRollupsForProjectModel = async (projectId: string): Promise<void> => {
+    await ProjectHealthRollupModel.destroy({ where: { projectId } });
 };
