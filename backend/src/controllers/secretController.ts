@@ -62,7 +62,7 @@ export const applyRepoData = async (repoData: RepoData, projectId: string): Prom
     const updatedServices: ProjectService[] = newServices.map((sName) => {
         const old = oldServices.find((s) => s.serviceName === sName);
         if (old) return old;
-        return { serviceName: sName, expectedContainerState: DockerStatus.UNKNOWN, collectContainerLogs: false };
+        return { serviceName: sName, expectedContainerState: DockerStatus.UNKNOWN };
     });
 
     await updateProjectNoDirty(projectId, {
@@ -94,7 +94,6 @@ export const applyLegacyOverlay = async (projectId: string, legacy: Project): Pr
         return {
             ...svc,
             expectedContainerState: old.expectedContainerState,
-            collectContainerLogs: old.collectContainerLogs,
         };
     });
 

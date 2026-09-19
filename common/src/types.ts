@@ -327,7 +327,6 @@ export enum DockerStatus {
 export interface ProjectService {
     serviceName: string;
     expectedContainerState: DockerStatus;
-    collectContainerLogs: boolean;
 }
 export interface ProjectServiceInstance extends ProjectService {
     instanceId: string;

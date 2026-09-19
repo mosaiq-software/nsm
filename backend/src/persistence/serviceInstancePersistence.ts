@@ -14,7 +14,6 @@ ServiceInstanceModel.init(
         containerId: DataTypes.STRING,
         expectedContainerState: DataTypes.STRING,
         actualContainerState: DataTypes.STRING,
-        collectContainerLogs: DataTypes.BOOLEAN,
         containerLogs: DataTypes.TEXT,
         created: DataTypes.NUMBER,
         lastUpdated: DataTypes.NUMBER,

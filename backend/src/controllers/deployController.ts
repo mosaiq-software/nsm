@@ -164,7 +164,6 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
                 lastUpdated: Date.now(),
                 serviceName: service.serviceName,
                 expectedContainerState: service.expectedContainerState,
-                collectContainerLogs: service.collectContainerLogs,
             };
             serviceNameToInstanceId[service.serviceName] = instance.instanceId;
             serviceInstances.push(instance);

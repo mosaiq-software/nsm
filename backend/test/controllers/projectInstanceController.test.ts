@@ -7,7 +7,7 @@ import { DeploymentState, DockerStatus, ProjectServiceInstance } from '@mosaiq/n
 
 beforeEach(async () => resetDb());
 
-const svc = (id: string, piId: string): ProjectServiceInstance => ({ instanceId: id, projectInstanceId: piId, serviceName: 'web', containerId: undefined, expectedContainerState: DockerStatus.RUNNING, actualContainerState: DockerStatus.UNKNOWN, collectContainerLogs: false, containerLogs: '', created: Date.now(), lastUpdated: Date.now() });
+const svc = (id: string, piId: string): ProjectServiceInstance => ({ instanceId: id, projectInstanceId: piId, serviceName: 'web', containerId: undefined, expectedContainerState: DockerStatus.RUNNING, actualContainerState: DockerStatus.UNKNOWN, containerLogs: '', created: Date.now(), lastUpdated: Date.now() });
 const inst = (id: string, projectId: string, active: boolean) => ({ id, projectId, workerNodeId: 'n', state: DeploymentState.DEPLOYED, created: Date.now(), lastUpdated: Date.now(), active, directories: {} });
 
 describe('projectInstanceController', () => {

@@ -1,4 +1,4 @@
-import { ActionIcon, ActionIconGroup, Alert, Button, Card, Center, Code, Combobox, Divider, Fieldset, Grid, Group, HoverCard, List, Loader, Modal, NumberInput, ScrollArea, Select, Space, Stack, Switch, Text, Textarea, TextInput, Title, Tooltip, useCombobox } from '@mantine/core';
+import { ActionIcon, ActionIconGroup, Alert, Badge, Button, Card, Center, Code, Combobox, Divider, Fieldset, Grid, Group, HoverCard, List, Loader, Menu, Modal, NumberInput, ScrollArea, Select, SegmentedControl, Space, Stack, Switch, Text, Textarea, TextInput, Title, Tooltip, useCombobox } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { DockerStatus, DynamicEnvVariable, NginxConfigLocationType, Project, ProjectService, Secret, UpperDynamicEnvVariableType } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
@@ -13,7 +13,7 @@ import { ProjectHeader } from '@/components/ProjectHeader';
 import { assembleDotenv, extractVariables, parseDynamicVariablePath } from '@mosaiq/nsm-common/secretUtil';
 import { NginxEditor } from '@/components/NginxEditor';
 import { ResourceAllocationEditor } from '@/components/ResourceAllocation';
-import { MdOutlineCode, MdOutlineDns, MdOutlineDownload, MdOutlineInfo, MdOutlineLan, MdOutlineLaunch, MdOutlineLink, MdOutlineLinkOff, MdOutlineRefresh, MdOutlineUmbrella, MdOutlineUpload, MdOutlineWeb } from 'react-icons/md';
+import { MdOutlineCode, MdOutlineDns, MdOutlineDownload, MdOutlineInfo, MdOutlineLan, MdOutlineLaunch, MdOutlineLink, MdOutlineLinkOff, MdOutlineMoreVert, MdOutlineRefresh, MdOutlineUmbrella, MdOutlineUpload, MdOutlineVisibility, MdOutlineVisibilityOff, MdOutlineWeb } from 'react-icons/md';
 import { useWindowEvent } from '@mantine/hooks';
 
 const ProjectConfigPage = () => {
@@ -394,7 +394,7 @@ const ProjectConfigPage = () => {
                                 <Title order={6}>Value</Title>
                             </Grid.Col>
                             {secrets.map((secret) => {
-                                return <EnvVarRow key={secret.secretName} secret={secret} onChange={updateSecret} vars={dynamicEnvVariables} />;
+                                return <EnvVarRow key={secret.secretName} secret={secret} onChange={updateSecret} vars={dynamicEnvVariables} project={project} />;
                             })}
                         </Grid>
                     ) : (
@@ -457,6 +457,7 @@ interface EnvVarRowProps {
     secret: Secret;
     onChange: (secret: Secret) => void;
     vars: DynamicEnvVariable[];
+    project: Project;
 }
 const EnvVarRow = (props: EnvVarRowProps) => {
     const EnvItems = {
@@ -468,7 +469,34 @@ const EnvVarRow = (props: EnvVarRowProps) => {
         [UpperDynamicEnvVariableType.DOMAIN]: { icon: MdOutlineUmbrella, desc: 'The domain of a server block', title: 'Domain' },
     };
     const combobox = useCombobox();
+    const [revealed, setRevealed] = useState(false);
     const { secret } = props;
+
+    // Resolve UUIDs to the values a human recognizes: the domain a server serves, and a route's path.
+    const serverIdToDomain: { [serverId: string]: string } = {};
+    const locationIdToLabel: { [locationId: string]: string } = {};
+    for (const server of props.project.nginxConfig?.servers ?? []) {
+        serverIdToDomain[server.serverId] = server.domain;
+        for (const location of server.locations) {
+            locationIdToLabel[location.locationId] = location.type === NginxConfigLocationType.STATIC && location.spa ? '/' : location.path;
+        }
+    }
+    // A friendly one-line description of a linked dynamic variable, e.g. "nsm.mosaiq.dev · /api · Port".
+    const describeLink = (path: string): string => {
+        let dynVar: ReturnType<typeof parseDynamicVariablePath>;
+        try {
+            dynVar = parseDynamicVariablePath(path);
+        } catch {
+            return path;
+        }
+        const parts: string[] = [];
+        const domain = dynVar.serverId ? serverIdToDomain[dynVar.serverId] : undefined;
+        parts.push(domain || 'Project');
+        if (dynVar.locationId && locationIdToLabel[dynVar.locationId] !== undefined) parts.push(locationIdToLabel[dynVar.locationId]);
+        parts.push(dynVar.field);
+        return parts.join(' · ');
+    };
+
     const groupedVars: { [key: string]: { vars: DynamicEnvVariable[]; menuItem: (typeof EnvItems)[keyof typeof EnvItems] | undefined } } = {};
     props.vars.forEach((varItem) => {
         const dynVar = parseDynamicVariablePath(varItem.path);
@@ -478,6 +506,7 @@ const EnvVarRow = (props: EnvVarRowProps) => {
         }
         groupedVars[parent].vars.push(varItem);
     });
+    const showEye = !secret.variable && !!secret.secretValue.length;
     return (
         <>
             <Grid.Col span={3}>
@@ -495,11 +524,19 @@ const EnvVarRow = (props: EnvVarRowProps) => {
                     <TextInput
                         flex={1}
                         placeholder={secret.secretPlaceholder}
-                        value={secret.variable ? `Linked to ${parseDynamicVariablePath(secret.secretValue).serverId?.split('-')[0] ?? 'Project'} -> ${parseDynamicVariablePath(secret.secretValue).locationId?.split('-')[0] ?? 'Server'} -> ${parseDynamicVariablePath(secret.secretValue).field}` : secret.secretValue}
+                        type={showEye && !revealed ? 'password' : undefined}
+                        value={secret.variable ? `Linked to ${describeLink(secret.secretValue)}` : secret.secretValue}
                         onChange={(event) => props.onChange({ ...secret, secretValue: event.currentTarget.value })}
                         disabled={secret.variable}
                     />
                     <ActionIconGroup>
+                        {showEye && (
+                            <Tooltip label={revealed ? 'Hide Value' : 'Show Value'}>
+                                <ActionIcon onClick={() => setRevealed((r) => !r)} variant="outline">
+                                    {revealed ? <MdOutlineVisibilityOff /> : <MdOutlineVisibility />}
+                                </ActionIcon>
+                            </Tooltip>
+                        )}
                         {secret.variable && (
                             <Tooltip label="Unlink Variable">
                                 <ActionIcon onClick={() => props.onChange({ ...secret, variable: false, secretValue: '' })} variant="outline">
@@ -528,6 +565,11 @@ const EnvVarRow = (props: EnvVarRowProps) => {
                                     <ScrollArea.Autosize type="scroll" mah={400}>
                                         {Object.entries(groupedVars).map(([parent, gr], i) => {
                                             const grParts = parent.split('.');
+                                            const grServerId = grParts[1];
+                                            const grLocationId = grParts[2];
+                                            const grDomain = grServerId ? serverIdToDomain[grServerId] : undefined;
+                                            const grPath = grLocationId ? locationIdToLabel[grLocationId] : undefined;
+                                            const grLabel = [grDomain, grPath].filter((p) => p !== undefined && p !== '').join('');
                                             return (
                                                 <Combobox.Group
                                                     key={parent}
@@ -537,7 +579,7 @@ const EnvVarRow = (props: EnvVarRowProps) => {
                                                             <Group align="center">
                                                                 {gr.menuItem && <gr.menuItem.icon />}
                                                                 <Text fz="xs">
-                                                                    {gr.menuItem?.title} {grParts[grParts.length - 1].split('-')[0]}
+                                                                    {gr.menuItem?.title} {grLabel}
                                                                 </Text>
                                                             </Group>
                                                         </Stack>
@@ -545,11 +587,12 @@ const EnvVarRow = (props: EnvVarRowProps) => {
                                                 >
                                                     {gr.vars.map((varItem) => {
                                                         const dynVar = parseDynamicVariablePath(varItem.path);
+                                                        const optPath = dynVar.locationId ? locationIdToLabel[dynVar.locationId] : undefined;
                                                         return (
                                                             <Combobox.Option key={varItem.path} value={varItem.path}>
                                                                 <Group gap={'xs'}>
                                                                     <Text fz="sm" fw={500}>
-                                                                        {`${dynVar.locationId ? `${dynVar.locationId.split('-')[0]}'s ` : ''}${dynVar.field}`}
+                                                                        {`${optPath ? `${optPath} ` : ''}${dynVar.field}`}
                                                                     </Text>
                                                                     {!!varItem.placeholder?.length && (
                                                                         <Text fz="xs" c="dimmed">
@@ -588,54 +631,62 @@ interface ServiceProps {
     service: ProjectService;
     onChange: (service: Partial<ProjectService>) => void;
 }
+// The two states that describe nearly every container: a long-running Service (running) or a
+// one-shot Build Job that exits when done. Anything else is a rare, explicit choice.
+const ADVANCED_STATES = [DockerStatus.CREATED, DockerStatus.PAUSED, DockerStatus.RESTARTING, DockerStatus.REMOVING, DockerStatus.DEAD, DockerStatus.UNKNOWN];
 const Service = (props: ServiceProps) => {
     const { service, onChange } = props;
-    const combobox = useCombobox();
+    const isCommonState = service.expectedContainerState === DockerStatus.RUNNING || service.expectedContainerState === DockerStatus.EXITED;
     return (
         <Fieldset w={300}>
             <Stack>
                 <Title order={6}>{service.serviceName}</Title>
-                <Combobox
-                    store={combobox}
-                    width={500}
-                    position="bottom"
-                    withArrow
-                    onOptionSubmit={(val) => {
-                        onChange({ expectedContainerState: val as DockerStatus });
-                        combobox.closeDropdown();
-                    }}
-                >
-                    <Combobox.Target>
-                        <TextInput label="Expected Container State" value={service.expectedContainerState} readOnly onClick={() => combobox.toggleDropdown()} description={DockerStatusDescriptions[service.expectedContainerState]} />
-                    </Combobox.Target>
-                    <Combobox.Dropdown>
-                        <Combobox.Header>The ending state of a successful container run.</Combobox.Header>
-                        <Combobox.Group label="Normal States">
-                            {[DockerStatus.RUNNING, DockerStatus.EXITED].map((status) => (
-                                <Combobox.Option key={status} value={status}>
-                                    <Title order={6}>{status}</Title>
-                                    <Text fz="xs">{DockerStatusDescriptions[status]}</Text>
-                                </Combobox.Option>
-                            ))}
-                        </Combobox.Group>
-                        <Combobox.Group label="Other States">
-                            {[DockerStatus.CREATED, DockerStatus.PAUSED, DockerStatus.RESTARTING, DockerStatus.REMOVING, DockerStatus.DEAD, DockerStatus.UNKNOWN].map((status) => (
-                                <Combobox.Option key={status} value={status}>
-                                    <Title order={6}>{status}</Title>
-                                    <Text fz="xs">{DockerStatusDescriptions[status]}</Text>
-                                </Combobox.Option>
-                            ))}
-                        </Combobox.Group>
-                    </Combobox.Dropdown>
-                </Combobox>
-                <Switch
-                    label="Collect Container Logs"
-                    description="Should the stdout and stderr of this container be collected and stored?"
-                    checked={service.collectContainerLogs}
-                    onChange={(event) => {
-                        onChange({ collectContainerLogs: event.currentTarget.checked });
-                    }}
-                />
+                <Stack gap={4}>
+                    <Text fz="sm" fw={500}>
+                        Expected State
+                    </Text>
+                    <Group gap="xs" wrap="nowrap" align="center">
+                        <SegmentedControl
+                            flex={1}
+                            value={isCommonState ? service.expectedContainerState : ''}
+                            onChange={(val) => onChange({ expectedContainerState: val as DockerStatus })}
+                            data={[
+                                { label: 'Service', value: DockerStatus.RUNNING },
+                                { label: 'Build Job', value: DockerStatus.EXITED },
+                            ]}
+                        />
+                        <Menu withArrow shadow="md" position="bottom-end" width={280}>
+                            <Menu.Target>
+                                <Tooltip label="Other end states">
+                                    <ActionIcon variant="light" size="lg" aria-label="Other end states">
+                                        <MdOutlineMoreVert />
+                                    </ActionIcon>
+                                </Tooltip>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                                <Menu.Label>Other End States</Menu.Label>
+                                {ADVANCED_STATES.map((status) => (
+                                    <Menu.Item key={status} onClick={() => onChange({ expectedContainerState: status })}>
+                                        <Text fz="sm" fw={500} tt="capitalize">
+                                            {status}
+                                        </Text>
+                                        <Text fz="xs" c="dimmed">
+                                            {DockerStatusDescriptions[status]}
+                                        </Text>
+                                    </Menu.Item>
+                                ))}
+                            </Menu.Dropdown>
+                        </Menu>
+                    </Group>
+                    {!isCommonState && (
+                        <Badge variant="light" color="gray" tt="capitalize" w="min-content">
+                            {service.expectedContainerState}
+                        </Badge>
+                    )}
+                    <Text fz="xs" c="dimmed">
+                        {isCommonState ? (service.expectedContainerState === DockerStatus.RUNNING ? 'A long-running service that should stay up.' : 'A one-shot job that runs to completion and exits.') : DockerStatusDescriptions[service.expectedContainerState]}
+                    </Text>
+                </Stack>
             </Stack>
         </Fieldset>
     );

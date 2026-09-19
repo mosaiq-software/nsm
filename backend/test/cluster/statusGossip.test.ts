@@ -9,7 +9,7 @@ import { createServiceInstanceModel, getServiceInstanceByIdModel } from '@/persi
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
 import { DockerStatus, NodeStatusReport, ProjectServiceInstance } from '@mosaiq/nsm-common/types';
 
-const svc = (id: string): ProjectServiceInstance => ({ instanceId: id, projectInstanceId: 'pi', serviceName: 'web', containerId: undefined, expectedContainerState: DockerStatus.RUNNING, actualContainerState: DockerStatus.UNKNOWN, collectContainerLogs: false, containerLogs: '', created: Date.now(), lastUpdated: Date.now() });
+const svc = (id: string): ProjectServiceInstance => ({ instanceId: id, projectInstanceId: 'pi', serviceName: 'web', containerId: undefined, expectedContainerState: DockerStatus.RUNNING, actualContainerState: DockerStatus.UNKNOWN, containerLogs: '', created: Date.now(), lastUpdated: Date.now() });
 
 const report = (over: Partial<NodeStatusReport> = {}): NodeStatusReport => ({ nodeId: 'n1', nsmVersion: '1.0.0', healthy: true, currentAddress: '10.0.0.5', apiPort: 1025, containers: [], ts: Date.now(), ...over });
 

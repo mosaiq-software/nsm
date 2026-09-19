@@ -1,9 +1,23 @@
-import { ActionIcon, Autocomplete, Button, Group, Stack, Title, Text, Switch, Textarea, TextInput, Menu, Tooltip, Fieldset, Space, NumberInput, Badge } from '@mantine/core';
+import { ActionIcon, Autocomplete, Button, Group, Stack, Title, Text, Switch, Textarea, TextInput, Menu, Tooltip, Fieldset, Space, NumberInput, Badge, SegmentedControl } from '@mantine/core';
 import { ConfigLocation, NginxConfigLocationType, Project, ProjectNginxConfig } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import React, { useEffect, useState } from 'react';
 import { MdOutlineCheckCircle, MdOutlineCode, MdOutlineDelete, MdOutlineDns, MdOutlineLink, MdOutlineWeb } from 'react-icons/md';
 import { useAPI } from '@/utils/api';
+
+// A human-readable summary of what a route serves, shown in place of its UUID.
+const locationSummary = (location: ConfigLocation): string => {
+    switch (location.type) {
+        case NginxConfigLocationType.STATIC:
+            return location.spa ? '/ (SPA)' : location.path || '/';
+        case NginxConfigLocationType.REDIRECT:
+            return `${location.path || '/'} -> ${location.target || '...'}`;
+        case NginxConfigLocationType.PROXY:
+        case NginxConfigLocationType.CUSTOM:
+        default:
+            return location.path || '/';
+    }
+};
 
 interface NginxEditorProps {
     current: ProjectNginxConfig;
@@ -124,12 +138,12 @@ export const NginxEditor = (props: NginxEditorProps) => {
     const duplicateDomain = config.servers.map((srv) => srv.domain).find((domain, idx, arr) => arr.indexOf(domain) !== idx);
     return (
         <Stack>
-            <Title order={5}>Domain Configuration</Title>
+            <Title order={5}>Sites & Routing</Title>
             {config.servers.map((server, serverIndex) => {
                 const duplicatePath = server.locations.map((loc) => loc.path).find((path, idx, arr) => arr.indexOf(path) !== idx);
                 return (
                     <Fieldset key={server.serverId}>
-                        <Title order={5}>{`Domain ${server.serverId.split('-')[0]}`}</Title>
+                        <Title order={5}>{server.domain || 'New Site'}</Title>
                         <Group justify="space-between" align="flex-end" gap="xl">
                             <Group align="flex-end">
                                 <DomainPicker
@@ -153,28 +167,30 @@ export const NginxEditor = (props: NginxEditorProps) => {
                                     }}
                                 />
                             </Group>
-                            <Tooltip label={`Remove Domain ${server.serverId.split('-')[0]}`}>
+                            <Tooltip label={`Remove ${server.domain || 'this site'}`}>
                                 <ActionIcon onClick={() => handleRemoveServer(server.serverId)} variant="light" color="red" size={'input-sm'}>
                                     <MdOutlineDelete />
                                 </ActionIcon>
                             </Tooltip>
                         </Group>
                         <Space h="md" />
-                        <Text>Resources:</Text>
+                        <Text>Routes:</Text>
                         <Space h="xs" />
                         <Group wrap="wrap" align="flex-start">
                             {server.locations.map((location, locationIndex) => {
                                 return (
                                     <Fieldset key={location.locationId}>
                                         <Stack w="300px" gap="xs">
-                                            <Group justify="space-between" align="center">
-                                                <Group>
-                                                    <Title order={5}>{`${location.locationId.split('-')[0]}`}</Title>
+                                            <Group justify="space-between" align="center" wrap="nowrap">
+                                                <Group gap="xs" wrap="nowrap">
                                                     <Badge leftSection={MenuItems[location.type].icon({ size: 14 })} variant="outline">
                                                         {MenuItems[location.type].title}
                                                     </Badge>
+                                                    <Text fw={600} truncate>
+                                                        {locationSummary(location)}
+                                                    </Text>
                                                 </Group>
-                                                <Tooltip label={`Remove ${MenuItems[location.type].title} ${location.locationId.split('-')[0]}`}>
+                                                <Tooltip label={`Remove ${MenuItems[location.type].title}`}>
                                                     <ActionIcon onClick={() => handleRemoveLocation(server.serverId, location.locationId)} variant="light" color="red" size={'input-xs'}>
                                                         <MdOutlineDelete />
                                                     </ActionIcon>
@@ -193,6 +209,7 @@ export const NginxEditor = (props: NginxEditorProps) => {
                                                     });
                                                 }}
                                                 duplicatePath={duplicatePath === location.path}
+                                                spaTakenByOther={server.locations.some((l) => l.locationId !== location.locationId && l.type === NginxConfigLocationType.STATIC && l.spa)}
                                             />
                                         </Stack>
                                     </Fieldset>
@@ -201,7 +218,7 @@ export const NginxEditor = (props: NginxEditorProps) => {
                             <Menu withArrow shadow="md" trigger={'hover'}>
                                 <Menu.Target>
                                     <Button variant="light" w="min-content" size="compact-sm">
-                                        Add Resource
+                                        Add Route
                                     </Button>
                                 </Menu.Target>
                                 <Menu.Dropdown>
@@ -313,28 +330,47 @@ interface RenderLocationProps {
     domain: string;
     onChange: (location: ConfigLocation) => void;
     duplicatePath: boolean;
+    // True when another static route on the same site already occupies the single-page-app slot, so
+    // this route cannot also be an SPA (two SPAs would fight over the `/` route).
+    spaTakenByOther: boolean;
 }
 
 const RenderLocation = (props: RenderLocationProps) => {
     if (props.location.type === NginxConfigLocationType.STATIC) {
+        const isSpa = !!props.location.spa;
         return (
             <>
-                <TextInput
-                    required
-                    value={props.location.path}
-                    label="Path"
-                    placeholder="/"
-                    description={(props.domain ? (props.location.path.startsWith('/') ? `https://${props.domain}${props.location.path}` : '') : '') + (props.location.spa ? ' (SPA must be /)' : '')}
-                    onChange={(e) => props.location.type === NginxConfigLocationType.STATIC && props.onChange({ ...props.location, path: e.currentTarget.value })}
-                    error={props.duplicatePath ? 'Duplicate Path' : undefined}
-                    readOnly={!!props.location.spa}
+                <SegmentedControl
+                    fullWidth
+                    value={isSpa ? 'spa' : 'files'}
+                    onChange={(val) => {
+                        if (props.location.type !== NginxConfigLocationType.STATIC) return;
+                        const nextSpa = val === 'spa';
+                        props.onChange({ ...props.location, spa: nextSpa, path: nextSpa ? '/' : props.location.path });
+                    }}
+                    data={[
+                        { label: 'Single-Page App', value: 'spa', disabled: props.spaTakenByOther && !isSpa },
+                        { label: 'Static Files', value: 'files' },
+                    ]}
                 />
-                <Switch
-                    label="Single Page Application"
-                    description="Serve index.html for all non-file requests"
-                    checked={!!props.location.spa}
-                    onChange={(e) => props.location.type === NginxConfigLocationType.STATIC && props.onChange({ ...props.location, spa: e.currentTarget.checked, path: e.currentTarget.checked ? '/' : props.location.path })}
-                />
+                {props.spaTakenByOther && !isSpa && (
+                    <Text fz="xs" c="dimmed">
+                        Only one single-page app is allowed per site.
+                    </Text>
+                )}
+                {isSpa ? (
+                    <TextInput required value="/" label="Path" description={props.domain ? `https://${props.domain}` : 'Served at the site root'} readOnly />
+                ) : (
+                    <TextInput
+                        required
+                        value={props.location.path}
+                        label="Path"
+                        placeholder="/"
+                        description={props.domain && props.location.path.startsWith('/') ? `https://${props.domain}${props.location.path}` : ''}
+                        onChange={(e) => props.location.type === NginxConfigLocationType.STATIC && props.onChange({ ...props.location, path: e.currentTarget.value })}
+                        error={props.duplicatePath ? 'Duplicate Path' : undefined}
+                    />
+                )}
                 <Switch
                     label="Force Allow CORS"
                     description="Explicitly allow CORS for this location. Use with caution."

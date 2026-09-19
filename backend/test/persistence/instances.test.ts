@@ -39,7 +39,6 @@ describe('serviceInstancePersistence', () => {
         containerId: undefined,
         expectedContainerState: DockerStatus.RUNNING,
         actualContainerState: DockerStatus.UNKNOWN,
-        collectContainerLogs: false,
         containerLogs: '',
         created: Date.now(),
         lastUpdated: Date.now(),

@@ -40,7 +40,7 @@ const baseProject = (over: Partial<Project> = {}): Project =>
         hasDockerCompose: true,
         hasDotenv: false,
         secrets: [],
-        services: [{ serviceName: 'web', expectedContainerState: DockerStatus.RUNNING, collectContainerLogs: false }],
+        services: [{ serviceName: 'web', expectedContainerState: DockerStatus.RUNNING }],
         dockerCompose: { services: { web: { image: 'x' } } },
         nginxConfig: { servers: [{ serverId: 's1', domain: 'ex.com', wildcardSubdomain: false, locations: [{ locationId: 'lp', type: NginxConfigLocationType.PROXY, path: '/api', proxyPass: '', websocketSupport: false }] }] },
         ...over,

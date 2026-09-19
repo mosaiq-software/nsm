@@ -38,7 +38,7 @@ describe('applyRepoData', () => {
         const row = await getProjectByIdModel('p1');
         expect(row?.hasDockerCompose).toBe(true);
         expect(row?.hasDotenv).toBe(true);
-        expect(JSON.parse(row!.servicesJson)).toEqual([{ serviceName: 'web', expectedContainerState: 'unknown', collectContainerLogs: false }]);
+        expect(JSON.parse(row!.servicesJson)).toEqual([{ serviceName: 'web', expectedContainerState: 'unknown' }]);
     });
 });
 
