@@ -1,40 +1,51 @@
 import React, { useEffect } from 'react';
 import { NavLink as MantineNavLink, NavLinkProps as MantineNavLinkProps } from '@mantine/core';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 export interface RouterLinkProps extends MantineNavLinkProps {
     to: string;
     showActive?: boolean;
+    collapseTo?: string;
+    activeWithin?: boolean;
     children?: React.ReactNode;
 }
 export default function RouterLink(props: RouterLinkProps) {
     const navigate = useNavigate();
-    let shape = props.to;
-    if (props.children) {
-        shape = `${props.to}/*`;
-    }
-    const active = !!(props.showActive && pathMatchesShape(window.location.pathname, shape));
-    const [opened, setOpened] = React.useState<boolean>(pathMatchesShape(window.location.pathname, shape));
+    const location = useLocation();
+    const { to, showActive, collapseTo, activeWithin, children, ...rest } = props;
+    const shape = children ? `${to}/*` : to;
+    const selfActive = pathMatchesShape(location.pathname, shape);
+    const active = !!(showActive && selfActive);
+    const activeHere = selfActive || !!activeWithin;
+    const [opened, setOpened] = React.useState<boolean>(activeHere);
     useEffect(() => {
-        setOpened(pathMatchesShape(window.location.pathname, shape));
-    }, [window.location.pathname, shape, props.children]);
+        if (activeHere) {
+            setOpened(true);
+        }
+    }, [activeHere]);
     return (
         <MantineNavLink
-            onClickCapture={(e) => {
+            onClick={(e) => {
                 e.preventDefault();
-                navigate(props.to);
-                setOpened(!opened);
+                e.stopPropagation();
+                if (children && opened) {
+                    setOpened(false);
+                    navigate(collapseTo ?? to);
+                } else {
+                    setOpened(true);
+                    navigate(to);
+                }
             }}
             active={active}
-            opened={opened}
-            {...props}
+            opened={children ? opened : undefined}
+            {...rest}
         >
-            {props.children}
+            {children}
         </MantineNavLink>
     );
 }
 
-const pathMatchesShape = (path: string, shape: string): boolean => {
+export const pathMatchesShape = (path: string, shape: string): boolean => {
     if (shape === path || shape === '*') {
         return true;
     }

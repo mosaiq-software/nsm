@@ -2,11 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
 import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, FileInput, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import RouterLink from '@/components/RouterLink';
+import RouterLink, { pathMatchesShape } from '@/components/RouterLink';
 import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { useProjects } from '@/contexts/project-context';
 import { useMe } from '@/contexts/me-context';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Capability, GithubOwner, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
@@ -28,6 +28,7 @@ const Layout = (props: { children: React.ReactNode }) => {
     const meCtx = useMe();
     const userCtx = useUser();
     const navigate = useNavigate();
+    const location = useLocation();
     const [modal, setModal] = useState<'create' | null>(null);
     const [creatingProject, setCreatingProject] = useState(false);
     const [pushBusy, setPushBusy] = useState(false);
@@ -308,6 +309,8 @@ const Layout = (props: { children: React.ReactNode }) => {
                     {meCtx.teams.map((team) => (
                         <RouterLink
                             to={`/teams/${team.ownerId}`}
+                            collapseTo="/"
+                            activeWithin={team.projects.some((p) => pathMatchesShape(location.pathname, `/p/${p.id}/*`))}
                             label={team.login}
                             key={team.ownerId}
                             showActive
@@ -317,7 +320,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                 team.projects
                                     .filter((p) => p.capabilities.includes(Capability.VIEW))
                                     .map((project) => (
-                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive rightSection={<ProjectStatusChip projectId={project.id} />}>
+                                        <RouterLink to={`/p/${project.id}`} collapseTo={`/teams/${team.ownerId}`} label={project.id} key={project.id} showActive rightSection={<ProjectStatusChip projectId={project.id} />}>
                                             {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />}
