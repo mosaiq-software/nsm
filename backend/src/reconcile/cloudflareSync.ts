@@ -4,7 +4,6 @@ import { isCloudflareConfigured, isCloudflareRegistrarConfigured } from '@/confi
 import { CfDnsRecord, CfRegistrarDomain, getPortReservationIdFromComment, hasDynamicTag, listDnsRecords, listRegistrarDomains, listZones } from '@/utils/cloudflare';
 import { deleteDnsZonesNotInModel, getDnsZoneByNameModel, getDnsZoneModel, upsertDnsZoneModel } from '@/persistence/dnsZonePersistence';
 import { deleteRecordsForZoneModel, replaceZoneRecordsModel } from '@/persistence/dnsRecordPersistence';
-import { setZoneAssignmentModel } from '@/persistence/dnsZoneAssignmentPersistence';
 import { setDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
 import { areaLog } from '@/utils/log';
 
@@ -76,7 +75,6 @@ const performCloudflareSync = async (): Promise<{ zoneCount: number }> => {
     const gone = await deleteDnsZonesNotInModel(zones.map((z) => z.id));
     for (const zoneId of gone) {
         await deleteRecordsForZoneModel(zoneId);
-        await setZoneAssignmentModel(zoneId, null);
         await setDomainAllocationsModel(zoneId, []);
         syncLog.info({ action: 'zone_pruned', zoneId }, `pruned zone ${zoneId} no longer present on Cloudflare`);
     }

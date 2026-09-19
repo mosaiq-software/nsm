@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Modal, Select, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { Capability, DnsZone, DomainBillingSummary, DomainRequest, DomainRequestStatus, DomainSearchResult, Project, Team } from '@mosaiq/nsm-common/types';
+import { Capability, DnsZone, DomainBillingSummary, DomainRequest, DomainRequestStatus, DomainSearchResult, Team } from '@mosaiq/nsm-common/types';
 import { useAPI } from '@/utils/api';
 import { useMe } from '@/contexts/me-context';
 import { DomainDetailModal } from '@/components/DomainDetailModal';
@@ -26,7 +26,6 @@ const DomainsPage = () => {
     const [requests, setRequests] = useState<DomainRequest[]>([]);
     const [billing, setBilling] = useState<DomainBillingSummary | null>(null);
     const [teams, setTeams] = useState<Team[]>([]);
-    const [projects, setProjects] = useState<Project[]>([]);
     const [publicIp, setPublicIp] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncingIp, setSyncingIp] = useState(false);
@@ -46,19 +45,17 @@ const DomainsPage = () => {
     const refresh = useCallback(async () => {
         setLoading(true);
         try {
-            const [reqs, doms, bill, tms, projs, ip] = await Promise.all([
+            const [reqs, doms, bill, tms, ip] = await Promise.all([
                 api.get(API_ROUTES.GET_DOMAIN_REQUESTS, {}),
                 isAdmin ? api.get(API_ROUTES.GET_DOMAINS, {}) : Promise.resolve([]),
                 isAdmin ? api.get(API_ROUTES.GET_DOMAIN_BILLING, {}) : Promise.resolve(null),
                 isAdmin ? api.get(API_ROUTES.GET_TEAMS, {}) : Promise.resolve([]),
-                isAdmin ? api.get(API_ROUTES.GET_PROJECTS, {}) : Promise.resolve([]),
                 isAdmin ? api.get(API_ROUTES.GET_PUBLIC_IP, {}) : Promise.resolve({ ip: null }),
             ]);
             setRequests(reqs ?? []);
             setDomains(doms ?? []);
             setBilling((bill as DomainBillingSummary) ?? null);
             setTeams(tms ?? []);
-            setProjects(projs ?? []);
             setPublicIp((ip as { ip: string | null })?.ip ?? null);
         } finally {
             setLoading(false);
@@ -330,7 +327,7 @@ const DomainsPage = () => {
                     <Stack>
                         <Title order={5}>Owned domains</Title>
                         <Text fz="xs" c="dimmed">
-                            Click a domain to manage DNS records, allocations, assignment, and billing.
+                            Click a domain to manage DNS records, allocations, and billing.
                         </Text>
                         <Table verticalSpacing="xs" highlightOnHover fz="sm">
                             <Table.Thead>
@@ -424,7 +421,6 @@ const DomainsPage = () => {
                 <DomainDetailModal
                     zone={selected}
                     teams={teams}
-                    projects={projects}
                     isAdmin={isAdmin}
                     isSuperAdmin={isSuperAdmin}
                     publicIp={publicIp}

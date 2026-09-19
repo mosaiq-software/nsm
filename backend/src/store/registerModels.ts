@@ -17,7 +17,6 @@ import '@/persistence/certPersistence';
 import '@/persistence/clusterMetaPersistence';
 import '@/persistence/dnsZonePersistence';
 import '@/persistence/dnsRecordPersistence';
-import '@/persistence/dnsZoneAssignmentPersistence';
 import '@/persistence/domainTeamAllocationPersistence';
 import '@/persistence/domainRequestPersistence';
 import '@/persistence/quotaBreachPersistence';

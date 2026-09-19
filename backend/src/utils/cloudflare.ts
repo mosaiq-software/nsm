@@ -4,6 +4,7 @@ import { areaLog } from '@/utils/log';
 const cfLog = areaLog('cloudflare');
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
+const CF_GRAPHQL = 'https://api.cloudflare.com/client/v4/graphql';
 const TIMEOUT_MS = 20000;
 
 // Marker written into a Cloudflare record's `comment` to mark it as NSM-managed dynamic-IP. Keeping
@@ -250,4 +251,45 @@ export const getRegistrarDomain = async (domain: string): Promise<CfRegistrarDom
 // support this; callers treat a throw as "instruct the operator to do it in the dashboard".
 export const setRegistrarAutoRenew = async (domain: string, autoRenew: boolean): Promise<void> => {
     await cfRequest(`/accounts/${acct()}/registrar/domains/${encodeURIComponent(domain)}`, { method: 'PUT', body: { auto_renew: autoRenew }, expectEnvelope: false });
+};
+
+// ===== DNS analytics (GraphQL) =====
+export interface CfDnsAnalyticsRow {
+    queryName: string;
+    date: string; // YYYY-MM-DD
+    count: number;
+}
+
+// Daily DNS query counts for a zone over [sinceDate, untilDate], grouped by query name, via
+// Cloudflare's GraphQL dnsAnalyticsAdaptiveGroups. Values are inlined (not GraphQL variables) to
+// avoid declaring the schema's scalar types; inputs are a zone id and formatted dates we control.
+export const getDnsAnalytics = async (zoneId: string, sinceDate: string, untilDate: string): Promise<CfDnsAnalyticsRow[]> => {
+    if (!isCloudflareConfigured()) return [];
+    const query = `{
+        viewer {
+            zones(filter: { zoneTag: ${JSON.stringify(zoneId)} }) {
+                dnsAnalyticsAdaptiveGroups(limit: 10000, filter: { date_geq: ${JSON.stringify(sinceDate)}, date_leq: ${JSON.stringify(untilDate)} }, orderBy: [count_DESC]) {
+                    count
+                    dimensions { queryName date }
+                }
+            }
+        }
+    }`;
+    const res = await fetch(CF_GRAPHQL, {
+        method: 'POST',
+        headers: cfHeaders(),
+        body: JSON.stringify({ query }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    const json: any = await res.json().catch(() => undefined);
+    if (!res.ok || json?.errors?.length) {
+        const msg = json?.errors?.map((e: any) => e.message).join('; ') || `${res.status}`;
+        throw new Error(`Cloudflare GraphQL DNS analytics failed: ${msg}`);
+    }
+    const groups: any[] = json?.data?.viewer?.zones?.[0]?.dnsAnalyticsAdaptiveGroups ?? [];
+    return groups.map((g) => ({
+        queryName: g.dimensions?.queryName ?? '',
+        date: g.dimensions?.date ?? '',
+        count: typeof g.count === 'number' ? g.count : 0,
+    }));
 };

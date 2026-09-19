@@ -77,7 +77,6 @@ export enum OpType {
     DELETE_TEAM_OVERRIDE = 'DELETE_TEAM_OVERRIDE',
     ADD_ADMIN = 'ADD_ADMIN',
     REMOVE_ADMIN = 'REMOVE_ADMIN',
-    SET_ZONE_ASSIGNMENT = 'SET_ZONE_ASSIGNMENT',
     SET_DOMAIN_ALLOCATIONS = 'SET_DOMAIN_ALLOCATIONS',
     UPSERT_DOMAIN_REQUEST = 'UPSERT_DOMAIN_REQUEST',
     UPSERT_PORT_RESERVATION = 'UPSERT_PORT_RESERVATION',
@@ -107,7 +106,6 @@ export type Op =
     | { type: OpType.DELETE_TEAM_OVERRIDE; ownerId: string; memberId: string }
     | { type: OpType.ADD_ADMIN; admin: Admin }
     | { type: OpType.REMOVE_ADMIN; id: string }
-    | { type: OpType.SET_ZONE_ASSIGNMENT; zoneId: string; projectId: string | null }
     | { type: OpType.SET_DOMAIN_ALLOCATIONS; zoneId: string; ownerIds: string[] }
     | { type: OpType.UPSERT_DOMAIN_REQUEST; request: DomainRequest }
     | { type: OpType.UPSERT_PORT_RESERVATION; reservation: PortReservation }

@@ -1,12 +1,12 @@
-import { DnsRecord, DnsZone, DNS_STRUCTURED_TYPES } from '@mosaiq/nsm-common/types';
+import { DnsRecord, DnsZone, DnsZoneAnalytics, DNS_STRUCTURED_TYPES } from '@mosaiq/nsm-common/types';
 import { getAllDnsZonesModel, getDnsZoneModel, DnsZoneCache } from '@/persistence/dnsZonePersistence';
 import { getRecordsByPortReservationModel, getRecordsForZoneModel } from '@/persistence/dnsRecordPersistence';
-import { getAllZoneAssignmentsModel, getZoneAssignmentModel } from '@/persistence/dnsZoneAssignmentPersistence';
 import { getAllocationsForZoneModel, getAllDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
 import { getPortReservationByIdModel } from '@/persistence/portReservationPersistence';
-import { CfDnsRecordInput, addDynamicTag, createDnsRecord, deleteDnsRecord, removeDynamicTag, removePortTag, setPortTag, updateDnsRecord } from '@/utils/cloudflare';
+import { CfDnsRecordInput, addDynamicTag, createDnsRecord, deleteDnsRecord, getDnsAnalytics, removeDynamicTag, removePortTag, setPortTag, updateDnsRecord } from '@/utils/cloudflare';
 import { syncZoneRecords } from '@/reconcile/cloudflareSync';
 import { checkPublicIp, getKnownPublicIp } from '@/reconcile/publicIpWatcher';
+import { config } from '@/config';
 import { areaLog } from '@/utils/log';
 
 // Record types that carry a port NSM can drive from a reservation. SRV's port lives in `data.port`.
@@ -17,9 +17,14 @@ const dnsLog = areaLog('cloudflare');
 // Proxying (orange cloud) is only meaningful on these record types.
 const PROXYABLE_TYPES = new Set(['A', 'AAAA', 'CNAME']);
 
+// Cloudflare dashboard overview URL for a zone, when the account id is configured.
+const zoneDashboardUrl = (zoneName: string): string | undefined => {
+    const accountId = config.cloudflare.accountId;
+    return accountId ? `https://dash.cloudflare.com/${accountId}/${zoneName}` : undefined;
+};
+
 // Merge a cached zone with its durable NSM associations into the shared DnsZone view.
 export const buildZoneView = async (zone: DnsZoneCache): Promise<DnsZone> => {
-    const assignedProjectId = await getZoneAssignmentModel(zone.id);
     const allocatedTeamIds = await getAllocationsForZoneModel(zone.id);
     return {
         id: zone.id,
@@ -29,15 +34,14 @@ export const buildZoneView = async (zone: DnsZoneCache): Promise<DnsZone> => {
         billing: zone.billing,
         recordCount: zone.recordCount,
         lastSyncedAt: zone.lastSyncedAt,
-        assignedProjectId: assignedProjectId ?? undefined,
         allocatedTeamIds,
+        dashboardUrl: zoneDashboardUrl(zone.name),
     };
 };
 
 // All zones with their NSM associations. Associations are batch-loaded to avoid N queries per zone.
 export const listDomains = async (): Promise<DnsZone[]> => {
     const zones = await getAllDnsZonesModel();
-    const assignments = new Map((await getAllZoneAssignmentsModel()).map((a) => [a.zoneId, a.projectId]));
     const allocations = new Map<string, string[]>();
     for (const a of await getAllDomainAllocationsModel()) {
         const list = allocations.get(a.zoneId) ?? [];
@@ -53,14 +57,73 @@ export const listDomains = async (): Promise<DnsZone[]> => {
             billing: z.billing,
             recordCount: z.recordCount,
             lastSyncedAt: z.lastSyncedAt,
-            assignedProjectId: assignments.get(z.id) ?? undefined,
             allocatedTeamIds: allocations.get(z.id) ?? [],
+            dashboardUrl: zoneDashboardUrl(z.name),
         }))
         .sort((a, b) => a.name.localeCompare(b.name));
 };
 
 export const listRecords = async (zoneId: string): Promise<DnsRecord[]> => {
     return (await getRecordsForZoneModel(zoneId)).sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+};
+
+// Normalize a DNS name for matching analytics query names to records: lowercase, no trailing dot.
+const normalizeDnsName = (name: string): string => name.trim().toLowerCase().replace(/\.$/, '');
+
+// UTC date string (YYYY-MM-DD) offset by `deltaDays` from today.
+const dayString = (deltaDays: number): string => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + deltaDays);
+    return d.toISOString().slice(0, 10);
+};
+
+const ANALYTICS_WINDOW_DAYS = 7;
+
+// Past-week DNS query traffic for a zone, aggregated per query name plus a zone-wide total. Traffic
+// is attributed to records by name (summed across query types). Returns an empty window if the
+// Cloudflare token lacks analytics access so the UI degrades gracefully.
+export const getZoneAnalytics = async (zoneId: string): Promise<DnsZoneAnalytics> => {
+    const days: string[] = [];
+    for (let i = ANALYTICS_WINDOW_DAYS - 1; i >= 0; i--) days.push(dayString(-i));
+    const since = days[0];
+    const until = days[days.length - 1];
+
+    const empty: DnsZoneAnalytics = { since, until, days, total: 0, totalSeries: days.map((date) => ({ date, count: 0 })), byName: [] };
+
+    let rows;
+    try {
+        rows = await getDnsAnalytics(zoneId, since, until);
+    } catch (e: any) {
+        dnsLog.warn({ action: 'dns_analytics_failed', zoneId, err: e?.message }, `failed to load DNS analytics for zone ${zoneId}`);
+        return empty;
+    }
+
+    const dayIndex = new Map(days.map((d, i) => [d, i]));
+    const byNameCounts = new Map<string, number[]>();
+    const totalPerDay = new Array(days.length).fill(0);
+    let total = 0;
+
+    for (const row of rows) {
+        const idx = dayIndex.get(row.date);
+        if (idx === undefined) continue;
+        const name = normalizeDnsName(row.queryName);
+        if (!name) continue;
+        const series = byNameCounts.get(name) ?? new Array(days.length).fill(0);
+        series[idx] += row.count;
+        byNameCounts.set(name, series);
+        totalPerDay[idx] += row.count;
+        total += row.count;
+    }
+
+    const byName = [...byNameCounts.entries()]
+        .map(([name, counts]) => ({
+            name,
+            total: counts.reduce((a, b) => a + b, 0),
+            series: days.map((date, i) => ({ date, count: counts[i] })),
+        }))
+        .sort((a, b) => b.total - a.total);
+
+    return { since, until, days, total, totalSeries: days.map((date, i) => ({ date, count: totalPerDay[i] })), byName };
 };
 
 // Build the Cloudflare create/update body from a partial DnsRecord, honoring the dynamic-IP toggle:

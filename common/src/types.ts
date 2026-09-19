@@ -904,10 +904,35 @@ export interface DnsZone {
     paused: boolean;
     billing?: DomainBilling;
     // NSM-side associations (durable, replicated via ops).
-    assignedProjectId?: string;
     allocatedTeamIds?: string[]; // team ownerIds
     recordCount?: number;
     lastSyncedAt?: number;
+    // Cloudflare dashboard overview URL for this zone; set when the account id is configured.
+    dashboardUrl?: string;
+}
+
+// A single day's DNS query count in an analytics series.
+export interface DnsAnalyticsPoint {
+    date: string; // YYYY-MM-DD
+    count: number;
+}
+
+// Per-query-name DNS traffic over the analytics window.
+export interface DnsNameAnalytics {
+    name: string; // normalized query name (lowercased, no trailing dot)
+    total: number;
+    series: DnsAnalyticsPoint[]; // one point per day in the window, chronological
+}
+
+// Zone-wide DNS analytics for a fixed window (default: the past 7 days), sourced from Cloudflare's
+// GraphQL dnsAnalyticsAdaptiveGroups. `byName` lets the UI attribute traffic to individual records.
+export interface DnsZoneAnalytics {
+    since: string; // YYYY-MM-DD (inclusive)
+    until: string; // YYYY-MM-DD (inclusive)
+    days: string[]; // ordered day labels covering the window
+    total: number; // sum of all queries across every name
+    totalSeries: DnsAnalyticsPoint[]; // zone-wide per-day totals
+    byName: DnsNameAnalytics[];
 }
 
 // A domain-search suggestion (non-authoritative, from Cloudflare's registrar search endpoint).

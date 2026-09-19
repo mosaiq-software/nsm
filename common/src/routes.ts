@@ -1,4 +1,4 @@
-import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, CreateProjectWebhookBody, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, ProjectWebhook, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, UpdateProjectWebhookBody, User } from './types';
+import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, CreateProjectWebhookBody, DeploymentLogUpdate, DnsRecord, DnsZone, DnsZoneAnalytics, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, ProjectWebhook, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, UpdateProjectWebhookBody, User } from './types';
 import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
 import { CreatePortReservationBody, PortReservation } from './types';
 
@@ -39,6 +39,7 @@ export enum API_ROUTES {
     GET_DOMAIN_BILLING = '/domains/billing',
     GET_PUBLIC_IP = '/domains/public-ip',
     GET_DNS_RECORDS = '/domains/:zoneId/records',
+    GET_DNS_ANALYTICS = '/domains/:zoneId/analytics',
     GET_PROJECT_DOMAINS = '/project/:projectId/domains',
     GET_NODE_CONFIG = '/nodes/:nodeId/config',
     GET_NODE_PORT_RESERVATIONS = '/nodes/:nodeId/port-reservations',
@@ -80,7 +81,6 @@ export enum API_ROUTES {
     POST_DOMAIN_REQUEST_DECIDE = '/domains/requests/:requestId/decide',
     POST_DOMAIN_DELETE = '/domains/:zoneId/delete',
     POST_DOMAIN_ALLOCATIONS = '/domains/:zoneId/allocations',
-    POST_DOMAIN_ASSIGN = '/domains/:zoneId/assign',
     POST_DNS_RECORD_CREATE = '/domains/:zoneId/records/create',
     POST_DNS_RECORD_UPDATE = '/domains/:zoneId/records/:recordId/update',
     POST_DNS_RECORD_DELETE = '/domains/:zoneId/records/:recordId/delete',
@@ -136,6 +136,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_DOMAIN_BILLING]: {};
     [API_ROUTES.GET_PUBLIC_IP]: {};
     [API_ROUTES.GET_DNS_RECORDS]: { zoneId: string };
+    [API_ROUTES.GET_DNS_ANALYTICS]: { zoneId: string };
     [API_ROUTES.GET_PROJECT_DOMAINS]: { projectId: string };
     [API_ROUTES.GET_NODE_CONFIG]: { nodeId: string };
     [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: { nodeId: string };
@@ -177,7 +178,6 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: { requestId: string };
     [API_ROUTES.POST_DOMAIN_DELETE]: { zoneId: string };
     [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: { zoneId: string };
-    [API_ROUTES.POST_DOMAIN_ASSIGN]: { zoneId: string };
     [API_ROUTES.POST_DNS_RECORD_CREATE]: { zoneId: string };
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: { zoneId: string; recordId: string };
     [API_ROUTES.POST_DNS_RECORD_DELETE]: { zoneId: string; recordId: string };
@@ -235,6 +235,7 @@ export interface API_BODY {
     [API_ROUTES.GET_DOMAIN_BILLING]: undefined;
     [API_ROUTES.GET_PUBLIC_IP]: undefined;
     [API_ROUTES.GET_DNS_RECORDS]: undefined;
+    [API_ROUTES.GET_DNS_ANALYTICS]: undefined;
     [API_ROUTES.GET_PROJECT_DOMAINS]: undefined;
     [API_ROUTES.GET_NODE_CONFIG]: undefined;
     [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: undefined;
@@ -276,7 +277,6 @@ export interface API_BODY {
     [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: { approve: boolean; reason?: string };
     [API_ROUTES.POST_DOMAIN_DELETE]: { confirmName: string };
     [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: { ownerIds: string[] };
-    [API_ROUTES.POST_DOMAIN_ASSIGN]: { projectId: string | null };
     [API_ROUTES.POST_DNS_RECORD_CREATE]: Partial<DnsRecord>;
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: Partial<DnsRecord>;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: {};
@@ -332,6 +332,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_DOMAIN_BILLING]: DomainBillingSummary | undefined;
     [API_ROUTES.GET_PUBLIC_IP]: { ip: string | null };
     [API_ROUTES.GET_DNS_RECORDS]: DnsRecord[];
+    [API_ROUTES.GET_DNS_ANALYTICS]: DnsZoneAnalytics;
     [API_ROUTES.GET_PROJECT_DOMAINS]: string[];
     [API_ROUTES.GET_NODE_CONFIG]: NodeConfigValues | undefined;
     [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: PortReservation[];
@@ -373,7 +374,6 @@ export interface API_RETURN {
     [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: DomainRequest | undefined;
     [API_ROUTES.POST_DOMAIN_DELETE]: undefined;
     [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: DomainAllocationResult;
-    [API_ROUTES.POST_DOMAIN_ASSIGN]: undefined;
     [API_ROUTES.POST_DNS_RECORD_CREATE]: DnsRecord | undefined;
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: DnsRecord | undefined;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: undefined;
@@ -431,6 +431,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_DOMAIN_BILLING]: string;
     [API_ROUTES.GET_PUBLIC_IP]: string;
     [API_ROUTES.GET_DNS_RECORDS]: string;
+    [API_ROUTES.GET_DNS_ANALYTICS]: string;
     [API_ROUTES.GET_PROJECT_DOMAINS]: string;
     [API_ROUTES.GET_NODE_CONFIG]: string;
     [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: string;
@@ -472,7 +473,6 @@ export interface API_AUTH {
     [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: string;
     [API_ROUTES.POST_DOMAIN_DELETE]: string;
     [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: string;
-    [API_ROUTES.POST_DOMAIN_ASSIGN]: string;
     [API_ROUTES.POST_DNS_RECORD_CREATE]: string;
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: string;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: string;

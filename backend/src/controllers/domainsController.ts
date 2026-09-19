@@ -218,12 +218,6 @@ export const setAllocations = async (zoneId: string, ownerIds: string[]): Promis
     return { ok: true };
 };
 
-export const assignZone = async (zoneId: string, projectId: string | null): Promise<void> => {
-    const zone = await getDnsZoneModel(zoneId);
-    if (!zone) throw new Error('domain not found');
-    await cluster.propose({ type: OpType.SET_ZONE_ASSIGNMENT, zoneId, projectId });
-};
-
 // Super-admin only: delete the zone from Cloudflare (stops DNS) and best-effort disable registrar
 // auto-renew (stops billing). Requires the typed domain name to match.
 export const deleteDomain = async (zoneId: string, confirmName: string): Promise<void> => {
@@ -240,7 +234,6 @@ export const deleteDomain = async (zoneId: string, confirmName: string): Promise
 
     await deleteRecordsForZoneModel(zoneId);
     await deleteDnsZoneModel(zoneId);
-    await cluster.propose({ type: OpType.SET_ZONE_ASSIGNMENT, zoneId, projectId: null });
     await cluster.propose({ type: OpType.SET_DOMAIN_ALLOCATIONS, zoneId, ownerIds: [] });
     domainsLog.info({ action: 'domain_deleted', domainName: zone.name }, `deleted domain ${zone.name}`);
 };

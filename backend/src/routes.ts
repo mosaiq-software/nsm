@@ -23,9 +23,9 @@ import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
 import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userController';
 import { Capability } from '@mosaiq/nsm-common/types';
 import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requireCreateProjectForOwner, requireOwnerInstalledForProject, requireProjectCapability, requireSuperAdmin, requireTeamCapability, requireTeamManage } from '@/controllers/authz';
-import { createRecord, deleteRecord, getPublicIp, listDomains, listRecords, refreshPublicIp, updateRecord } from '@/controllers/dnsController';
+import { createRecord, deleteRecord, getPublicIp, getZoneAnalytics, listDomains, listRecords, refreshPublicIp, updateRecord } from '@/controllers/dnsController';
 import { syncCloudflareNow } from '@/reconcile/cloudflareSync';
-import { assignZone, billingSummary, checkDomains, createRequest, decideRequest, deleteDomain, listProjectDomains, listRequests, searchDomains, setAllocations } from '@/controllers/domainsController';
+import { billingSummary, checkDomains, createRequest, decideRequest, deleteDomain, listProjectDomains, listRequests, searchDomains, setAllocations } from '@/controllers/domainsController';
 import { applyLocalConfig, applyNodeConfig, readLocalConfig, readNodeConfig } from '@/controllers/nodeConfigController';
 import { createReservation, deleteReservation, listAllReservations, listNodeReservations, listProjectReservations } from '@/controllers/portReservationController';
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
@@ -1002,6 +1002,14 @@ privateRouter.get(API_ROUTES.GET_DNS_RECORDS, async (req, res) => {
     res.status(200).json(await listRecords(params.zoneId));
 });
 
+// Admin: past-week DNS query analytics for a zone (per-record traffic + zone total).
+privateRouter.get(API_ROUTES.GET_DNS_ANALYTICS, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_DNS_ANALYTICS];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    res.status(200).json(await getZoneAnalytics(params.zoneId));
+});
+
 // Team-scoped list of allocated domains for the config picker. Anyone who can VIEW the project.
 privateRouter.get(API_ROUTES.GET_PROJECT_DOMAINS, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_DOMAINS];
@@ -1090,20 +1098,6 @@ privateRouter.post(API_ROUTES.POST_DOMAIN_ALLOCATIONS, async (req, res) => {
         res.status(200).json(await setAllocations(params.zoneId, Array.isArray(body.ownerIds) ? body.ownerIds : []));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Allocation failed');
-    }
-});
-
-// Admin: assign (or clear) the project a domain is associated with.
-privateRouter.post(API_ROUTES.POST_DOMAIN_ASSIGN, async (req, res) => {
-    const params = req.params as API_PARAMS[API_ROUTES.POST_DOMAIN_ASSIGN];
-    if (!requireLeader(req, res)) return;
-    if (!(await requireAdmin(req, res))) return;
-    try {
-        const body = (req.body || {}) as API_BODY[API_ROUTES.POST_DOMAIN_ASSIGN];
-        await assignZone(params.zoneId, body.projectId ?? null);
-        res.status(200).json(undefined);
-    } catch (e: any) {
-        res.status(400).send(e?.message || 'Assignment failed');
     }
 });
 
