@@ -10,6 +10,7 @@ import { enqueueDeploy } from '@/controllers/deployQueue';
 import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
+import { getProjectDeployAverage } from '@/controllers/deployEstimates';
 import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, queryNodeMetric, getNodeStorageSpec, queryNodeStorageSeries, getProjectResourceUsage, MetricKind } from '@/controllers/observabilityController';
 import { setProjectQuota } from '@/controllers/quotaController';
 import { getProjectHealthSummary } from '@/controllers/healthController';
@@ -242,6 +243,14 @@ privateRouter.get(API_ROUTES.GET_PROJECT_INSTANCE, async (req, res) => {
     if (!instance) return void res.status(404).send('Project instance not found');
     if (!(await requireProjectCapability(req, res, instance.projectId, Capability.VIEW))) return;
     res.status(200).json(instance);
+});
+
+privateRouter.get(API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
+    const { deployMs, sampleCount } = await getProjectDeployAverage(params.projectId);
+    res.status(200).json({ deployMs: deployMs ?? null, sampleCount });
 });
 
 privateRouter.get(API_ROUTES.GET_WORKER_NODES, async (_req, res) => {

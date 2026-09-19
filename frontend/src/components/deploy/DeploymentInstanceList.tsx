@@ -1,7 +1,9 @@
 import { Card, Group, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
 import { MdOutlineBolt } from 'react-icons/md';
-import { DeploymentStateBadge } from './DeploymentStateBadge';
+import { DeploymentStateBadge, isInProgressState } from './DeploymentStateBadge';
+import { useNow } from '@/hooks/useNow';
+import { deploymentDurationMs, formatDuration } from '@/utils/deployDuration';
 
 interface DeploymentInstanceListProps {
     instances: ProjectInstanceHeader[];
@@ -10,6 +12,7 @@ interface DeploymentInstanceListProps {
 }
 
 export const DeploymentInstanceList = ({ instances, selectedId, onSelect }: DeploymentInstanceListProps) => {
+    const now = useNow(instances.some((i) => isInProgressState(i.state)));
     if (instances.length === 0) {
         return (
             <Card withBorder w={300} miw={300}>
@@ -26,6 +29,8 @@ export const DeploymentInstanceList = ({ instances, selectedId, onSelect }: Depl
                 <Stack gap={4}>
                     {instances.map((instance) => {
                         const selected = instance.id === selectedId;
+                        const inProgress = isInProgressState(instance.state);
+                        const duration = formatDuration(deploymentDurationMs(instance, now));
                         return (
                             <UnstyledButton
                                 key={instance.id}
@@ -43,6 +48,7 @@ export const DeploymentInstanceList = ({ instances, selectedId, onSelect }: Depl
                                         </Text>
                                         <Text fz="xs" c="dimmed" truncate>
                                             {instance.id.split('-')[0]}
+                                            {duration && ` · ${inProgress ? 'running' : 'took'} ${duration}`}
                                         </Text>
                                     </Stack>
                                     <Group gap={4} wrap="nowrap">

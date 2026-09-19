@@ -1,9 +1,9 @@
 import { ClusterStatus, DeployQueueEntry, DeployQueueState, DeploymentState, User } from '@mosaiq/nsm-common/types';
 import { cluster } from '@/cluster/node';
 import { getDeployQueueState, INTER_DEPLOY_DELAY_MS } from './deployQueue';
-import { getAllActiveProjectInstancesModel, getRecentDeployDurationsModel } from '@/persistence/projectInstancePersistence';
+import { getAllActiveProjectInstancesModel } from '@/persistence/projectInstancePersistence';
 import { getVisibleProjects } from './teamController';
-import { config } from '@/config';
+import { getProjectDeployAverage } from './deployEstimates';
 
 // Redact a queue entry the requesting user cannot see into a placeholder that keeps only its
 // position: identifying fields (projectId/instanceId), timestamps, and ETA estimates are cleared so
@@ -28,9 +28,9 @@ const buildAverages = async (
     const avg = new Map<string, number>();
     const count = new Map<string, number>();
     for (const projectId of new Set(projectIds)) {
-        const durations = await getRecentDeployDurationsModel(projectId, config.deployDurationSampleSize);
-        count.set(projectId, durations.length);
-        if (durations.length) avg.set(projectId, durations.reduce((a, b) => a + b, 0) / durations.length);
+        const { deployMs, sampleCount } = await getProjectDeployAverage(projectId);
+        count.set(projectId, sampleCount);
+        if (deployMs != null) avg.set(projectId, deployMs);
     }
     const known = [...avg.values()];
     const fallback = known.length ? known.reduce((a, b) => a + b, 0) / known.length : undefined;

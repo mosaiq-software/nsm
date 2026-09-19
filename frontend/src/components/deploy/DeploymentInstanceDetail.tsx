@@ -3,6 +3,8 @@ import { ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
 import { Link } from 'react-router-dom';
 import { MdOutlineBolt, MdOutlineRefresh, MdOutlineViewList } from 'react-icons/md';
 import { useLiveProjectInstance } from '@/hooks/useLiveProjectInstance';
+import { useNow } from '@/hooks/useNow';
+import { deploymentDurationMs, formatDuration } from '@/utils/deployDuration';
 import { BuildLogConsole } from './BuildLogConsole';
 import { DeploymentStateBadge, isInProgressState } from './DeploymentStateBadge';
 import { ServiceStatusCard } from './ServiceStatusCard';
@@ -25,6 +27,10 @@ export const DeploymentInstanceDetail = ({ header }: { header: ProjectInstanceHe
     const workerNodeId = instance?.workerNodeId ?? header.workerNodeId;
     const active = instance?.active ?? header.active;
     const services = instance?.services ?? [];
+
+    const inProgress = isInProgressState(state);
+    const now = useNow(inProgress);
+    const duration = formatDuration(deploymentDurationMs({ ...header, ...instance, state, created, lastUpdated }, now));
 
     return (
         <Stack style={{ flex: 1, minWidth: 0 }}>
@@ -58,9 +64,10 @@ export const DeploymentInstanceDetail = ({ header }: { header: ProjectInstanceHe
                         </Tooltip>
                     </Group>
                 </Group>
-                <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md">
+                <SimpleGrid cols={{ base: 2, sm: 5 }} mt="md">
                     <SummaryField label="Created">{new Date(created).toLocaleString()}</SummaryField>
                     <SummaryField label="Last updated">{new Date(lastUpdated).toLocaleString()}</SummaryField>
+                    <SummaryField label={inProgress ? 'Elapsed' : 'Duration'}>{duration ?? '—'}</SummaryField>
                     <SummaryField label="Node">{workerNodeId || 'Unassigned'}</SummaryField>
                     <SummaryField label="Instance">{header.id.split('-')[0]}</SummaryField>
                 </SimpleGrid>

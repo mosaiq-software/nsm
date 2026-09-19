@@ -10,6 +10,7 @@ export enum API_ROUTES {
     GET_PROJECT = '/project/:projectId',
     GET_PROJECTS = '/projects',
     GET_PROJECT_INSTANCE = '/project-instance/:projectInstanceId',
+    GET_PROJECT_DEPLOY_AVERAGE = '/project/:projectId/deploy-average',
     GET_WORKER_NODES = '/cluster/nodes',
     GET_WORKER_STATUSES = '/cluster/nodes/status',
     GET_JOIN_INFO = '/cluster/join-info',
@@ -108,6 +109,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_PROJECT]: { projectId: string };
     [API_ROUTES.GET_PROJECTS]: {};
     [API_ROUTES.GET_PROJECT_INSTANCE]: { projectInstanceId: string };
+    [API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE]: { projectId: string };
     [API_ROUTES.GET_WORKER_NODES]: {};
     [API_ROUTES.GET_WORKER_STATUSES]: {};
     [API_ROUTES.GET_JOIN_INFO]: {};
@@ -208,6 +210,7 @@ export interface API_BODY {
     [API_ROUTES.GET_PROJECT]: undefined;
     [API_ROUTES.GET_PROJECTS]: undefined;
     [API_ROUTES.GET_PROJECT_INSTANCE]: undefined;
+    [API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE]: undefined;
     [API_ROUTES.GET_WORKER_NODES]: undefined;
     [API_ROUTES.GET_WORKER_STATUSES]: undefined;
     [API_ROUTES.GET_JOIN_INFO]: undefined;
@@ -306,6 +309,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_PROJECT]: Project | undefined;
     [API_ROUTES.GET_PROJECTS]: Project[];
     [API_ROUTES.GET_PROJECT_INSTANCE]: ProjectInstance | undefined;
+    [API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE]: { deployMs: number | null; sampleCount: number };
     [API_ROUTES.GET_WORKER_NODES]: ClusterNode[] | undefined;
     [API_ROUTES.GET_WORKER_STATUSES]: undefined; //TODO
     [API_ROUTES.GET_JOIN_INFO]: { command: string; deployPublicKey: string | null };
@@ -406,6 +410,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_PROJECT]: string;
     [API_ROUTES.GET_PROJECTS]: string;
     [API_ROUTES.GET_PROJECT_INSTANCE]: string;
+    [API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE]: string;
     [API_ROUTES.GET_WORKER_NODES]: string;
     [API_ROUTES.GET_WORKER_STATUSES]: string;
     [API_ROUTES.GET_JOIN_INFO]: string;

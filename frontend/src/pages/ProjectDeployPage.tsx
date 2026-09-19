@@ -38,16 +38,24 @@ const ProjectDeployPage = () => {
 
     const serverHeaders = useMemo(() => [...(project?.instances ?? [])].sort((a, b) => b.created - a.created), [project?.instances]);
 
-    // Rolling average of recent successful deploys, so the page can show roughly how long a deploy of
-    // this app takes. Mirrors the leader's estimate (newest first, capped at 10 samples).
-    const avgDeployMs = useMemo(() => {
-        const durations = serverHeaders
-            .filter((h) => h.state === DeploymentState.DEPLOYED && typeof h.deployDurationMs === 'number')
-            .slice(0, 10)
-            .map((h) => h.deployDurationMs as number);
-        if (!durations.length) return undefined;
-        return durations.reduce((a, b) => a + b, 0) / durations.length;
-    }, [serverHeaders]);
+    // Average deploy time for this project, computed server-side from the exact same rolling average
+    // the leader uses to estimate the deploy queue (config sample size, successful deploys only), so
+    // the two numbers always agree. Undefined until fetched or when the project has no history.
+    const [avgDeployMs, setAvgDeployMs] = useState<number | undefined>(undefined);
+
+    // Re-fetch the average whenever a new successful deploy lands (or the project changes).
+    const deployedCount = useMemo(() => serverHeaders.filter((h) => h.state === DeploymentState.DEPLOYED).length, [serverHeaders]);
+    useEffect(() => {
+        if (!projectId) return;
+        let cancelled = false;
+        void api.get(API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE, { projectId }).then((res) => {
+            if (cancelled) return;
+            setAvgDeployMs(res && res.sampleCount > 0 && res.deployMs != null ? res.deployMs : undefined);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [projectId, deployedCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Include a freshly-triggered deployment before the project list has caught up with it.
     const headers = useMemo(() => {
