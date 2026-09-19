@@ -98,27 +98,29 @@ const TeamDetailPage = () => {
                 </Alert>
             ) : (
                 <>
-                    <Stack gap="xs">
-                        <Title order={4}>Default permissions</Title>
-                        <Text c="dimmed" size="sm">
-                            Every member of {team.login} gets at least these permissions. Overrides can only grant more, never less.
-                        </Text>
-                        <Group>
-                            {CAPABILITY_LABELS.map(({ cap, label }) => (
-                                <Checkbox key={cap} label={label} checked={defaults.includes(cap)} disabled={!canManage} onChange={(e) => toggleDefault(cap, e.currentTarget.checked)} />
-                            ))}
-                        </Group>
-                        {canManage && defaultsChanged && (
+                    {team.type === TeamType.ORGANIZATION && (
+                        <Stack gap="xs">
+                            <Title order={4}>Default permissions</Title>
+                            <Text c="dimmed" size="sm">
+                                Every member of {team.login} gets at least these permissions. Overrides can only grant more, never less.
+                            </Text>
                             <Group>
-                                <Button size="xs" loading={savingDefaults} onClick={saveDefaults}>
-                                    Save defaults
-                                </Button>
-                                <Button size="xs" variant="subtle" onClick={() => setDefaults(team.defaultCapabilities)}>
-                                    Discard
-                                </Button>
+                                {CAPABILITY_LABELS.map(({ cap, label }) => (
+                                    <Checkbox key={cap} label={label} checked={defaults.includes(cap)} disabled={!canManage} onChange={(e) => toggleDefault(cap, e.currentTarget.checked)} />
+                                ))}
                             </Group>
-                        )}
-                    </Stack>
+                            {canManage && defaultsChanged && (
+                                <Group>
+                                    <Button size="xs" loading={savingDefaults} onClick={saveDefaults}>
+                                        Save defaults
+                                    </Button>
+                                    <Button size="xs" variant="subtle" onClick={() => setDefaults(team.defaultCapabilities)}>
+                                        Discard
+                                    </Button>
+                                </Group>
+                            )}
+                        </Stack>
+                    )}
 
                     <Title order={4}>Members</Title>
                     {team.type === TeamType.USER ? (

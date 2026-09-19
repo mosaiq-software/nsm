@@ -145,6 +145,7 @@ export const getTeamDetail = async (user: User, ownerId: string): Promise<TeamDe
 export const setTeamDefaults = async (ownerId: string, capabilities: Capability[]): Promise<void> => {
     const team = await resolveTeamById(ownerId);
     if (!team || !team.installed) throw new Error('Team is not installed');
+    if (team.type === TeamType.USER) throw new Error('User teams do not have configurable permissions');
     const config: TeamConfig = { ownerId: team.ownerId, login: team.login, type: team.type, defaultCapabilities: dedupeCaps(capabilities) };
     await cluster.propose({ type: OpType.UPSERT_TEAM_CONFIG, config });
     teamLog.info({ action: 'team_defaults_set', ownerId, login: team.login, capabilities: config.defaultCapabilities }, `set default capabilities for ${team.login}`);
@@ -153,6 +154,7 @@ export const setTeamDefaults = async (ownerId: string, capabilities: Capability[
 export const setTeamOverride = async (ownerId: string, memberId: string, memberLogin: string, capabilities: Capability[]): Promise<void> => {
     const team = await resolveTeamById(ownerId);
     if (!team || !team.installed) throw new Error('Team is not installed');
+    if (team.type === TeamType.USER) throw new Error('User teams do not have configurable permissions');
     // Ensure the team config row exists so its default is persisted alongside overrides.
     if (!(await getTeamConfigModel(team.ownerId))) {
         await cluster.propose({ type: OpType.UPSERT_TEAM_CONFIG, config: { ownerId: team.ownerId, login: team.login, type: team.type, defaultCapabilities: team.defaultCapabilities } });
