@@ -3,6 +3,8 @@ import { AddIncidentUpdateBody, CreateIncidentBody, Incident, IncidentKind, Inci
 import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { addIncidentUpdateModel, deleteIncidentsForProjectModel, getIncidentByIdModel, getIncidentsByProjectModel, getUpdatesByIncidentModel } from '@/persistence/incidentPersistence';
 import { cluster } from '@/cluster/node';
+import { emitProjectEvent } from './webhookController';
+import { buildIncidentCreatedEvent, buildIncidentResolvedEvent, buildIncidentUpdatedEvent } from './webhooks/events';
 import { areaLog } from '@/utils/log';
 
 const incidentLog = areaLog('incidents');
@@ -53,6 +55,7 @@ export const createIncident = async (projectId: string, body: CreateIncidentBody
         await cluster.propose({ type: OpType.ADD_INCIDENT_UPDATE, update });
     }
     incidentLog.info({ action: 'incident_created', projectId, incidentId: incident.id, kind, status: incident.status }, `incident created for ${projectId}`);
+    void emitProjectEvent(buildIncidentCreatedEvent(incident));
     return { incident, updates: await getUpdatesByIncidentModel(incident.id) };
 };
 
@@ -69,6 +72,7 @@ export const addIncidentUpdate = async (projectId: string, incidentId: string, b
     const updated: Incident = { ...incident, status: body.status, resolvedAt, updatedAt: now };
     await cluster.propose({ type: OpType.UPSERT_INCIDENT, incident: updated });
     incidentLog.info({ action: 'incident_update_added', projectId, incidentId, status: body.status }, `update added to incident ${incidentId}`);
+    void emitProjectEvent(TERMINAL_STATUSES.has(body.status) ? buildIncidentResolvedEvent(updated, update) : buildIncidentUpdatedEvent(updated, update));
     return { incident: updated, updates: await getUpdatesByIncidentModel(incidentId) };
 };
 

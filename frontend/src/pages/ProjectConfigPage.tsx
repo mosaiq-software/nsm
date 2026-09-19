@@ -14,6 +14,7 @@ import { assembleDotenv, extractVariables, parseDynamicVariablePath } from '@mos
 import { NginxEditor } from '@/components/NginxEditor';
 import { ResourceAllocationEditor } from '@/components/ResourceAllocation';
 import { ApiKeysCard } from '@/components/ApiKeysCard';
+import { WebhooksSection } from '@/components/WebhooksSection';
 import { MdOutlineCode, MdOutlineDns, MdOutlineDownload, MdOutlineInfo, MdOutlineLan, MdOutlineLaunch, MdOutlineLink, MdOutlineLinkOff, MdOutlineMoreVert, MdOutlineRefresh, MdOutlineUmbrella, MdOutlineUpload, MdOutlineVisibility, MdOutlineVisibilityOff, MdOutlineWeb } from 'react-icons/md';
 import { useWindowEvent } from '@mantine/hooks';
 
@@ -474,6 +475,8 @@ const ProjectConfigPage = () => {
                 )}
                 <Space h="xl" />
                 {meCtx.canProject(project.id, Capability.CONFIGURE) && <ApiKeysCard projectId={project.id} />}
+                <Space h="xl" />
+                {meCtx.canProject(project.id, Capability.CONFIGURE) && <WebhooksSection projectId={project.id} />}
                 <Space h="xl" />
                 {meCtx.canProject(project.id, Capability.DELETE) && (
                     <Alert color="red" variant="light" title="Danger Zone">

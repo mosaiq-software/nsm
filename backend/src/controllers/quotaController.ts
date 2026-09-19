@@ -2,6 +2,8 @@ import { Project, ProjectResourceQuota } from '@mosaiq/nsm-common/types';
 import { getAllProjects, getProject, proposeProjectUpsert } from './projectController';
 import { getProjectResourceUsage } from './observabilityController';
 import { QuotaBreachInfo, sendQuotaBreachNotification } from './pushController';
+import { emitProjectEvent } from './webhookController';
+import { buildQuotaBreachEvent } from './webhooks/events';
 import { clearQuotaBreachStateModel, getQuotaBreachStateModel, setQuotaBreachStateModel } from '@/persistence/quotaBreachPersistence';
 import { cluster } from '@/cluster/node';
 import { areaLog } from '@/utils/log';
@@ -83,6 +85,7 @@ export const checkAllQuotas = async (): Promise<void> => {
 
                 if (hasNewResource || cooldownElapsed) {
                     await sendQuotaBreachNotification(project, breaches);
+                    void emitProjectEvent(buildQuotaBreachEvent(project, breaches));
                     await setQuotaBreachStateModel(project.id, breachedResources, Date.now());
                     quotaLog.info({ action: 'quota_breach_notified', projectId: project.id, resources: breachedResources, reason: hasNewResource ? 'new_resource' : 'cooldown' }, `notified quota breach for ${project.id}`);
                 } else {

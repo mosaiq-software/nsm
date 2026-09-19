@@ -15,6 +15,7 @@ import { upsertDomainRequestModel } from '@/persistence/domainRequestPersistence
 import { deletePortReservationModel, deletePortReservationsForProjectModel, upsertPortReservationModel } from '@/persistence/portReservationPersistence';
 import { addIncidentUpdateModel, deleteIncidentModel, upsertIncidentModel } from '@/persistence/incidentPersistence';
 import { revokeApiKeyModel, upsertApiKeyModel } from '@/persistence/apiKeyPersistence';
+import { deleteProjectWebhookModel, upsertProjectWebhookModel } from '@/persistence/projectWebhookPersistence';
 import { areaLog } from '@/utils/log';
 
 const clusterLog = areaLog('cluster');
@@ -72,6 +73,10 @@ const opDetails = (op: Op): Record<string, unknown> => {
             return { apiKeyId: op.apiKey.id, projectId: op.apiKey.projectId, permissions: op.apiKey.permissions };
         case OpType.REVOKE_API_KEY:
             return { apiKeyId: op.apiKeyId };
+        case OpType.UPSERT_PROJECT_WEBHOOK:
+            return { webhookId: op.webhook.id, projectId: op.webhook.projectId, type: op.webhook.type, eventCount: op.webhook.events.length, enabled: op.webhook.enabled };
+        case OpType.DELETE_PROJECT_WEBHOOK:
+            return { webhookId: op.webhookId };
         default:
             return {};
     }
@@ -181,6 +186,12 @@ export const applyOp = async (op: Op): Promise<void> => {
             break;
         case OpType.REVOKE_API_KEY:
             await revokeApiKeyModel(op.apiKeyId, op.revokedAt);
+            break;
+        case OpType.UPSERT_PROJECT_WEBHOOK:
+            await upsertProjectWebhookModel(op.webhook);
+            break;
+        case OpType.DELETE_PROJECT_WEBHOOK:
+            await deleteProjectWebhookModel(op.webhookId);
             break;
         default:
             clusterLog.warn({ action: 'op_unknown', opType: (op as any).type }, 'unknown cluster op ignored');

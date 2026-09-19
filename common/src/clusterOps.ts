@@ -1,4 +1,4 @@
-import { Admin, AllowedGithubEntity, ApiKey, DomainRequest, Incident, IncidentUpdate, PortReservation, Project, ProjectServiceInstance, Secret, TeamConfig, TeamMemberOverride, User } from './types';
+import { Admin, AllowedGithubEntity, ApiKey, DomainRequest, Incident, IncidentUpdate, PortReservation, Project, ProjectServiceInstance, ProjectWebhook, Secret, TeamConfig, TeamMemberOverride, User } from './types';
 
 // Static description of a peer in the cluster. Identity is nodeId; address is the current IP.
 export interface NodeInfo {
@@ -87,6 +87,8 @@ export enum OpType {
     ADD_INCIDENT_UPDATE = 'ADD_INCIDENT_UPDATE',
     UPSERT_API_KEY = 'UPSERT_API_KEY',
     REVOKE_API_KEY = 'REVOKE_API_KEY',
+    UPSERT_PROJECT_WEBHOOK = 'UPSERT_PROJECT_WEBHOOK',
+    DELETE_PROJECT_WEBHOOK = 'DELETE_PROJECT_WEBHOOK',
 }
 
 export type Op =
@@ -114,4 +116,6 @@ export type Op =
     | { type: OpType.DELETE_INCIDENT; incidentId: string }
     | { type: OpType.ADD_INCIDENT_UPDATE; update: IncidentUpdate }
     | { type: OpType.UPSERT_API_KEY; apiKey: ApiKey }
-    | { type: OpType.REVOKE_API_KEY; apiKeyId: string; revokedAt: number };
+    | { type: OpType.REVOKE_API_KEY; apiKeyId: string; revokedAt: number }
+    | { type: OpType.UPSERT_PROJECT_WEBHOOK; webhook: ProjectWebhook }
+    | { type: OpType.DELETE_PROJECT_WEBHOOK; webhookId: string };

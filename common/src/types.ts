@@ -527,6 +527,100 @@ export interface UpdateIncidentBody {
     scheduledEnd?: number;
 }
 
+// === Project webhooks ===
+// Outbound webhooks fire on important project events (deploys, incidents, health, quota). Each
+// webhook targets one delivery type; the type decides how the event is formatted for the receiver.
+// Discord is the only type today, but the backend renders payloads through a per-type formatter
+// registry so new types (Slack, generic JSON, ...) are additive.
+export enum ProjectWebhookType {
+    DISCORD = 'discord',
+}
+
+// The concrete project events a webhook can subscribe to. String values are stable wire identifiers
+// (domain.action) shared by the UI, persistence, and delivered payloads.
+export enum ProjectEventType {
+    DEPLOY_STARTED = 'deploy.started',
+    DEPLOY_SUCCEEDED = 'deploy.succeeded',
+    DEPLOY_FAILED = 'deploy.failed',
+    DEPLOY_CANCELLED = 'deploy.cancelled',
+    INCIDENT_CREATED = 'incident.created',
+    INCIDENT_UPDATED = 'incident.updated',
+    INCIDENT_RESOLVED = 'incident.resolved',
+    HEALTH_DEGRADED = 'health.degraded',
+    HEALTH_DOWN = 'health.down',
+    HEALTH_RECOVERED = 'health.recovered',
+    QUOTA_BREACHED = 'quota.breached',
+}
+
+// Every subscribable event, for UI enumeration.
+export const ALL_PROJECT_EVENT_TYPES: ProjectEventType[] = [
+    ProjectEventType.DEPLOY_STARTED,
+    ProjectEventType.DEPLOY_SUCCEEDED,
+    ProjectEventType.DEPLOY_FAILED,
+    ProjectEventType.DEPLOY_CANCELLED,
+    ProjectEventType.INCIDENT_CREATED,
+    ProjectEventType.INCIDENT_UPDATED,
+    ProjectEventType.INCIDENT_RESOLVED,
+    ProjectEventType.HEALTH_DEGRADED,
+    ProjectEventType.HEALTH_DOWN,
+    ProjectEventType.HEALTH_RECOVERED,
+    ProjectEventType.QUOTA_BREACHED,
+];
+
+// Coarse severity used by formatters to color/style the delivered message.
+export enum ProjectEventSeverity {
+    INFO = 'info',
+    SUCCESS = 'success',
+    WARNING = 'warning',
+    ERROR = 'error',
+}
+
+// A configured outbound webhook on a project. `url` is a delivery secret (anyone holding it can post
+// to the channel), so it is redacted (masked) in API responses.
+export interface ProjectWebhook {
+    id: string;
+    projectId: string;
+    type: ProjectWebhookType;
+    name: string;
+    url: string;
+    events: ProjectEventType[];
+    enabled: boolean;
+    createdBy: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+// The normalized internal event a hook point emits. Formatters turn this into a provider payload, so
+// it is deliberately provider-agnostic (title/description/fields rather than Discord embeds).
+export interface ProjectEvent {
+    type: ProjectEventType;
+    projectId: string;
+    severity: ProjectEventSeverity;
+    title: string;
+    description: string;
+    // Deep link back into NSM for this event (e.g. the deploy/status page), when applicable.
+    url?: string;
+    fields?: { name: string; value: string }[];
+    timestamp: number;
+}
+
+export interface CreateProjectWebhookBody {
+    type: ProjectWebhookType;
+    name: string;
+    url: string;
+    events: ProjectEventType[];
+    enabled?: boolean;
+}
+
+// Partial edit of a webhook. A `url` equal to the masked placeholder (or omitted) leaves the stored
+// URL unchanged, so the UI never needs to round-trip the secret.
+export interface UpdateProjectWebhookBody {
+    name?: string;
+    url?: string;
+    events?: ProjectEventType[];
+    enabled?: boolean;
+}
+
 // === Project API keys ===
 // Fine-grained permissions a project API key can be granted. Only GET_STATUS exists today; this is
 // intentionally an enum so future capabilities (config edits, log access, etc.) can be added.

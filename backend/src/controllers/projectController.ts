@@ -11,6 +11,7 @@ import { removeCertsForDomains } from '@/reconcile/certs';
 import { clearProjectHealth } from './healthController';
 import { clearProjectIncidents } from './incidentController';
 import { clearProjectApiKeys } from './apiKeyController';
+import { clearProjectWebhooks } from './webhookController';
 import { cluster } from '@/cluster/node';
 import { areaLog } from '@/utils/log';
 import { putRepoSecret } from '@/utils/githubApp';
@@ -192,6 +193,7 @@ export const deleteProject = async (projectId: string): Promise<boolean> => {
         await clearProjectHealth(projectId);
         await clearProjectIncidents(projectId);
         await clearProjectApiKeys(projectId);
+        await clearProjectWebhooks(projectId);
         await cluster.propose({ type: OpType.DELETE_PROJECT, projectId });
         // Drop the project's nginx conf before removing its certs, so no conf references a deleted
         // fullchain.pem while nginx reloads.

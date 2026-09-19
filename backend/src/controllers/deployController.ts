@@ -36,6 +36,8 @@ import { config } from '@/config';
 import { DEFAULT_TIMEOUT, NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_PROJECT_ID, NSM_LABEL_PROJECT_INSTANCE_ID, NSM_LABEL_SERVICE_NAME, NSM_LABEL_MANAGED } from '@/constants';
 import { leaderEnsureCerts } from '@/reconcile/certs';
 import { sendDeploymentNotification } from './pushController';
+import { emitProjectEvent } from './webhookController';
+import { buildDeployEvent } from './webhooks/events';
 import { areaLog } from '@/utils/log';
 
 const deployLog = areaLog('deploy');
@@ -284,11 +286,20 @@ export const updateDeploymentLog = async (instanceId: string, status: Deployment
         // Unblock the serial deploy queue: the node has reported this deploy fully done (and, on
         // failure, torn down) so the next queued item may start.
         notifyDeployTerminal(instanceId, status);
+    }
+    // Notify on notable deploy transitions: webhooks for the states buildDeployEvent surfaces
+    // (QUEUED "started" + terminal), and a push only on terminal states (the QUEUED push is sent at
+    // enqueue time). Both are fire-and-forget and never block the reconcile.
+    if (transitioned && (status === DeploymentState.QUEUED || TERMINAL_DEPLOY_STATES.includes(status))) {
         try {
             const project = await getProject(prev!.projectId);
-            if (project) void sendDeploymentNotification(project, status);
+            if (project) {
+                const event = buildDeployEvent(project, status);
+                if (event) void emitProjectEvent(event);
+                if (TERMINAL_DEPLOY_STATES.includes(status)) void sendDeploymentNotification(project, status);
+            }
         } catch (e: any) {
-            deployLog.error({ action: 'push_notification_failed', instanceId, projectId: prev!.projectId, err: e?.message }, 'deployment notification failed');
+            deployLog.error({ action: 'deploy_notification_failed', instanceId, projectId: prev!.projectId, err: e?.message }, 'deployment notification failed');
         }
     }
 };

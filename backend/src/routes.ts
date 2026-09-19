@@ -15,6 +15,7 @@ import { setProjectQuota } from '@/controllers/quotaController';
 import { getProjectHealthSummary } from '@/controllers/healthController';
 import { addIncidentUpdate, createIncident, deleteIncident, getRecentIncidents, listIncidents, updateIncident } from '@/controllers/incidentController';
 import { authenticateApiKey, createApiKey, listApiKeys, revokeApiKey } from '@/controllers/apiKeyController';
+import { createWebhook, deleteWebhook, listWebhooks, testWebhook, updateWebhook } from '@/controllers/webhookController';
 import { ApiKeyPermission } from '@mosaiq/nsm-common/types';
 import { NodeMetricKind } from '@mosaiq/nsm-common/types';
 import { collectDiskUsage } from '@/reconcile/diskUsage';
@@ -1237,6 +1238,71 @@ privateRouter.post(API_ROUTES.POST_REVOKE_API_KEY, async (req, res) => {
         res.status(200).json(undefined);
     } catch (e: any) {
         res.status(400).send(e?.message || 'Failed to revoke API key');
+    }
+});
+
+// === Project webhooks (project settings) ===
+// Managing webhooks is gated on CONFIGURE. Responses redact the webhook URL (a delivery secret).
+// Leader-only (replicated state served from the leader's DB).
+privateRouter.get(API_ROUTES.GET_PROJECT_WEBHOOKS, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_WEBHOOKS];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        res.status(200).json(await listWebhooks(params.projectId));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to list webhooks');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_CREATE_PROJECT_WEBHOOK, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_CREATE_PROJECT_WEBHOOK];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        const body = req.body as API_BODY[API_ROUTES.POST_CREATE_PROJECT_WEBHOOK];
+        res.status(200).json(await createWebhook(params.projectId, body, user.name));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to create webhook');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        const user = await getRequestUser(req);
+        if (!user) return void res.status(401).send('Unauthorized');
+        const body = req.body as API_BODY[API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK];
+        res.status(200).json(await updateWebhook(params.projectId, params.webhookId, body, user.name));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to update webhook');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_DELETE_PROJECT_WEBHOOK, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_DELETE_PROJECT_WEBHOOK];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        await deleteWebhook(params.projectId, params.webhookId);
+        res.status(200).json(undefined);
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to delete webhook');
+    }
+});
+
+privateRouter.post(API_ROUTES.POST_TEST_PROJECT_WEBHOOK, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_TEST_PROJECT_WEBHOOK];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    try {
+        res.status(200).json(await testWebhook(params.projectId, params.webhookId));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to test webhook');
     }
 });
 

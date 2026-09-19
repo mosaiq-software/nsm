@@ -1,4 +1,4 @@
-import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, User } from './types';
+import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, CreateProjectWebhookBody, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, ProjectWebhook, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, UpdateProjectWebhookBody, User } from './types';
 import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
 import { CreatePortReservationBody, PortReservation } from './types';
 
@@ -33,6 +33,7 @@ export enum API_ROUTES {
     GET_PROJECT_HEALTH = '/project/:projectId/health',
     GET_PROJECT_INCIDENTS = '/project/:projectId/incidents',
     GET_PROJECT_API_KEYS = '/project/:projectId/api-keys',
+    GET_PROJECT_WEBHOOKS = '/project/:projectId/webhooks',
     GET_DOMAINS = '/domains',
     GET_DOMAIN_REQUESTS = '/domains/requests',
     GET_DOMAIN_BILLING = '/domains/billing',
@@ -93,6 +94,10 @@ export enum API_ROUTES {
     POST_DELETE_INCIDENT = '/project/:projectId/incidents/:incidentId/delete',
     POST_CREATE_API_KEY = '/project/:projectId/api-keys/create',
     POST_REVOKE_API_KEY = '/project/:projectId/api-keys/:apiKeyId/revoke',
+    POST_CREATE_PROJECT_WEBHOOK = '/project/:projectId/webhooks/create',
+    POST_UPDATE_PROJECT_WEBHOOK = '/project/:projectId/webhooks/:webhookId/update',
+    POST_DELETE_PROJECT_WEBHOOK = '/project/:projectId/webhooks/:webhookId/delete',
+    POST_TEST_PROJECT_WEBHOOK = '/project/:projectId/webhooks/:webhookId/test',
 }
 export interface API_PARAMS {
     //GET
@@ -124,6 +129,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_PROJECT_HEALTH]: { projectId: string };
     [API_ROUTES.GET_PROJECT_INCIDENTS]: { projectId: string };
     [API_ROUTES.GET_PROJECT_API_KEYS]: { projectId: string };
+    [API_ROUTES.GET_PROJECT_WEBHOOKS]: { projectId: string };
     [API_ROUTES.GET_DOMAINS]: {};
     [API_ROUTES.GET_DOMAIN_REQUESTS]: {};
     [API_ROUTES.GET_DOMAIN_BILLING]: {};
@@ -184,6 +190,10 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DELETE_INCIDENT]: { projectId: string; incidentId: string };
     [API_ROUTES.POST_CREATE_API_KEY]: { projectId: string };
     [API_ROUTES.POST_REVOKE_API_KEY]: { projectId: string; apiKeyId: string };
+    [API_ROUTES.POST_CREATE_PROJECT_WEBHOOK]: { projectId: string };
+    [API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK]: { projectId: string; webhookId: string };
+    [API_ROUTES.POST_DELETE_PROJECT_WEBHOOK]: { projectId: string; webhookId: string };
+    [API_ROUTES.POST_TEST_PROJECT_WEBHOOK]: { projectId: string; webhookId: string };
 }
 
 export interface API_BODY {
@@ -217,6 +227,7 @@ export interface API_BODY {
     [API_ROUTES.GET_PROJECT_HEALTH]: undefined;
     [API_ROUTES.GET_PROJECT_INCIDENTS]: undefined;
     [API_ROUTES.GET_PROJECT_API_KEYS]: undefined;
+    [API_ROUTES.GET_PROJECT_WEBHOOKS]: undefined;
     [API_ROUTES.GET_DOMAINS]: undefined;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: undefined;
     [API_ROUTES.GET_DOMAIN_BILLING]: undefined;
@@ -277,6 +288,10 @@ export interface API_BODY {
     [API_ROUTES.POST_DELETE_INCIDENT]: {};
     [API_ROUTES.POST_CREATE_API_KEY]: CreateApiKeyBody;
     [API_ROUTES.POST_REVOKE_API_KEY]: {};
+    [API_ROUTES.POST_CREATE_PROJECT_WEBHOOK]: CreateProjectWebhookBody;
+    [API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK]: UpdateProjectWebhookBody;
+    [API_ROUTES.POST_DELETE_PROJECT_WEBHOOK]: {};
+    [API_ROUTES.POST_TEST_PROJECT_WEBHOOK]: {};
 }
 export interface API_RETURN {
     //GET
@@ -308,6 +323,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_PROJECT_HEALTH]: ProjectHealthSummary | undefined;
     [API_ROUTES.GET_PROJECT_INCIDENTS]: IncidentWithUpdates[];
     [API_ROUTES.GET_PROJECT_API_KEYS]: ApiKeyView[];
+    [API_ROUTES.GET_PROJECT_WEBHOOKS]: ProjectWebhook[];
     [API_ROUTES.GET_DOMAINS]: DnsZone[];
     [API_ROUTES.GET_DOMAIN_REQUESTS]: DomainRequest[];
     [API_ROUTES.GET_DOMAIN_BILLING]: DomainBillingSummary | undefined;
@@ -368,6 +384,10 @@ export interface API_RETURN {
     [API_ROUTES.POST_DELETE_INCIDENT]: undefined;
     [API_ROUTES.POST_CREATE_API_KEY]: CreateApiKeyResult | undefined;
     [API_ROUTES.POST_REVOKE_API_KEY]: undefined;
+    [API_ROUTES.POST_CREATE_PROJECT_WEBHOOK]: ProjectWebhook | undefined;
+    [API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK]: ProjectWebhook | undefined;
+    [API_ROUTES.POST_DELETE_PROJECT_WEBHOOK]: undefined;
+    [API_ROUTES.POST_TEST_PROJECT_WEBHOOK]: { ok: boolean };
 }
 
 export interface API_AUTH {
@@ -401,6 +421,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_PROJECT_HEALTH]: string;
     [API_ROUTES.GET_PROJECT_INCIDENTS]: string;
     [API_ROUTES.GET_PROJECT_API_KEYS]: string;
+    [API_ROUTES.GET_PROJECT_WEBHOOKS]: string;
     [API_ROUTES.GET_DOMAINS]: string;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: string;
     [API_ROUTES.GET_DOMAIN_BILLING]: string;
@@ -461,4 +482,8 @@ export interface API_AUTH {
     [API_ROUTES.POST_DELETE_INCIDENT]: string;
     [API_ROUTES.POST_CREATE_API_KEY]: string;
     [API_ROUTES.POST_REVOKE_API_KEY]: string;
+    [API_ROUTES.POST_CREATE_PROJECT_WEBHOOK]: string;
+    [API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK]: string;
+    [API_ROUTES.POST_DELETE_PROJECT_WEBHOOK]: string;
+    [API_ROUTES.POST_TEST_PROJECT_WEBHOOK]: string;
 }

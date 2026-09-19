@@ -16,6 +16,8 @@ import { getProjectInstancesByProjectIdModel } from '@/persistence/projectInstan
 import { getServiceInstancesByProjectInstanceIdModel } from '@/persistence/serviceInstancePersistence';
 import { deleteHealthSamplesForProjectModel, getLatestSamplesForProjectModel, getSamplesInRangeModel, insertHealthSamplesModel, pruneHealthSamplesModel } from '@/persistence/projectHealthPersistence';
 import { execSafe } from '@/host/exec';
+import { emitProjectEvent } from './webhookController';
+import { buildHealthTransitionEvent } from './webhooks/events';
 import { areaLog } from '@/utils/log';
 
 const healthLog = areaLog('health');
@@ -126,6 +128,23 @@ const mapWithConcurrency = async <T, R>(items: T[], limit: number, fn: (item: T)
     return results;
 };
 
+// Fire a health webhook event when a project's overall status changes. The fresh samples give the
+// new overall; the latest stored samples (read before this tick is inserted) give the previous one.
+// Must be awaited before the bulk insert so it compares against the prior tick, not the new one.
+const detectHealthTransition = async (projectId: string, newSamples: ProjectHealthSample[]): Promise<void> => {
+    try {
+        const next = worstStatus(newSamples.map((s) => s.status));
+        if (next === HealthStatus.UNKNOWN) return;
+        const prevSamples = await getLatestSamplesForProjectModel(projectId);
+        const prev = worstStatus(prevSamples.map((s) => s.status));
+        if (prev === HealthStatus.UNKNOWN || prev === next) return;
+        const event = buildHealthTransitionEvent(projectId, prev, next);
+        if (event) void emitProjectEvent(event);
+    } catch (e: any) {
+        healthLog.warn({ action: 'health_transition_failed', projectId, err: e?.message }, `health transition detection failed for ${projectId}`);
+    }
+};
+
 // Leader cron entry point: sample every project and persist the results.
 export const sampleAllProjects = async (): Promise<void> => {
     const projects = await getAllProjectsModel();
@@ -133,7 +152,9 @@ export const sampleAllProjects = async (): Promise<void> => {
     const batches = await mapWithConcurrency(projects, 8, async (p) => {
         try {
             const nginxConfig = JSON.parse(p.nginxConfigJson || '{"servers":[]}') as ProjectNginxConfig;
-            return await sampleProject(p.id, nginxConfig);
+            const samples = await sampleProject(p.id, nginxConfig);
+            await detectHealthTransition(p.id, samples);
+            return samples;
         } catch (e: any) {
             healthLog.warn({ action: 'sample_project_failed', projectId: p.id, err: e?.message }, `health sample failed for ${p.id}`);
             return [] as ProjectHealthSample[];
