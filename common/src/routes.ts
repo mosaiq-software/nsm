@@ -1,4 +1,5 @@
 import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, ResourceAllocation, Secret, Team, TeamDetail, User } from './types';
+import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -35,6 +36,7 @@ export enum API_ROUTES {
     GET_PUBLIC_IP = '/domains/public-ip',
     GET_DNS_RECORDS = '/domains/:zoneId/records',
     GET_PROJECT_DOMAINS = '/project/:projectId/domains',
+    GET_NODE_CONFIG = '/nodes/:nodeId/config',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -76,6 +78,7 @@ export enum API_ROUTES {
     POST_DNS_RECORD_UPDATE = '/domains/:zoneId/records/:recordId/update',
     POST_DNS_RECORD_DELETE = '/domains/:zoneId/records/:recordId/delete',
     POST_PUBLIC_IP_REFRESH = '/domains/public-ip/refresh',
+    POST_NODE_CONFIG = '/nodes/:nodeId/config/apply',
 }
 export interface API_PARAMS {
     //GET
@@ -111,6 +114,7 @@ export interface API_PARAMS {
     [API_ROUTES.GET_PUBLIC_IP]: {};
     [API_ROUTES.GET_DNS_RECORDS]: { zoneId: string };
     [API_ROUTES.GET_PROJECT_DOMAINS]: { projectId: string };
+    [API_ROUTES.GET_NODE_CONFIG]: { nodeId: string };
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -152,6 +156,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: { zoneId: string; recordId: string };
     [API_ROUTES.POST_DNS_RECORD_DELETE]: { zoneId: string; recordId: string };
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
+    [API_ROUTES.POST_NODE_CONFIG]: { nodeId: string };
 }
 export interface API_BODY {
     // Only POST
@@ -188,6 +193,7 @@ export interface API_BODY {
     [API_ROUTES.GET_PUBLIC_IP]: undefined;
     [API_ROUTES.GET_DNS_RECORDS]: undefined;
     [API_ROUTES.GET_PROJECT_DOMAINS]: undefined;
+    [API_ROUTES.GET_NODE_CONFIG]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -229,6 +235,7 @@ export interface API_BODY {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: Partial<DnsRecord>;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: {};
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
+    [API_ROUTES.POST_NODE_CONFIG]: NodeConfigUpdate;
 }
 export interface API_RETURN {
     //GET
@@ -264,6 +271,7 @@ export interface API_RETURN {
     [API_ROUTES.GET_PUBLIC_IP]: { ip: string | null };
     [API_ROUTES.GET_DNS_RECORDS]: DnsRecord[];
     [API_ROUTES.GET_PROJECT_DOMAINS]: string[];
+    [API_ROUTES.GET_NODE_CONFIG]: NodeConfigValues | undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -305,6 +313,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: DnsRecord | undefined;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: undefined;
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: { ip: string | null; changed: boolean };
+    [API_ROUTES.POST_NODE_CONFIG]: { ok: boolean };
 }
 
 export interface API_AUTH {
@@ -342,6 +351,7 @@ export interface API_AUTH {
     [API_ROUTES.GET_PUBLIC_IP]: string;
     [API_ROUTES.GET_DNS_RECORDS]: string;
     [API_ROUTES.GET_PROJECT_DOMAINS]: string;
+    [API_ROUTES.GET_NODE_CONFIG]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;
@@ -383,4 +393,5 @@ export interface API_AUTH {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: string;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: string;
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: string;
+    [API_ROUTES.POST_NODE_CONFIG]: string;
 }

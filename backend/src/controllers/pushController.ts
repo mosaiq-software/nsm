@@ -307,6 +307,34 @@ const resolveQuotaRecipientGithubIds = async (project: Project): Promise<Set<str
     return ids;
 };
 
+// The set of NSM admin githubIds: stored admins plus the implicit super admin (if they have signed
+// in at least once). Recipients who have never signed in simply resolve to nothing.
+const resolveAdminGithubIds = async (): Promise<Set<string>> => {
+    const ids = new Set<string>();
+    const admins = await getAllAdminsModel();
+    for (const a of admins) ids.add(a.id);
+    const superLogin = process.env.VITE_GITHUB_OAUTH_DEFAULT_USER;
+    if (superLogin) {
+        const su = await getUserByLoginModel(superLogin);
+        if (su) ids.add(su.githubId);
+    }
+    return ids;
+};
+
+// Push a notification to every NSM admin (and the super admin). Leader-only; fire-and-forget: all
+// failures are swallowed and logged so callers never need to guard the call.
+export const sendPushToAdmins = async (title: string, body: string, url = '/nodes'): Promise<void> => {
+    try {
+        if (!cluster.isLeader()) return;
+        const recipients = await resolveAdminGithubIds();
+        const payload = JSON.stringify({ title, body, url, tag: 'nsm-node-config' });
+        const res = await sendPushToGithubIds(recipients, payload);
+        pushLog.info({ action: 'admin_notification_dispatched', title, recipientCount: recipients.size, sentCount: res.sentCount, prunedCount: res.prunedCount }, `dispatched admin notification to ${res.sentCount}/${res.targetCount} subscriber(s)`);
+    } catch (e: any) {
+        pushLog.error({ action: 'admin_notification_failed', title, err: e?.message || String(e) }, 'failed to send admin notification');
+    }
+};
+
 // Push a resource-allocation breach notification to all NSM admins and the project's team members.
 // Leader-only; fire-and-forget (never rejects). Respects each recipient's per-project mute.
 export const sendQuotaBreachNotification = async (project: Project, breached: QuotaBreachInfo[]): Promise<void> => {

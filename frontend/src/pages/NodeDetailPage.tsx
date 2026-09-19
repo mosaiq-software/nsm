@@ -4,9 +4,11 @@ import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeFilesystemUsage, NodeMetricKind, NodeStorageSpec, ObservabilityMetricsResult, ProjectDiskUsage } from '@mosaiq/nsm-common/types';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { MdArrowBack, MdOutlineCameraAlt, MdOutlineRefresh, MdOutlineStar } from 'react-icons/md';
+import { MdArrowBack, MdOutlineCameraAlt, MdOutlineRefresh, MdOutlineSettings, MdOutlineStar } from 'react-icons/md';
 import { useCluster } from '@/contexts/cluster-context';
+import { useMe } from '@/contexts/me-context';
 import { useAPI } from '@/utils/api';
+import { NodeConfigModal } from '@/components/NodeConfigModal';
 import { formatAxisTime, formatBytes, formatBytesPerSec, formatPercent01 } from '@/utils/format';
 
 const TIME_RANGES: { label: string; ms: number }[] = [
@@ -199,8 +201,10 @@ const NodeDetailPage = () => {
     const params = useParams();
     const nodeId = params.nodeId as string;
     const clusterCtx = useCluster();
+    const meCtx = useMe();
     const api = useAPI();
 
+    const [configOpen, setConfigOpen] = useState(false);
     const [rangeMs, setRangeMs] = useState<number>(TIME_RANGES[1].ms);
     const [metrics, setMetrics] = useState<Partial<Record<NodeMetricKind, ObservabilityMetricsResult>>>({});
     const [storage, setStorage] = useState<NodeStorageSpec | null>(null);
@@ -240,6 +244,14 @@ const NodeDetailPage = () => {
         const interval = setInterval(refresh, 30000);
         return () => clearInterval(interval);
     }, [refresh]);
+
+    // Re-verify admin against a fresh /me before opening the editor (the modal, backend route, and
+    // node RPC all re-check too; this is the first of the layered checks).
+    const openConfig = async () => {
+        await meCtx.refresh();
+        if (!meCtx.isAdmin) return;
+        setConfigOpen(true);
+    };
 
     const takeSnapshot = async () => {
         setSnapshotting(true);
@@ -341,6 +353,24 @@ const NodeDetailPage = () => {
                     <MetricChart key={def.kind} def={def} result={metrics[def.kind]} rangeMs={rangeMs} />
                 ))}
             </SimpleGrid>
+
+            {meCtx.isAdmin && (
+                <Card withBorder mt="md">
+                    <Group justify="space-between" align="center" wrap="nowrap">
+                        <Stack gap={2}>
+                            <Title order={4}>Configuration</Title>
+                            <Text size="sm" c="dimmed">
+                                Edit this node's environment variables. Saving rewrites the node's nsm.env and restarts the daemon to apply the changes.
+                            </Text>
+                        </Stack>
+                        <Button leftSection={<MdOutlineSettings />} variant="light" onClick={openConfig}>
+                            Edit configuration
+                        </Button>
+                    </Group>
+                </Card>
+            )}
+
+            {configOpen && <NodeConfigModal nodeId={nodeId} isLeader={!!node?.isLeader} isAdmin={meCtx.isAdmin} onClose={() => setConfigOpen(false)} />}
 
             <Group justify="space-between" align="center" mt="md">
                 <Title order={3}>Storage</Title>

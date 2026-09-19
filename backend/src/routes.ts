@@ -20,6 +20,7 @@ import { Capability } from '@mosaiq/nsm-common/types';
 import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requireCreateProjectForOwner, requireOwnerInstalledForProject, requireProjectCapability, requireSuperAdmin, requireTeamCapability, requireTeamManage } from '@/controllers/authz';
 import { createRecord, deleteRecord, getPublicIp, listDomains, listRecords, refreshPublicIp, updateRecord } from '@/controllers/dnsController';
 import { assignZone, billingSummary, checkDomains, createRequest, decideRequest, deleteDomain, listProjectDomains, listRequests, searchDomains, setAllocations } from '@/controllers/domainsController';
+import { applyLocalConfig, applyNodeConfig, readLocalConfig, readNodeConfig } from '@/controllers/nodeConfigController';
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
 import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
 import { removeManagedCd, setupManagedCd } from '@/controllers/cicdController';
@@ -889,6 +890,34 @@ privateRouter.post(API_ROUTES.POST_PUBLIC_IP_REFRESH, async (req, res) => {
     }
 });
 
+// Admin: read a node's editable env config (secrets are masked to their length, never sent).
+privateRouter.get(API_ROUTES.GET_NODE_CONFIG, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_NODE_CONFIG];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    try {
+        res.status(200).json(await readNodeConfig(params.nodeId));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to read node config');
+    }
+});
+
+// Admin: apply an env config change to a node and restart it. Admin is re-verified here (belt and
+// suspenders on top of the router auth middleware) before anything is written to disk.
+privateRouter.post(API_ROUTES.POST_NODE_CONFIG, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_NODE_CONFIG];
+    const body = req.body as API_BODY[API_ROUTES.POST_NODE_CONFIG];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    const user = await getRequestUser(req);
+    if (!user) return void res.status(401).send('Unauthorized');
+    try {
+        res.status(200).json(await applyNodeConfig(params.nodeId, body, user.name));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to apply node config');
+    }
+});
+
 // Admin: DNS records for a domain (from the Cloudflare-authoritative cache).
 privateRouter.get(API_ROUTES.GET_DNS_RECORDS, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.GET_DNS_RECORDS];
@@ -1179,6 +1208,36 @@ internalRouter.post('/node/cancel-deploy', requireClusterSecret, async (req, res
     const { projectId } = req.body || {};
     if (projectId) cancelLocalDeployment(String(projectId));
     res.status(200).json(undefined);
+});
+
+// Leader reads this node's editable env config (secrets masked to length). Cluster-secret gated;
+// runs on the target node so its own env file is the source. POST (with empty body) to match the
+// postToNode RPC client.
+internalRouter.post('/node/config-values', requireClusterSecret, async (_req, res) => {
+    try {
+        res.status(200).json(readLocalConfig());
+    } catch (e: any) {
+        routeLog.error({ action: 'node_config_read_error', err: e?.message }, 'failed to read local node config');
+        res.status(500).send(e?.message);
+    }
+});
+
+// Leader instructs this node to write its env file and restart. Validated locally, then the restart
+// is scheduled after the response flushes.
+internalRouter.post('/node/config-apply', requireClusterSecret, async (req, res) => {
+    try {
+        applyLocalConfig(req.body);
+        res.status(200).json({ ok: true });
+    } catch (e: any) {
+        routeLog.error({ action: 'node_config_apply_error', err: e?.message }, 'failed to apply local node config');
+        res.status(400).send(e?.message || 'Failed to apply config');
+    }
+});
+
+// Lightweight liveness probe used by the leader to confirm a node restarted. Reports process uptime
+// so a restart is detectable as an uptime reset.
+internalRouter.post('/node/ping', requireClusterSecret, async (_req, res) => {
+    res.status(200).json({ ok: true, version: config.commit || config.version, uptimeMs: Math.round(process.uptime() * 1000) });
 });
 
 // CI/CD sets the desired NSM version (leader records it; rollout is orchestrated).
