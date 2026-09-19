@@ -6,7 +6,7 @@ import { getDiscordMessageRefByKeyModel } from '@/persistence/discordMessageRefP
 import { deleteScenarioMessage, editScenarioMessage, sendScenarioMessage } from '@/controllers/webhookController';
 import { NotificationMessage } from '@/controllers/webhooks/registry';
 import { cluster } from '@/cluster/node';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const notifLog = areaLog('github-notifications');
 
@@ -241,6 +241,6 @@ export const dispatchGithubEvent = async (project: Project, eventType: string, p
         const failed = results.filter((r) => r.status === 'rejected').length;
         notifLog.info({ action: 'github_notification_dispatched', projectId: project.id, scenario: evt.scenario, subEvent: evt.subEvent, targetCount: jobs.length, failed }, `dispatched ${evt.scenario}/${evt.subEvent} to ${jobs.length} webhook(s) for ${project.id}`);
     } catch (e: any) {
-        notifLog.error({ action: 'github_notification_failed', projectId: project.id, eventType, err: e?.message || String(e) }, 'failed to dispatch GitHub notification');
+        notifLog.error({ action: 'github_notification_failed', projectId: project.id, eventType, err: serializeError(e) }, 'failed to dispatch GitHub notification');
     }
 };

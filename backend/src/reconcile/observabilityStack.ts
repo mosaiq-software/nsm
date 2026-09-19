@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import { config } from '@/config';
 import { execSafe, getPrimaryIp } from '@/host/exec';
 import { cluster } from '@/cluster/node';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const obsLog = areaLog('observability');
 
@@ -30,7 +30,7 @@ export const ensureObservabilityStack = async (): Promise<void> => {
         if (code !== 0) obsLog.error({ action: 'obs_stack_failed', exitCode: code, out }, 'failed to start observability stack');
         else obsLog.info({ action: 'obs_stack_ready', composePath }, 'observability stack ensured');
     } catch (e: any) {
-        obsLog.error({ action: 'obs_stack_error', err: e?.message }, 'ensureObservabilityStack error');
+        obsLog.error({ action: 'obs_stack_error', err: serializeError(e) }, 'ensureObservabilityStack error');
     }
 };
 
@@ -51,6 +51,6 @@ export const ensureAgentStack = async (): Promise<void> => {
         if (code !== 0) obsLog.error({ action: 'agent_stack_failed', pushUrl, exitCode: code, out }, 'failed to start per-node agent stack');
         else obsLog.info({ action: 'agent_stack_ready', pushUrl }, 'per-node agent stack ensured');
     } catch (e: any) {
-        obsLog.error({ action: 'agent_stack_error', err: e?.message }, 'ensureAgentStack error');
+        obsLog.error({ action: 'agent_stack_error', err: serializeError(e) }, 'ensureAgentStack error');
     }
 };

@@ -13,7 +13,7 @@ const NsmLogsPage = () => {
                     Logs are served by the leader. No leader is currently reachable.
                 </Alert>
             )}
-            <LogViewer selector={{ source: 'nsmd' }} facetFields={['level', 'area', 'action', 'nodeId']} defaultColumns={['ts', 'level', 'area', 'action', 'msg']} />
+            <LogViewer selector={{ source: 'nsmd' }} facetFields={['service', 'level', 'area', 'action', 'nodeId']} defaultColumns={['ts', 'level', 'service', 'area', 'action', 'msg']} />
         </Stack>
     );
 };

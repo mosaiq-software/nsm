@@ -14,7 +14,7 @@ import { clearProjectApiKeys } from './apiKeyController';
 import { clearProjectWebhooks } from './webhookController';
 import { cluster } from '@/cluster/node';
 import { sha256Hex, hashEquals } from '@/utils/hash';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const projectLog = areaLog('project');
 
@@ -196,7 +196,7 @@ export const deleteProject = async (projectId: string): Promise<boolean> => {
         projectLog.info({ action: 'project_deleted', projectId }, `project ${projectId} deleted`);
         return true;
     } catch (error: any) {
-        projectLog.error({ action: 'project_delete_failed', projectId, err: error?.message }, `failed to delete project ${projectId}`);
+        projectLog.error({ action: 'project_delete_failed', projectId, err: serializeError(error) }, `failed to delete project ${projectId}`);
         return false;
     }
 };

@@ -5,7 +5,7 @@ import YAML from 'yaml';
 import { DockerCompose } from '@mosaiq/nsm-common/dockerComposeTypes';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { getCloneToken, withCloneCredentials } from '@/utils/githubApp';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const repoLog = areaLog('repository');
 
@@ -39,7 +39,7 @@ const getEnvFileFromDir = async (dir: string): Promise<string> => {
         const files = await fs.readdir(dir);
         envFile = files.filter((file) => file.startsWith('.env'))[0] || '';
     } catch (error: any) {
-        repoLog.warn({ action: 'env_dir_read_failed', dir, err: error?.message }, 'error reading repo directory for .env');
+        repoLog.warn({ action: 'env_dir_read_failed', dir, err: serializeError(error) }, 'error reading repo directory for .env');
         return '';
     }
     if (!envFile) {
@@ -50,7 +50,7 @@ const getEnvFileFromDir = async (dir: string): Promise<string> => {
         const envFileContents = await fs.readFile(`${dir}/${envFile}`, 'utf-8');
         return envFileContents;
     } catch (error: any) {
-        repoLog.warn({ action: 'env_read_failed', dir, envFile, err: error?.message }, 'error reading .env file');
+        repoLog.warn({ action: 'env_read_failed', dir, envFile, err: serializeError(error) }, 'error reading .env file');
         return '';
     }
 };
@@ -172,7 +172,7 @@ const getJsProcessEnvVarsFromDir = async (dir: string): Promise<string[]> => {
                 }
             }
         } catch (error: any) {
-            repoLog.debug({ action: 'js_file_read_failed', file, err: error?.message }, 'error reading JS file for env vars');
+            repoLog.debug({ action: 'js_file_read_failed', file, err: serializeError(error) }, 'error reading JS file for env vars');
         }
     }
     return Array.from(envVars);
@@ -182,7 +182,7 @@ const deleteSandboxRepo = async (projectId: string): Promise<void> => {
     try {
         await fs.rm(`${config.repoSandboxPath}/${projectId}`, { recursive: true, force: true });
     } catch (e: any) {
-        repoLog.warn({ action: 'sandbox_delete_failed', projectId, err: e?.message }, 'error removing sandbox repo directory');
+        repoLog.warn({ action: 'sandbox_delete_failed', projectId, err: serializeError(e) }, 'error removing sandbox repo directory');
         return;
     }
 };
@@ -236,7 +236,7 @@ const cloneRepository = async (projectId: string, repoOwner: string, repoName: s
         repoLog.info({ action: 'sandbox_clone_completed', projectId, method: 'ssh' }, `cloned ${repoOwner}/${repoName}`);
         return;
     } catch (e: any) {
-        repoLog.error({ action: 'sandbox_clone_failed', projectId, repoOwner, repoName, err: e?.message }, 'error cloning repository');
+        repoLog.error({ action: 'sandbox_clone_failed', projectId, repoOwner, repoName, err: serializeError(e) }, 'error cloning repository');
         throw e;
     }
 };

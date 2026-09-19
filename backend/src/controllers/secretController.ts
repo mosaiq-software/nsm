@@ -5,7 +5,7 @@ import { OpType, PortPlanEntry } from '@mosaiq/nsm-common/clusterOps';
 import { getServicesForProject, RepoData } from '@/utils/repositoryUtils';
 import { getProject, updateProject, updateProjectNoDirty } from './projectController';
 import { cluster } from '@/cluster/node';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const secretLog = areaLog('secret');
 
@@ -163,7 +163,7 @@ const fillSecret = (secret: Secret, project: Project, requestedPorts: PortPlanEn
                 return secret;
         }
     } catch (error: any) {
-        secretLog.debug({ action: 'dynamic_var_parse_failed', projectId: project.id, secretName: secret.secretName, err: error?.message }, 'failed to resolve dynamic variable');
+        secretLog.debug({ action: 'dynamic_var_parse_failed', projectId: project.id, secretName: secret.secretName, err: serializeError(error) }, 'failed to resolve dynamic variable');
         return secret;
     }
 };

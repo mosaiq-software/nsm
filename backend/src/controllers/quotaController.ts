@@ -6,7 +6,7 @@ import { emitProjectEvent } from './webhookController';
 import { buildQuotaBreachEvent } from './webhooks/events';
 import { clearQuotaBreachStateModel, getQuotaBreachStateModel, setQuotaBreachStateModel } from '@/persistence/quotaBreachPersistence';
 import { cluster } from '@/cluster/node';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const quotaLog = areaLog('quota');
 
@@ -94,10 +94,10 @@ export const checkAllQuotas = async (): Promise<void> => {
                     await setQuotaBreachStateModel(project.id, breachedResources, prior?.lastNotifiedAt ?? Date.now());
                 }
             } catch (e: any) {
-                quotaLog.warn({ action: 'quota_check_failed', projectId: project.id, err: e?.message || String(e) }, `failed to check quota for ${project.id}`);
+                quotaLog.warn({ action: 'quota_check_failed', projectId: project.id, err: serializeError(e) }, `failed to check quota for ${project.id}`);
             }
         }
     } catch (e: any) {
-        quotaLog.error({ action: 'quota_sweep_failed', err: e?.message || String(e) }, 'failed to run quota sweep');
+        quotaLog.error({ action: 'quota_sweep_failed', err: serializeError(e) }, 'failed to run quota sweep');
     }
 };

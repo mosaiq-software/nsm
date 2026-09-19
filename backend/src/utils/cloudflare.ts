@@ -1,5 +1,5 @@
 import { config, isCloudflareConfigured, isCloudflareRegistrarConfigured } from '@/config';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const cfLog = areaLog('cloudflare');
 
@@ -242,7 +242,7 @@ export const getRegistrarDomain = async (domain: string): Promise<CfRegistrarDom
         const res = await cfRequest<any>(`/accounts/${acct()}/registrar/domains/${encodeURIComponent(domain)}`, { expectEnvelope: false });
         return (res?.result || res) as CfRegistrarDomain;
     } catch (e: any) {
-        cfLog.warn({ action: 'get_registrar_domain_failed', domain, err: e?.message }, `failed to read registrar domain ${domain}`);
+        cfLog.warn({ action: 'get_registrar_domain_failed', domain, err: serializeError(e) }, `failed to read registrar domain ${domain}`);
         return null;
     }
 };

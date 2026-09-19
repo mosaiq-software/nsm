@@ -4,7 +4,7 @@ import { getMeta, setMeta } from '@/persistence/clusterMetaPersistence';
 import { getAllDynamicRecordsModel } from '@/persistence/dnsRecordPersistence';
 import { updateDnsRecord } from '@/utils/cloudflare';
 import { syncZoneRecords } from '@/reconcile/cloudflareSync';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const ipLog = areaLog('cloudflare');
 
@@ -81,7 +81,7 @@ export const checkPublicIp = async (): Promise<PublicIpCheckResult> => {
                 touchedZones.add(rec.zoneId);
                 ipLog.info({ action: 'dynamic_record_updated', recordId: rec.id, name: rec.name, type: rec.type, ip: target }, `updated dynamic ${rec.type} ${rec.name} -> ${target}`);
             } catch (e: any) {
-                ipLog.error({ action: 'dynamic_record_update_failed', recordId: rec.id, err: e?.message }, `failed to update dynamic record ${rec.name}`);
+                ipLog.error({ action: 'dynamic_record_update_failed', recordId: rec.id, err: serializeError(e) }, `failed to update dynamic record ${rec.name}`);
             }
         }
 
@@ -90,7 +90,7 @@ export const checkPublicIp = async (): Promise<PublicIpCheckResult> => {
         for (const zoneId of touchedZones) await syncZoneRecords(zoneId);
         return { ip: ipv4 || lastV4, changed: touchedZones.size > 0 };
     } catch (e: any) {
-        ipLog.error({ action: 'public_ip_check_failed', err: e?.message }, 'public IP check failed');
+        ipLog.error({ action: 'public_ip_check_failed', err: serializeError(e) }, 'public IP check failed');
         return { ip: null, changed: false };
     }
 };

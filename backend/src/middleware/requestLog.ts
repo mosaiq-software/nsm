@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { RequestHandler } from 'express';
-import { areaLog } from '@/utils/log';
+import { areaLog, runWithRequestContext } from '@/utils/log';
 
 const httpLog = areaLog('http');
 
@@ -27,5 +27,7 @@ export const requestLogger: RequestHandler = (req, res, next) => {
             `${req.method} ${req.path} ${res.statusCode}`
         );
     });
-    next();
+    // Run the rest of the request inside the reqId context so every log line emitted while handling
+    // this request (including in awaited async work) is correlated via the pino mixin.
+    runWithRequestContext({ reqId }, () => next());
 };

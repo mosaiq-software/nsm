@@ -8,7 +8,7 @@ import { projectEventUrl } from '@/controllers/webhooks/events';
 import { ensureGithubWebhook, removeGithubWebhookIfUnused } from '@/controllers/githubWebhookProvisioning';
 import { isGithubAppConfigured } from '@/config';
 import { cluster } from '@/cluster/node';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const webhookLog = areaLog('webhooks');
 
@@ -88,7 +88,7 @@ export const createWebhook = async (projectId: string, body: CreateProjectWebhoo
     await cluster.propose({ type: OpType.UPSERT_PROJECT_WEBHOOK, webhook });
     // Any GitHub scenario subscription needs the shared GitHub webhook to be provisioned.
     if (githubScenarios.length && isGithubAppConfigured()) {
-        await ensureGithubWebhook(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_ensure_github_failed', projectId, err: e?.message }, `failed to ensure GitHub webhook for ${projectId}`));
+        await ensureGithubWebhook(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_ensure_github_failed', projectId, err: serializeError(e) }, `failed to ensure GitHub webhook for ${projectId}`));
     }
     webhookLog.info({ action: 'webhook_created', projectId, webhookId: webhook.id, type: webhook.type, eventCount: events.length, scenarioCount: githubScenarios.length }, `webhook created for ${projectId}`);
     return toMaskedView(webhook);
@@ -123,8 +123,8 @@ export const updateWebhook = async (projectId: string, webhookId: string, body: 
     // Reconcile the shared GitHub webhook: provision it if scenarios are now configured, or remove it
     // if this edit dropped the last consumer.
     if (isGithubAppConfigured()) {
-        if (githubScenarios.length) await ensureGithubWebhook(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_ensure_github_failed', projectId, err: e?.message }, `failed to ensure GitHub webhook for ${projectId}`));
-        else await removeGithubWebhookIfUnused(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_remove_github_failed', projectId, err: e?.message }, `failed to remove GitHub webhook for ${projectId}`));
+        if (githubScenarios.length) await ensureGithubWebhook(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_ensure_github_failed', projectId, err: serializeError(e) }, `failed to ensure GitHub webhook for ${projectId}`));
+        else await removeGithubWebhookIfUnused(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_remove_github_failed', projectId, err: serializeError(e) }, `failed to remove GitHub webhook for ${projectId}`));
     }
     webhookLog.info({ action: 'webhook_updated', projectId, webhookId, eventCount: events.length, scenarioCount: githubScenarios.length, enabled: updated.enabled }, `webhook ${webhookId} updated`);
     return toMaskedView(updated);
@@ -136,7 +136,7 @@ export const deleteWebhook = async (projectId: string, webhookId: string): Promi
     await cluster.propose({ type: OpType.DELETE_PROJECT_WEBHOOK, webhookId });
     // Best-effort cleanup of tracked Discord message refs for this webhook (leader-local).
     await deleteDiscordMessageRefsForWebhookModel(webhookId).catch(() => {});
-    if (isGithubAppConfigured()) await removeGithubWebhookIfUnused(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_remove_github_failed', projectId, err: e?.message }, `failed to remove GitHub webhook for ${projectId}`));
+    if (isGithubAppConfigured()) await removeGithubWebhookIfUnused(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_remove_github_failed', projectId, err: serializeError(e) }, `failed to remove GitHub webhook for ${projectId}`));
     webhookLog.info({ action: 'webhook_deleted', projectId, webhookId }, `webhook ${webhookId} deleted`);
 };
 
@@ -184,7 +184,7 @@ const deliverToWebhook = async (webhook: ProjectWebhook, event: ProjectEvent): P
                 await sleep(1000);
                 continue;
             }
-            webhookLog.warn({ action: 'webhook_delivery_error', webhookId: webhook.id, projectId: webhook.projectId, type: webhook.type, err: e?.message || String(e) }, `webhook ${webhook.id} delivery errored`);
+            webhookLog.warn({ action: 'webhook_delivery_error', webhookId: webhook.id, projectId: webhook.projectId, type: webhook.type, err: serializeError(e) }, `webhook ${webhook.id} delivery errored`);
             return false;
         }
     }
@@ -203,7 +203,7 @@ export const emitProjectEvent = async (event: ProjectEvent): Promise<void> => {
         const sentCount = results.filter((r) => r.status === 'fulfilled' && r.value).length;
         webhookLog.info({ action: 'webhook_event_dispatched', projectId: event.projectId, event: event.type, targetCount: targets.length, sentCount }, `dispatched ${event.type} to ${sentCount}/${targets.length} webhook(s) for ${event.projectId}`);
     } catch (e: any) {
-        webhookLog.error({ action: 'webhook_dispatch_failed', projectId: event.projectId, event: event.type, err: e?.message || String(e) }, 'failed to dispatch project event');
+        webhookLog.error({ action: 'webhook_dispatch_failed', projectId: event.projectId, event: event.type, err: serializeError(e) }, 'failed to dispatch project event');
     }
 };
 
@@ -249,7 +249,7 @@ const deliverNotificationWithRetry = async (webhook: ProjectWebhook, url: string
                 await sleep(1000);
                 continue;
             }
-            webhookLog.warn({ action: 'notification_delivery_error', webhookId: webhook.id, projectId: webhook.projectId, method, err: e?.message || String(e) }, `notification ${method} errored`);
+            webhookLog.warn({ action: 'notification_delivery_error', webhookId: webhook.id, projectId: webhook.projectId, method, err: serializeError(e) }, `notification ${method} errored`);
             return null;
         }
     }

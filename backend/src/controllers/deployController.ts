@@ -38,7 +38,7 @@ import { leaderEnsureCerts } from '@/reconcile/certs';
 import { sendDeploymentNotification } from './pushController';
 import { emitProjectEvent } from './webhookController';
 import { buildDeployEvent } from './webhooks/events';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const deployLog = areaLog('deploy');
 
@@ -258,7 +258,7 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
         // Kick off cert issuance for any new domains (leader-side, best effort).
         void leaderEnsureCerts();
     } catch (error: any) {
-        deployLog.error({ action: 'deploy_failed', projectId, instanceId, err: error?.message }, `deploy failed for ${projectId}`);
+        deployLog.error({ action: 'deploy_failed', projectId, instanceId, err: serializeError(error) }, `deploy failed for ${projectId}`);
         if (instanceId) await updateDeploymentLog(instanceId, DeploymentState.FAILED, `Error deploying project: ${error.message}\n`);
     }
     return instanceId;
@@ -299,7 +299,7 @@ export const updateDeploymentLog = async (instanceId: string, status: Deployment
                 if (TERMINAL_DEPLOY_STATES.includes(status)) void sendDeploymentNotification(project, status);
             }
         } catch (e: any) {
-            deployLog.error({ action: 'deploy_notification_failed', instanceId, projectId: prev!.projectId, err: e?.message }, 'deployment notification failed');
+            deployLog.error({ action: 'deploy_notification_failed', instanceId, projectId: prev!.projectId, err: serializeError(e) }, 'deployment notification failed');
         }
     }
 };

@@ -12,7 +12,7 @@ import { refreshInternalHosts } from './internalDns';
 import { regeneratePromTargets } from './promTargets';
 import { clearLocalGeneration, getLocalGeneration, getLiveGenerations, getReadyGeneration, listLocalProjects, removeLiveGeneration, setLocalGeneration } from './state';
 import { reconcileDuration, errorsTotal } from '@/utils/metrics';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const reconcileLog = areaLog('reconcile');
 
@@ -43,7 +43,7 @@ const scheduleDrain = (projectId: string, activeGeneration: number): void => {
                     await removeLiveGeneration(projectId, g);
                     reconcileLog.info({ action: 'generation_drained', projectId, generation: g }, `drained ${projectId} generation ${g}`);
                 } catch (e: any) {
-                    reconcileLog.error({ action: 'drain_failed', projectId, generation: g, err: e?.message }, `failed to drain ${projectId} generation ${g}`);
+                    reconcileLog.error({ action: 'drain_failed', projectId, generation: g, err: serializeError(e) }, `failed to drain ${projectId} generation ${g}`);
                 } finally {
                     drainScheduled.delete(key);
                 }
@@ -138,7 +138,7 @@ export const reconcileTick = async (): Promise<void> => {
             await regeneratePromTargets();
         }
     } catch (e: any) {
-        reconcileLog.error({ action: 'tick_error', err: e?.message }, 'reconcile tick error');
+        reconcileLog.error({ action: 'tick_error', err: serializeError(e) }, 'reconcile tick error');
         errorsTotal.inc({ area: 'reconcile' });
     } finally {
         endTimer();

@@ -7,7 +7,7 @@ import { sendDeploymentNotification } from './pushController';
 import { createProjectInstanceModel, getAllActiveProjectInstancesModel } from '@/persistence/projectInstancePersistence';
 import { config } from '@/config';
 import { DEFAULT_TIMEOUT } from '@/constants';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const queueLog = areaLog('deployQueue');
 
@@ -106,7 +106,7 @@ const drainQueue = async (): Promise<void> => {
                     // deployProject already records FAILED on its own errors; this is a backstop for
                     // anything thrown before that (e.g. project vanished between enqueue and drain).
                     // The FAILED transition resolves the completion waiter below.
-                    queueLog.error({ action: 'deploy_drain_failed', projectId: entry.projectId, instanceId: entry.instanceId, err: error?.message }, `deploy drain failed for ${entry.projectId}`);
+                    queueLog.error({ action: 'deploy_drain_failed', projectId: entry.projectId, instanceId: entry.instanceId, err: serializeError(error) }, `deploy drain failed for ${entry.projectId}`);
                     await updateDeploymentLog(entry.instanceId, DeploymentState.FAILED, `Deploy failed: ${error?.message}\n`).catch(() => {});
                 }
                 // Block until the owning node reports the deploy fully done (DEPLOYED) or failed/

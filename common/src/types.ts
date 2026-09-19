@@ -1079,17 +1079,21 @@ export interface DomainAllocationResult {
     blockedBy?: { projectId: string; ownerLogin: string }[];
 }
 
-export enum LogLevel {
-    ERROR = 'error',
-    WARN = 'warn',
-    INFO = 'info',
-    DEBUG = 'debug',
-}
+export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error';
 
-export interface LogMessage {
-    time: number;
-    lvl: LogLevel;
+// A structured log line produced by the frontend and shipped to the leader for ingestion. The
+// backend stamps `service: 'client'` and the authenticated user, then writes it through pino so
+// client-side logs land in Loki alongside server logs (see POST_CLIENT_LOGS).
+export interface ClientLogEntry {
+    ts: number; // client epoch millis
+    level: ClientLogLevel;
+    area: string; // subsystem tag, mirrors backend areaLog (e.g. 'api', 'push', 'window')
     msg: string;
+    err?: unknown; // serialized error shape { message, name, stack, ... } when present
+    url?: string; // location.href at emit time
+    userAgent?: string;
+    appVersion?: string;
+    fields?: Record<string, unknown>; // arbitrary extra context
 }
 
 // === Observability query results (proxied from Loki / Prometheus by the leader) ===

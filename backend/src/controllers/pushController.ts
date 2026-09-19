@@ -8,7 +8,7 @@ import { getMutingGithubIdsForProjectModel, muteProjectModel, unmuteProjectModel
 import { getEffectiveCapabilitiesForProject, listOrgMembersForTeam, resolveTeamForProject } from '@/controllers/authz';
 import { getAllAdminsModel } from '@/persistence/adminPersistence';
 import { getMeta, setMeta } from '@/persistence/clusterMetaPersistence';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const pushLog = areaLog('push');
 
@@ -35,7 +35,7 @@ const applyVapidDetails = (): void => {
     try {
         webpush.setVapidDetails(config.vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
     } catch (e: any) {
-        pushLog.error({ action: 'vapid_apply_failed', err: e?.message || String(e) }, 'failed to apply VAPID details');
+        pushLog.error({ action: 'vapid_apply_failed', err: serializeError(e) }, 'failed to apply VAPID details');
     }
 };
 
@@ -77,7 +77,7 @@ export const initWebPush = async (): Promise<void> => {
         await ensureVapidKeys();
         pushLog.info({ action: 'webpush_initialized' }, 'web push initialized');
     } catch (e: any) {
-        pushLog.error({ action: 'webpush_init_failed', err: e?.message || String(e) }, 'failed to initialize VAPID keys');
+        pushLog.error({ action: 'webpush_init_failed', err: serializeError(e) }, 'failed to initialize VAPID keys');
     }
 };
 
@@ -194,7 +194,7 @@ export const sendPushToGithubIds = async (
                     prunedCount++;
                     pushLog.debug({ action: 'subscription_pruned', endpoint: truncEndpoint(sub.endpoint), statusCode: status }, 'pruned stale push subscription');
                 } else {
-                    pushLog.error({ action: 'notification_send_failed', endpoint: truncEndpoint(sub.endpoint), err: status || e?.message || String(e) }, 'failed to send notification');
+                    pushLog.error({ action: 'notification_send_failed', endpoint: truncEndpoint(sub.endpoint), err: serializeError(e) }, 'failed to send notification');
                 }
             }
         })
@@ -258,7 +258,7 @@ export const sendDeploymentNotification = async (project: Project, state: Deploy
             `dispatched ${state} notification for ${project.id} to ${res.sentCount}/${res.targetCount} subscriber(s)`
         );
     } catch (e: any) {
-        pushLog.error({ action: 'notification_dispatch_failed', projectId: project.id, state, err: e?.message || String(e) }, 'failed to send deployment notification');
+        pushLog.error({ action: 'notification_dispatch_failed', projectId: project.id, state, err: serializeError(e) }, 'failed to send deployment notification');
     }
 };
 
@@ -335,7 +335,7 @@ export const sendPushToAdmins = async (title: string, body: string, url = '/node
         const res = await sendPushToGithubIds(recipients, payload);
         pushLog.info({ action: 'admin_notification_dispatched', title, recipientCount: recipients.size, sentCount: res.sentCount, prunedCount: res.prunedCount }, `dispatched admin notification to ${res.sentCount}/${res.targetCount} subscriber(s)`);
     } catch (e: any) {
-        pushLog.error({ action: 'admin_notification_failed', title, err: e?.message || String(e) }, 'failed to send admin notification');
+        pushLog.error({ action: 'admin_notification_failed', title, err: serializeError(e) }, 'failed to send admin notification');
     }
 };
 
@@ -360,6 +360,6 @@ export const sendQuotaBreachNotification = async (project: Project, breached: Qu
             `dispatched quota breach notification for ${project.id} to ${res.sentCount}/${res.targetCount} subscriber(s)`
         );
     } catch (e: any) {
-        pushLog.error({ action: 'quota_notification_dispatch_failed', projectId: project.id, err: e?.message || String(e) }, 'failed to send quota breach notification');
+        pushLog.error({ action: 'quota_notification_dispatch_failed', projectId: project.id, err: serializeError(e) }, 'failed to send quota breach notification');
     }
 };

@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { getGithubLoginUrl } from '@/utils/auth';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { rawApiPostNoHook } from '@/utils/api';
+import { logger, setLogAuthToken } from '@/utils/logger';
 
 type UserContextType = {
     user: User | null;
@@ -37,6 +38,7 @@ const UserProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
 
     const signOut = async () => {
         setUser(null);
+        setLogAuthToken(undefined);
         const storedToken = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY);
         if (!storedToken) return;
         try {
@@ -44,7 +46,7 @@ const UserProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
             localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
             window.location.href = '/';
         } catch (error) {
-            console.error('Failed to sign out:', error);
+            logger.error('auth', 'failed to sign out', { err: error });
         }
     };
 
@@ -54,13 +56,15 @@ const UserProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
             const res = await rawApiPostNoHook(API_ROUTES.POST_GITHUB_LOGIN, { token }, {}, token);
             if (res) {
                 setUser(res);
+                setLogAuthToken(token);
             } else {
                 rawApiPostNoHook(API_ROUTES.POST_GITHUB_LOGOUT, { token }, {}, token);
                 setUser(null);
+                setLogAuthToken(undefined);
                 localStorage.removeItem(LOCAL_STORAGE_TOKEN_KEY);
             }
         } catch (error) {
-            console.error('Failed to start session:', error);
+            logger.error('auth', 'failed to start session', { err: error });
         }
     };
 

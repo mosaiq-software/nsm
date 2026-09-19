@@ -1,5 +1,6 @@
 import { useUser } from '@/contexts/user-context';
 import { API_BODY, API_PARAMS, API_RETURN, API_ROUTES } from '@mosaiq/nsm-common/routes';
+import { logger } from '@/utils/logger';
 
 const TIMEOUT_MS = 15000;
 
@@ -33,10 +34,13 @@ async function apiGet<T extends API_ROUTES>(route: T, params: API_PARAMS[T], aut
             },
             signal: AbortSignal.timeout(TIMEOUT_MS),
         });
+        if (!response.ok) {
+            logger.warn('api', `GET ${route} responded ${response.status}`, { route: String(route), params, status: response.status });
+        }
         const data = (await response.json()) as API_RETURN[T] | undefined;
         return data;
     } catch (e) {
-        console.error('Error getting', route, params);
+        logger.error('api', `GET ${route} failed`, { err: e, route: String(route), params });
         return undefined;
     }
 }
@@ -56,10 +60,13 @@ async function apiPost<T extends API_ROUTES>(route: T, params: API_PARAMS[T], bo
             body: body ? JSON.stringify(body) : '{}',
             signal: AbortSignal.timeout(TIMEOUT_MS),
         });
+        if (!response.ok) {
+            logger.warn('api', `POST ${route} responded ${response.status}`, { route: String(route), params, status: response.status });
+        }
         const data = (await response.json()) as API_RETURN[T] | undefined;
         return data;
     } catch (e) {
-        console.error('Error posting', route, params, body);
+        logger.error('api', `POST ${route} failed`, { err: e, route: String(route), params });
         return undefined;
     }
 }

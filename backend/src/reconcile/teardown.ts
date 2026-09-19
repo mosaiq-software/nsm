@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import { composeChildEnv, config } from '@/config';
 import { execSafe, execStream } from '@/host/exec';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const teardownLog = areaLog('teardown');
 
@@ -25,7 +25,7 @@ export const teardownGenerationLocal = async (projectId: string, generation: num
         if (code !== 0) teardownLog.warn({ action: 'generation_teardown_nonzero', projectId, generation, exitCode: code, out }, `generation teardown exited with code ${code}`);
         else teardownLog.info({ action: 'generation_teardown_completed', projectId, generation }, `torn down ${genProject(projectId, generation)}`);
     } catch (e: any) {
-        teardownLog.error({ action: 'generation_teardown_failed', projectId, generation, err: e?.message }, `error tearing down ${genProject(projectId, generation)}`);
+        teardownLog.error({ action: 'generation_teardown_failed', projectId, generation, err: serializeError(e) }, `error tearing down ${genProject(projectId, generation)}`);
     }
     try {
         await fs.rm(dir, { recursive: true, force: true });
@@ -48,7 +48,7 @@ export const teardownLegacyLocal = async (projectId: string): Promise<void> => {
         if (code !== 0) teardownLog.warn({ action: 'legacy_teardown_nonzero', projectId, exitCode: code, out }, `legacy teardown exited with code ${code}`);
         else teardownLog.info({ action: 'legacy_teardown_completed', projectId }, `torn down legacy stack ${projectId}`);
     } catch (e: any) {
-        teardownLog.error({ action: 'legacy_teardown_failed', projectId, err: e?.message }, `error tearing down legacy stack ${projectId}`);
+        teardownLog.error({ action: 'legacy_teardown_failed', projectId, err: serializeError(e) }, `error tearing down legacy stack ${projectId}`);
     }
     try {
         await fs.rm(dir, { recursive: true, force: true });
@@ -96,7 +96,7 @@ export const teardownProjectLocal = async (projectId: string): Promise<void> => 
         if (code !== 0) teardownLog.warn({ action: 'project_teardown_nonzero', projectId, exitCode: code, out }, `project teardown exited with code ${code}`);
         else teardownLog.info({ action: 'project_teardown_completed', projectId }, `torn down project ${projectId}`);
     } catch (e: any) {
-        teardownLog.error({ action: 'project_teardown_failed', projectId, err: e?.message }, `error tearing down project ${projectId}`);
+        teardownLog.error({ action: 'project_teardown_failed', projectId, err: serializeError(e) }, `error tearing down project ${projectId}`);
     }
     try {
         await fs.rm(baseDir(projectId), { recursive: true, force: true });

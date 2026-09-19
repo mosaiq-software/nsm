@@ -2,7 +2,7 @@ import { DeploymentState } from '@mosaiq/nsm-common/types';
 import { cluster } from '@/cluster/node';
 import { postToLeader } from '@/cluster/leaderClient';
 import { updateDeploymentLog, promoteDeployment } from '@/controllers/deployController';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const reportLog = areaLog('deploy');
 
@@ -16,7 +16,7 @@ export const reportDeploymentLog = async (logId: string, status: DeploymentState
             await postToLeader('/cluster/log', { logId, status, log });
         }
     } catch (e: any) {
-        reportLog.error({ action: 'report_log_failed', logId, status, err: e?.message }, 'failed to report deployment log');
+        reportLog.error({ action: 'report_log_failed', logId, status, err: serializeError(e) }, 'failed to report deployment log');
     }
 };
 
@@ -32,6 +32,6 @@ export const reportDeployReady = async (projectId: string, generation: number, n
             await postToLeader('/cluster/deploy-ready', { projectId, generation, nodeId });
         }
     } catch (e: any) {
-        reportLog.error({ action: 'report_ready_failed', projectId, generation, err: e?.message }, 'failed to report deployment ready');
+        reportLog.error({ action: 'report_ready_failed', projectId, generation, err: serializeError(e) }, 'failed to report deployment ready');
     }
 };

@@ -3,7 +3,7 @@ import { getPrivateGitHubUserData, revokeGithubAuth } from '@/utils/authUtils';
 import { User } from '@mosaiq/nsm-common/types';
 import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { cluster } from '@/cluster/node';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const authLog = areaLog('auth');
 
@@ -29,7 +29,7 @@ export const signInUser = async (authToken: string) => {
         authLog.info({ action: 'user_signed_in', githubId: user.githubId, login: user.name }, `user ${user.name} signed in`);
         return user;
     } catch (error: any) {
-        authLog.error({ action: 'signin_failed', err: error?.message }, 'failed to sign in user');
+        authLog.error({ action: 'signin_failed', err: serializeError(error) }, 'failed to sign in user');
         throw new Error('Failed to sign in user' + error.message);
     }
 };
@@ -52,7 +52,7 @@ export const signOutUser = async (authToken: string): Promise<void> => {
         await revokeGithubAuth(authToken);
         authLog.info({ action: 'user_signed_out', githubId: user.githubId, login: user.name }, `user ${user.name} signed out`);
     } catch (e: any) {
-        authLog.error({ action: 'signout_failed', err: e?.message }, 'failed to sign out user');
+        authLog.error({ action: 'signout_failed', err: serializeError(e) }, 'failed to sign out user');
         throw new Error('Failed to sign out user: ' + e.message);
     }
 };
@@ -65,7 +65,7 @@ export const signOutAllUsers = async (): Promise<void> => {
             await signOutUser(user.authToken);
         }
     } catch (e: any) {
-        authLog.error({ action: 'signout_all_failed', err: e?.message }, 'failed to sign out all users');
+        authLog.error({ action: 'signout_all_failed', err: serializeError(e) }, 'failed to sign out all users');
         throw new Error('Failed to sign out all users: ' + e.message);
     }
 };

@@ -1,0 +1,47 @@
+---
+description: Logging and observability conventions for NSM (backend pino + frontend logger)
+alwaysApply: true
+---
+
+# Logging Conventions
+
+Logs are the primary observability signal: everything nsmd does is logged, shipped via journald → Alloy → Loki, and browsed in the NSM Logs UI. Follow these when adding or changing logs.
+
+## Always use an area logger
+
+- Backend: `const xLog = areaLog('subsystem')` (from `@/utils/log`). Never call `console.*` in `backend/src`.
+- Frontend: `import { logger } from '@/utils/logger'` and call `logger.debug/info/warn/error(area, msg, fields?)`. Never call `console.*` in `frontend/src`.
+
+## Log errors with `serializeError` — never `.message`
+
+`err: e.message` (or a bare status) drops the stack, `cause`, and HTTP response bodies (e.g. web-push's `.body` reason). Always serialize:
+
+```ts
+// ❌ BAD — loses stack + response body
+} catch (e) {
+    xLog.error({ action: 'thing_failed', err: (e as any)?.message }, 'thing failed');
+}
+
+// ✅ GOOD
+} catch (e) {
+    xLog.error({ action: 'thing_failed', err: serializeError(e), projectId }, 'thing failed');
+}
+```
+
+On the frontend, pass the raw error as `err` and the logger serializes it: `logger.error('api', 'POST failed', { err: e, route })`.
+
+## Never swallow
+
+A `catch` must not silently discard an error. Log it (at `debug` if it's an expected/degraded fallback) before returning a default. Deliberate control-flow fallbacks (e.g. JSON-parse-or-default) may omit a log only with a one-line comment explaining why.
+
+## Standard fields
+
+- `service`: `'server'` (auto) or `'client'` (auto for shipped frontend logs). Filter server vs client logs in the NSM Logs UI with the `service` facet.
+- `area`: subsystem (matches the area logger).
+- `action`: a stable snake_case event id (e.g. `notification_send_failed`) — used for faceting.
+- `err`: `serializeError(e)` output.
+- Include correlating context (`projectId`, `nodeId`, `githubId`, …). `reqId` is injected automatically during a request.
+
+## Levels
+
+`error` = action failed / needs attention · `warn` = degraded but handled · `info` = notable state change · `debug` = routine ticks and detail (the default level; everything is logged).

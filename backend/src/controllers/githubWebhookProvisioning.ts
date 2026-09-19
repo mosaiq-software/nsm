@@ -5,7 +5,7 @@ import { getProject, updateProjectNoDirty } from '@/controllers/projectControlle
 import { getWebhooksByProjectModel } from '@/persistence/projectWebhookPersistence';
 import { createRepoWebhook, deleteRepoWebhook } from '@/utils/githubApp';
 import { sha256Hex } from '@/utils/hash';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const provLog = areaLog('github-webhook-provision');
 
@@ -45,7 +45,7 @@ export const removeGithubWebhookIfUnused = async (projectId: string): Promise<vo
     if (await webhookConsumersExist(project)) return;
 
     await deleteRepoWebhook(project.repoOwner, project.repoName, project.githubWebhook.hookId).catch((e: any) =>
-        provLog.warn({ action: 'github_webhook_delete_failed', projectId, err: e?.message }, `failed to delete GitHub webhook for ${projectId}`)
+        provLog.warn({ action: 'github_webhook_delete_failed', projectId, err: serializeError(e) }, `failed to delete GitHub webhook for ${projectId}`)
     );
     await updateProjectNoDirty(projectId, { githubWebhook: undefined });
     provLog.info({ action: 'github_webhook_deprovisioned', projectId }, `removed shared GitHub webhook for ${projectId}`);

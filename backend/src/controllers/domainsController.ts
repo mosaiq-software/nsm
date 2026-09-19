@@ -12,7 +12,7 @@ import { getAllProjectsModel, getProjectByIdModel } from '@/persistence/projectP
 import { resolveTeamById, resolveTeamByLogin, isSuperAdmin } from '@/controllers/authz';
 import { getUserByLoginModel } from '@/persistence/userPersistence';
 import { sendPushToGithubIds } from '@/controllers/pushController';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const domainsLog = areaLog('cloudflare');
 
@@ -49,7 +49,7 @@ const notify = async (githubId: string | null | undefined, title: string, body: 
     try {
         await sendPushToGithubIds([githubId], JSON.stringify({ title, body, url: '/domains', tag: 'nsm-domain' }));
     } catch (e: any) {
-        domainsLog.warn({ action: 'notify_failed', err: e?.message }, 'failed to send domain notification');
+        domainsLog.warn({ action: 'notify_failed', err: serializeError(e) }, 'failed to send domain notification');
     }
 };
 
@@ -92,7 +92,7 @@ const pollRegistration = async (domainName: string): Promise<{ ok: boolean; stat
             if (status.completed && (state === 'succeeded' || state === 'active' || state === 'registered')) return { ok: true, state };
             if (state === 'failed' || state === 'blocked' || state === 'action_required') return { ok: false, state, error: status.error?.message };
         } catch (e: any) {
-            domainsLog.warn({ action: 'registration_poll_error', domainName, err: e?.message }, 'error polling registration status');
+            domainsLog.warn({ action: 'registration_poll_error', domainName, err: serializeError(e) }, 'error polling registration status');
         }
     }
     return { ok: false, state: 'timeout', error: 'Registration did not complete in time; check the Cloudflare dashboard.' };
@@ -150,7 +150,7 @@ export const decideRequest = async (decider: User, requestId: string, approve: b
             try {
                 await createZone(request.domainName);
             } catch (e: any) {
-                domainsLog.warn({ action: 'zone_create_after_purchase_failed', domainName: request.domainName, err: e?.message }, 'zone auto-create after purchase failed');
+                domainsLog.warn({ action: 'zone_create_after_purchase_failed', domainName: request.domainName, err: serializeError(e) }, 'zone auto-create after purchase failed');
             }
             await syncCloudflare();
             zone = await getDnsZoneByNameModel(request.domainName);
@@ -171,7 +171,7 @@ export const decideRequest = async (decider: User, requestId: string, approve: b
     } catch (e: any) {
         const failed = await save({ status: DomainRequestStatus.FAILED, reason: e?.message || 'Purchase failed' });
         await notify(request.requesterId, 'Domain purchase failed', `Purchasing ${request.domainName} failed: ${e?.message || 'unknown error'}.`);
-        domainsLog.error({ action: 'domain_purchase_error', domainName: request.domainName, err: e?.message }, 'domain purchase errored');
+        domainsLog.error({ action: 'domain_purchase_error', domainName: request.domainName, err: serializeError(e) }, 'domain purchase errored');
         return failed;
     }
 };
@@ -229,7 +229,7 @@ export const deleteDomain = async (zoneId: string, confirmName: string): Promise
     try {
         await setRegistrarAutoRenew(zone.name, false);
     } catch (e: any) {
-        domainsLog.warn({ action: 'auto_renew_disable_failed', domainName: zone.name, err: e?.message }, `could not disable auto-renew for ${zone.name}; disable it in the Cloudflare dashboard to stop billing`);
+        domainsLog.warn({ action: 'auto_renew_disable_failed', domainName: zone.name, err: serializeError(e) }, `could not disable auto-renew for ${zone.name}; disable it in the Cloudflare dashboard to stop billing`);
     }
 
     await deleteRecordsForZoneModel(zoneId);

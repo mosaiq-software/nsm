@@ -1,4 +1,4 @@
-import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, CreateProjectWebhookBody, DeploymentLogUpdate, DnsRecord, DnsZone, DnsZoneAnalytics, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, ProjectWebhook, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, UpdateProjectWebhookBody, User } from './types';
+import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClientLogEntry, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, CreateProjectWebhookBody, DeploymentLogUpdate, DnsRecord, DnsZone, DnsZoneAnalytics, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, ProjectWebhook, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, UpdateProjectWebhookBody, User } from './types';
 import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
 import { CreatePortReservationBody, PortReservation } from './types';
 
@@ -68,7 +68,7 @@ export enum API_ROUTES {
     POST_DELETE_TEAM_OVERRIDE = '/team/:ownerId/override/delete',
     POST_ADD_ADMIN = '/admins/add',
     POST_REMOVE_ADMIN = '/admins/remove',
-    POST_LOGGER = '/logger/:logKey',
+    POST_CLIENT_LOGS = '/observability/client-logs',
     POST_PUSH_SUBSCRIBE = '/push/subscribe',
     POST_PUSH_UNSUBSCRIBE = '/push/unsubscribe',
     POST_SET_PROJECT_NOTIFICATION = '/push/preference/:projectId/set',
@@ -167,7 +167,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: { ownerId: string };
     [API_ROUTES.POST_ADD_ADMIN]: {};
     [API_ROUTES.POST_REMOVE_ADMIN]: {};
-    [API_ROUTES.POST_LOGGER]: { logKey: string };
+    [API_ROUTES.POST_CLIENT_LOGS]: {};
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: {};
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: {};
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: { projectId: string };
@@ -268,7 +268,7 @@ export interface API_BODY {
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: { memberId: string };
     [API_ROUTES.POST_ADD_ADMIN]: { login: string };
     [API_ROUTES.POST_REMOVE_ADMIN]: { id: string };
-    [API_ROUTES.POST_LOGGER]: LogMessage;
+    [API_ROUTES.POST_CLIENT_LOGS]: ClientLogEntry[];
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: PushSubscriptionJSON;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: { endpoint: string };
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: { enabled: boolean };
@@ -367,7 +367,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: undefined;
     [API_ROUTES.POST_ADD_ADMIN]: Admin | undefined;
     [API_ROUTES.POST_REMOVE_ADMIN]: undefined;
-    [API_ROUTES.POST_LOGGER]: undefined;
+    [API_ROUTES.POST_CLIENT_LOGS]: { ok: boolean; accepted: number };
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: undefined;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: undefined;
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: undefined;
@@ -468,7 +468,7 @@ export interface API_AUTH {
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: string;
     [API_ROUTES.POST_ADD_ADMIN]: string;
     [API_ROUTES.POST_REMOVE_ADMIN]: string;
-    [API_ROUTES.POST_LOGGER]: undefined;
+    [API_ROUTES.POST_CLIENT_LOGS]: string;
     [API_ROUTES.POST_PUSH_SUBSCRIBE]: string;
     [API_ROUTES.POST_PUSH_UNSUBSCRIBE]: string;
     [API_ROUTES.POST_SET_PROJECT_NOTIFICATION]: string;

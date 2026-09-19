@@ -13,7 +13,7 @@ import { syncCloudflare } from '@/reconcile/cloudflareSync';
 import { checkPublicIp } from '@/reconcile/publicIpWatcher';
 import { isCloudflareConfigured } from '@/config';
 import { HEALTH_SAMPLE_INTERVAL_MS, pruneHealthRollups, pruneHealthSamples, rollupHealthSamples, sampleAllProjects } from '@/controllers/healthController';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const initLog = areaLog('startup');
 
@@ -30,7 +30,7 @@ export const applyGithubFingerprints = () => {
         execSync(`echo "${githubPublicFingerprint3}" >> ~/.ssh/known_hosts`);
         initLog.info({ action: 'github_fingerprints_applied' }, 'applied GitHub SSH fingerprints to known_hosts');
     } catch (e: any) {
-        initLog.error({ action: 'github_fingerprints_failed', err: e?.message }, 'error adding GitHub fingerprints to known_hosts');
+        initLog.error({ action: 'github_fingerprints_failed', err: serializeError(e) }, 'error adding GitHub fingerprints to known_hosts');
     }
 };
 
@@ -40,7 +40,7 @@ export const ensureBaseDirectories = async () => {
         try {
             await fs.mkdir(p, { recursive: true });
         } catch (e: any) {
-            initLog.error({ action: 'base_dir_failed', path: p, err: e?.message }, `error creating path ${p}`);
+            initLog.error({ action: 'base_dir_failed', path: p, err: serializeError(e) }, `error creating path ${p}`);
         }
     }
     initLog.info({ action: 'base_directories_ensured', pathCount: paths.length }, 'base directories ensured');
@@ -80,12 +80,12 @@ export const registerCronJobs = () => {
     // Every node: sample per-project disk usage into the Prometheus gauge every 30 minutes.
     cron.schedule('*/30 * * * *', () => {
         initLog.debug({ action: 'cron_fired', job: 'disk_usage' }, 'disk usage cron fired');
-        void collectDiskUsage().catch((e) => initLog.error({ action: 'disk_usage_failed', err: e?.message }, 'disk usage collection failed'));
+        void collectDiskUsage().catch((e) => initLog.error({ action: 'disk_usage_failed', err: serializeError(e) }, 'disk usage collection failed'));
     });
     // Leader-only: compare each allocated project's live usage to its allocation and notify on breach.
     cron.schedule('*/5 * * * *', () => {
         initLog.debug({ action: 'cron_fired', job: 'quota_check', isLeader: cluster.isLeader() }, 'quota check cron fired');
-        if (cluster.isLeader()) void checkAllQuotas().catch((e) => initLog.error({ action: 'quota_check_failed', err: e?.message }, 'quota check failed'));
+        if (cluster.isLeader()) void checkAllQuotas().catch((e) => initLog.error({ action: 'quota_check_failed', err: serializeError(e) }, 'quota check failed'));
     });
     // Leader-only: mirror Cloudflare zones/records into the cache (Cloudflare authoritative).
     cron.schedule('*/5 * * * *', () => {
@@ -100,25 +100,25 @@ export const registerCronJobs = () => {
     // min granularity is 1 minute; the frequent health sampling itself is a setInterval below).
     cron.schedule('0 3 * * *', () => {
         if (cluster.isLeader()) {
-            void pruneHealthSamples().catch((e) => initLog.error({ action: 'health_prune_failed', err: e?.message }, 'health prune failed'));
-            void pruneHealthRollups().catch((e) => initLog.error({ action: 'health_rollup_prune_failed', err: e?.message }, 'health rollup prune failed'));
+            void pruneHealthSamples().catch((e) => initLog.error({ action: 'health_prune_failed', err: serializeError(e) }, 'health prune failed'));
+            void pruneHealthRollups().catch((e) => initLog.error({ action: 'health_rollup_prune_failed', err: serializeError(e) }, 'health rollup prune failed'));
         }
     });
     // Leader-only: downsample closed hours of raw samples into compact rollups. Runs a few minutes
     // past the hour so the just-elapsed hour is fully closed before aggregation.
     cron.schedule('5 * * * *', () => {
         initLog.debug({ action: 'cron_fired', job: 'health_rollup', isLeader: cluster.isLeader() }, 'health rollup cron fired');
-        if (cluster.isLeader()) void rollupHealthSamples().catch((e) => initLog.error({ action: 'health_rollup_failed', err: e?.message }, 'health rollup failed'));
+        if (cluster.isLeader()) void rollupHealthSamples().catch((e) => initLog.error({ action: 'health_rollup_failed', err: serializeError(e) }, 'health rollup failed'));
     });
     initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30', 'quota_check:*/5', 'cloudflare_sync:*/5', `public_ip:${ipCron}`, 'health_prune:0 3', 'health_rollup:5 *'] }, 'cron jobs registered');
 
     // Managed CD SCHEDULE triggers: rebuild per-project cron tasks from persisted config. Tasks only
     // fire on the leader, so registering on every node is safe.
-    void initCdSchedules().catch((e) => initLog.error({ action: 'cd_schedules_init_failed', err: e?.message }, 'CD schedule init failed'));
+    void initCdSchedules().catch((e) => initLog.error({ action: 'cd_schedules_init_failed', err: serializeError(e) }, 'CD schedule init failed'));
 
     // Leader-only: sample every project's health on a sub-minute cadence (finer than node-cron
     // supports), feeding the uptime time series that powers the status page and public API.
     setInterval(() => {
-        if (cluster.isLeader()) void sampleAllProjects().catch((e) => initLog.error({ action: 'health_sample_failed', err: e?.message }, 'health sampling failed'));
+        if (cluster.isLeader()) void sampleAllProjects().catch((e) => initLog.error({ action: 'health_sample_failed', err: serializeError(e) }, 'health sampling failed'));
     }, HEALTH_SAMPLE_INTERVAL_MS);
 };

@@ -5,7 +5,7 @@ import { CfDnsRecord, CfRegistrarDomain, getPortReservationIdFromComment, hasDyn
 import { deleteDnsZonesNotInModel, getDnsZoneByNameModel, getDnsZoneModel, upsertDnsZoneModel } from '@/persistence/dnsZonePersistence';
 import { deleteRecordsForZoneModel, replaceZoneRecordsModel } from '@/persistence/dnsRecordPersistence';
 import { setDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const syncLog = areaLog('cloudflare');
 
@@ -52,7 +52,7 @@ const performCloudflareSync = async (): Promise<{ zoneCount: number }> => {
         try {
             for (const r of await listRegistrarDomains()) if (r.name) registrarByName.set(r.name.toLowerCase(), r);
         } catch (e: any) {
-            syncLog.warn({ action: 'registrar_list_failed', err: e?.message }, 'could not list registrar domains (registrar API may be unavailable)');
+            syncLog.warn({ action: 'registrar_list_failed', err: serializeError(e) }, 'could not list registrar domains (registrar API may be unavailable)');
         }
     }
 
@@ -89,7 +89,7 @@ export const syncCloudflare = async (): Promise<void> => {
     try {
         await performCloudflareSync();
     } catch (e: any) {
-        syncLog.error({ action: 'sync_failed', err: e?.message }, 'Cloudflare sync failed');
+        syncLog.error({ action: 'sync_failed', err: serializeError(e) }, 'Cloudflare sync failed');
     }
 };
 
@@ -101,7 +101,7 @@ export const syncCloudflareNow = async (): Promise<{ ok: boolean; zoneCount?: nu
         const { zoneCount } = await performCloudflareSync();
         return { ok: true, zoneCount };
     } catch (e: any) {
-        syncLog.error({ action: 'sync_failed', err: e?.message }, 'Cloudflare sync failed');
+        syncLog.error({ action: 'sync_failed', err: serializeError(e) }, 'Cloudflare sync failed');
         return { ok: false, error: e?.message || 'Cloudflare sync failed' };
     }
 };
@@ -115,7 +115,7 @@ export const syncZoneRecords = async (zoneId: string): Promise<void> => {
         const existing = await getDnsZoneModel(zoneId);
         if (existing) await upsertDnsZoneModel({ ...existing, recordCount: records.length, lastSyncedAt: Date.now() });
     } catch (e: any) {
-        syncLog.error({ action: 'zone_sync_failed', zoneId, err: e?.message }, `failed to refresh zone ${zoneId}`);
+        syncLog.error({ action: 'zone_sync_failed', zoneId, err: serializeError(e) }, `failed to refresh zone ${zoneId}`);
     }
 };
 

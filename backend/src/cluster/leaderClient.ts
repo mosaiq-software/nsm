@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { config } from '@/config';
 import { cluster } from './node';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const clientLog = areaLog('leaderClient');
 
@@ -29,7 +29,7 @@ export const postToLeader = async <T = any>(path: string, body: any): Promise<T 
         clientLog.debug({ action: 'post_to_leader_ok', path, status: res.status }, `POST ${path} to leader ok`);
         return text ? (JSON.parse(text) as T) : null;
     } catch (e: any) {
-        clientLog.warn({ action: 'post_to_leader_error', path, leaderAddress: base, err: e?.message }, `POST ${path} to leader failed`);
+        clientLog.warn({ action: 'post_to_leader_error', path, leaderAddress: base, err: serializeError(e) }, `POST ${path} to leader failed`);
         return null;
     }
 };
@@ -51,7 +51,7 @@ export const postToNode = async <T = any>(address: string, apiPort: number, path
         clientLog.debug({ action: 'post_to_node_ok', address, apiPort, path }, `POST ${path} to ${address} ok`);
         return text ? (JSON.parse(text) as T) : null;
     } catch (e: any) {
-        clientLog.warn({ action: 'post_to_node_error', address, apiPort, path, err: e?.message }, `POST ${path} to ${address} failed`);
+        clientLog.warn({ action: 'post_to_node_error', address, apiPort, path, err: serializeError(e) }, `POST ${path} to ${address} failed`);
         return null;
     }
 };
@@ -84,7 +84,7 @@ export const forwardToLeader = async (req: Request, res: Response): Promise<void
         res.send(text);
         clientLog.debug({ action: 'forward_completed', method, originalUrl: req.originalUrl, upstreamStatus: upstream.status }, `forwarded ${method} ${req.originalUrl} -> ${upstream.status}`);
     } catch (e: any) {
-        clientLog.warn({ action: 'forward_failed', method: req.method, originalUrl: req.originalUrl, err: e?.message }, `failed to forward ${req.method} ${req.originalUrl}`);
+        clientLog.warn({ action: 'forward_failed', method: req.method, originalUrl: req.originalUrl, err: serializeError(e) }, `failed to forward ${req.method} ${req.originalUrl}`);
         res.status(502).send(`Failed to reach leader: ${e.message}`);
     }
 };

@@ -11,7 +11,7 @@ import { reportDeploymentLog, reportDeployReady } from './report';
 import { markGenerationLive, markGenerationReady, removeLiveGeneration, setLocalGeneration } from './state';
 import { releasePorts, waitPortReady } from './ports';
 import { teardownGenerationLocal, teardownLegacyLocal } from './teardown';
-import { deployLogger } from '@/utils/log';
+import { deployLogger, serializeError } from '@/utils/log';
 import { deploysTotal, deployDuration, errorsTotal } from '@/utils/metrics';
 
 // In-flight `docker compose up` child per project on THIS host, so a build can be killed before its
@@ -97,7 +97,7 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
                 await teardownGenerationLocal(dep.projectId, dep.generation);
                 await removeLiveGeneration(dep.projectId, dep.generation);
             } catch (e: any) {
-                dlog.error({ action: 'blue_cleanup_failed', generation: dep.generation, err: e?.message }, 'failed to clean up failed blue stack');
+                dlog.error({ action: 'blue_cleanup_failed', generation: dep.generation, err: serializeError(e) }, 'failed to clean up failed blue stack');
             }
         } else {
             // Legacy in-place deploy: there is no old generation to fall back to, so tear the broken
@@ -105,7 +105,7 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
             try {
                 await teardownLegacyLocal(dep.projectId);
             } catch (e: any) {
-                dlog.error({ action: 'legacy_cleanup_failed', generation: dep.generation, err: e?.message }, 'failed to clean up failed legacy stack');
+                dlog.error({ action: 'legacy_cleanup_failed', generation: dep.generation, err: serializeError(e) }, 'failed to clean up failed legacy stack');
             }
         }
         releasePorts(allocatedPorts);
@@ -117,7 +117,7 @@ export const applyDeployment = async (dep: DesiredDeployment): Promise<boolean> 
             await reportDeploymentLog(dep.logId, DeploymentState.FAILED, `Failed to deploy project: ${error.message}\n`);
             deploysTotal.inc({ result: 'failure' });
             errorsTotal.inc({ area: 'deploy' });
-            dlog.error({ action: 'deploy_failed', generation: dep.generation, err: error?.message }, 'deployment failed');
+            dlog.error({ action: 'deploy_failed', generation: dep.generation, err: serializeError(error) }, 'deployment failed');
         }
         return false;
     } finally {

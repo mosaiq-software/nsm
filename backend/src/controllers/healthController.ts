@@ -29,7 +29,7 @@ import {
 import { execSafe } from '@/host/exec';
 import { emitProjectEvent } from './webhookController';
 import { buildHealthTransitionEvent } from './webhooks/events';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const healthLog = areaLog('health');
 
@@ -157,7 +157,7 @@ const detectHealthTransition = async (projectId: string, newSamples: ProjectHeal
         const event = buildHealthTransitionEvent(projectId, prev, next);
         if (event) void emitProjectEvent(event);
     } catch (e: any) {
-        healthLog.warn({ action: 'health_transition_failed', projectId, err: e?.message }, `health transition detection failed for ${projectId}`);
+        healthLog.warn({ action: 'health_transition_failed', projectId, err: serializeError(e) }, `health transition detection failed for ${projectId}`);
     }
 };
 
@@ -172,7 +172,7 @@ export const sampleAllProjects = async (): Promise<void> => {
             await detectHealthTransition(p.id, samples);
             return samples;
         } catch (e: any) {
-            healthLog.warn({ action: 'sample_project_failed', projectId: p.id, err: e?.message }, `health sample failed for ${p.id}`);
+            healthLog.warn({ action: 'sample_project_failed', projectId: p.id, err: serializeError(e) }, `health sample failed for ${p.id}`);
             return [] as ProjectHealthSample[];
         }
     });
@@ -253,7 +253,7 @@ export const rollupHealthSamples = async (): Promise<void> => {
             await upsertHealthRollupsModel(rollups);
             rollupCount += rollups.length;
         } catch (e: any) {
-            healthLog.warn({ action: 'rollup_project_failed', projectId: p.id, err: e?.message }, `health rollup failed for ${p.id}`);
+            healthLog.warn({ action: 'rollup_project_failed', projectId: p.id, err: serializeError(e) }, `health rollup failed for ${p.id}`);
         }
     }
     healthLog.debug({ action: 'health_rolled_up', projectCount: projects.length, rollupCount }, `rolled up ${projects.length} project(s)`);

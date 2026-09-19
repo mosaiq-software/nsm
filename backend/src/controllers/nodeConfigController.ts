@@ -7,7 +7,7 @@ import { postToNode } from '@/cluster/leaderClient';
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
 import { sendPushToAdmins } from '@/controllers/pushController';
 import { EDITABLE_ENV_KEYS, getEnvSpec, NodeConfigUpdate, NodeConfigValues } from '@mosaiq/nsm-common/envSchema';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const cfgLog = areaLog('nodeConfig');
 
@@ -135,7 +135,7 @@ const watchFollowerRestart = async (nodeId: string, address: string, apiPort: nu
         cfgLog.warn({ action: 'follower_restart_unconfirmed', nodeId, sawDown }, `could not confirm ${nodeId} restart within timeout`);
         await sendPushToAdmins('Node restart may have failed', sawDown ? `${nodeId} went down after a configuration change but did not report healthy within 90s. Check the node.` : `Could not confirm ${nodeId} restarted after a configuration change. Check the node.`, `/nodes/${nodeId}`);
     } catch (e: any) {
-        cfgLog.error({ action: 'follower_watch_failed', nodeId, err: e?.message }, 'follower restart watch failed');
+        cfgLog.error({ action: 'follower_watch_failed', nodeId, err: serializeError(e) }, 'follower restart watch failed');
     }
 };
 

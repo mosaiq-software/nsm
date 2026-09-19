@@ -1,5 +1,6 @@
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { rawApiGetNoHook, rawApiPostNoHook } from '@/utils/api';
+import { logger } from '@/utils/logger';
 
 // Web Push is only available in secure contexts (HTTPS, or localhost for dev) with SW + PushManager.
 export const isPushSupported = (): boolean => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -19,7 +20,7 @@ export const registerServiceWorker = async (): Promise<ServiceWorkerRegistration
     try {
         return await navigator.serviceWorker.register('/sw.js');
     } catch (e) {
-        console.error('Failed to register service worker', e);
+        logger.error('push', 'failed to register service worker', { err: e });
         return undefined;
     }
 };
@@ -31,7 +32,8 @@ export const isPushSubscribed = async (): Promise<boolean> => {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         return Boolean(sub);
-    } catch {
+    } catch (e) {
+        logger.debug('push', 'failed to read push subscription state', { err: e });
         return false;
     }
 };

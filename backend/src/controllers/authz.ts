@@ -7,7 +7,7 @@ import { getTeamOverrideModel } from '@/persistence/teamOverridePersistence';
 import { getProjectByIdModel } from '@/persistence/projectPersistence';
 import { GithubMember, GithubOwner, listInstallationOwners, listOrgMembers, listOrgOwners } from '@/utils/githubApp';
 import { isGithubAppConfigured } from '@/config';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const authzLog = areaLog('authz');
 
@@ -34,7 +34,7 @@ const makeCache = <V>(fetcher: (key: string) => Promise<V>) => {
                 return value;
             } catch (e: any) {
                 if (entry) {
-                    authzLog.warn({ action: 'cache_stale_served', key, err: e?.message }, `serving stale cache for ${key} after fetch error`);
+                    authzLog.warn({ action: 'cache_stale_served', key, err: serializeError(e) }, `serving stale cache for ${key} after fetch error`);
                     return entry.value;
                 }
                 throw e;
@@ -59,7 +59,7 @@ export const getInstalledOwners = async (): Promise<GithubOwner[]> => {
     try {
         return await installedOwnersCache('all');
     } catch (e: any) {
-        authzLog.warn({ action: 'installed_owners_failed', err: e?.message }, 'failed to list installed owners');
+        authzLog.warn({ action: 'installed_owners_failed', err: serializeError(e) }, 'failed to list installed owners');
         return [];
     }
 };
@@ -69,7 +69,7 @@ const getOrgMembers = async (org: string): Promise<GithubMember[]> => {
     try {
         return await orgMembersCache(org.toLowerCase());
     } catch (e: any) {
-        authzLog.warn({ action: 'org_members_failed', org, err: e?.message }, `failed to list members for ${org}`);
+        authzLog.warn({ action: 'org_members_failed', org, err: serializeError(e) }, `failed to list members for ${org}`);
         return [];
     }
 };
@@ -79,7 +79,7 @@ const getOrgOwners = async (org: string): Promise<GithubMember[]> => {
     try {
         return await orgOwnersCache(org.toLowerCase());
     } catch (e: any) {
-        authzLog.warn({ action: 'org_owners_failed', org, err: e?.message }, `failed to list owners for ${org}`);
+        authzLog.warn({ action: 'org_owners_failed', org, err: serializeError(e) }, `failed to list owners for ${org}`);
         return [];
     }
 };

@@ -1,6 +1,6 @@
 import { config } from '@/config';
 import { execSafe } from '@/host/exec';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const portLog = areaLog('ports');
 
@@ -126,7 +126,7 @@ export const doubleCheckPortFree = async (port: number): Promise<boolean> => {
         const { out } = await execSafe(cmd, 2000);
         return out.includes('FREE');
     } catch (error: any) {
-        portLog.error({ action: 'nc_probe_failed', port, err: error?.message }, 'error executing nc command');
+        portLog.error({ action: 'nc_probe_failed', port, err: serializeError(error) }, 'error executing nc command');
         return false;
     }
 };
@@ -146,7 +146,7 @@ export const getOccupiedPorts = async (): Promise<number[]> => {
             }
         }
     } catch (error: any) {
-        portLog.error({ action: 'netstat_failed', err: error?.message }, 'error listing occupied ports');
+        portLog.error({ action: 'netstat_failed', err: serializeError(error) }, 'error listing occupied ports');
     }
     return Array.from(occupiedPorts);
 };

@@ -1,5 +1,5 @@
 import queryString from 'query-string';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const authLog = areaLog('auth');
 
@@ -35,7 +35,7 @@ export const getGithubAuthTokenFromTempCode = async (code: string) => {
         authLog.info({ action: 'oauth_token_exchanged' }, 'exchanged GitHub OAuth code for token');
         return parsedData.access_token as string;
     } catch (error: any) {
-        authLog.warn({ action: 'oauth_exchange_failed', err: error?.message }, 'GitHub OAuth token exchange failed');
+        authLog.warn({ action: 'oauth_exchange_failed', err: serializeError(error) }, 'GitHub OAuth token exchange failed');
         return null;
     }
 };
@@ -56,7 +56,7 @@ export async function getPrivateGitHubUserData(access_token: string): Promise<Gi
         authLog.info({ action: 'github_user_fetched', login: profile.login }, `fetched GitHub user ${profile.login}`);
         return profile;
     } catch (error: any) {
-        authLog.error({ action: 'github_user_fetch_error', err: error?.message }, 'error fetching GitHub user data');
+        authLog.error({ action: 'github_user_fetch_error', err: serializeError(error) }, 'error fetching GitHub user data');
         return null;
     }
 }
@@ -97,7 +97,7 @@ export async function getOrgsForUser(access_token: string) {
             throw new Error(`GitHub org fetch returned invalid JSON: ${txt}`);
         }
     } catch (error: any) {
-        authLog.error({ action: 'github_orgs_fetch_error', err: error?.message }, 'error fetching GitHub organizations');
+        authLog.error({ action: 'github_orgs_fetch_error', err: serializeError(error) }, 'error fetching GitHub organizations');
         return null;
     }
 }
@@ -122,6 +122,6 @@ export const revokeGithubAuth = async (access_token: string) => {
         }
         authLog.info({ action: 'github_token_revoked', status: response.status }, 'revoked GitHub token');
     } catch (error: any) {
-        authLog.error({ action: 'github_token_revoke_error', err: error?.message }, 'error revoking GitHub token');
+        authLog.error({ action: 'github_token_revoke_error', err: serializeError(error) }, 'error revoking GitHub token');
     }
 };

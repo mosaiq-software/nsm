@@ -34,6 +34,7 @@ import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController'
 import { removeManagedCd, setupManagedCd } from '@/controllers/cicdController';
 import { handleGithubWebhook } from '@/controllers/githubWebhookController';
 import { getProjectNotificationEnabled, getVapidPublicKey, sendTestNotification, setProjectNotification, subscribe, unsubscribe } from '@/controllers/pushController';
+import { ingestClientLogs } from '@/controllers/clientLogController';
 import { getAllNodesModel, getNodeByIdModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
 import { mintInstallationToken, listInstallationOwners, listInstallationRepos, listRepoBranches } from '@/utils/githubApp';
@@ -46,7 +47,7 @@ import { applyUpdateInstruction, setDesiredNsmVersion } from '@/cluster/selfUpda
 import { purgeProjectLocal, teardownProjectLocal } from '@/reconcile/teardown';
 import { cancelLocalDeployment } from '@/reconcile/deploy';
 import { registry } from '@/utils/metrics';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const routeLog = areaLog('routes');
 
@@ -130,7 +131,7 @@ publicRouter.get('/install.sh', async (_req, res) => {
         res.setHeader('Content-Type', 'text/x-shellscript');
         res.status(200).send(templated);
     } catch (e) {
-        routeLog.error({ action: 'install_sh_error', err: (e as any)?.message }, 'error serving install.sh');
+        routeLog.error({ action: 'install_sh_error', err: serializeError(e) }, 'error serving install.sh');
         res.status(500).send();
     }
 });
@@ -153,7 +154,7 @@ publicRouter.get('/auth/github', async (req, res) => {
         }
         res.status(302).redirect(`${process.env.FRONTEND_URL}?token=${token}`);
     } catch (error) {
-        routeLog.error({ action: 'auth_github_error', err: (error as any)?.message }, 'error handling GitHub auth callback');
+        routeLog.error({ action: 'auth_github_error', err: serializeError(error) }, 'error handling GitHub auth callback');
         res.status(500).send();
     }
 });
@@ -170,7 +171,7 @@ publicRouter.get(API_ROUTES.GET_DEPLOY, async (req, res) => {
         await enqueueDeploy(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'deploy_webhook_error', err: (e as any)?.message }, 'error deploying (webhook)');
+        routeLog.error({ action: 'deploy_webhook_error', err: serializeError(e) }, 'error deploying (webhook)');
         res.status(500).send();
     }
 });
@@ -191,7 +192,7 @@ publicRouter.post(API_ROUTES.POST_GITHUB_WEBHOOK, async (req, res) => {
         }
         res.status(outcome.status).send(outcome.message);
     } catch (e) {
-        routeLog.error({ action: 'github_webhook_error', err: (e as any)?.message }, 'error handling GitHub webhook');
+        routeLog.error({ action: 'github_webhook_error', err: serializeError(e) }, 'error handling GitHub webhook');
         res.status(500).send();
     }
 });
@@ -205,7 +206,7 @@ publicRouter.post(API_ROUTES.POST_GITHUB_LOGIN, async (req, res) => {
         if (!user) return void res.status(401).send('Unauthorized');
         res.status(200).json(user);
     } catch (e) {
-        routeLog.error({ action: 'github_login_error', err: (e as any)?.message }, 'error with GitHub login');
+        routeLog.error({ action: 'github_login_error', err: serializeError(e) }, 'error with GitHub login');
         res.status(500).send();
     }
 });
@@ -231,7 +232,7 @@ privateRouter.get(API_ROUTES.GET_PROJECTS, async (req, res) => {
         if (!user) return void res.status(401).send('Unauthorized');
         res.status(200).json(await getVisibleProjects(user));
     } catch (e) {
-        routeLog.error({ action: 'list_projects_error', err: (e as any)?.message }, 'error listing projects');
+        routeLog.error({ action: 'list_projects_error', err: serializeError(e) }, 'error listing projects');
         res.status(500).send();
     }
 });
@@ -294,7 +295,7 @@ privateRouter.get(API_ROUTES.GET_ME, async (req, res) => {
         if (!user) return void res.status(401).send('Unauthorized');
         res.status(200).json(await buildMeResponse(user));
     } catch (e) {
-        routeLog.error({ action: 'me_error', err: (e as any)?.message }, 'error building me response');
+        routeLog.error({ action: 'me_error', err: serializeError(e) }, 'error building me response');
         res.status(500).send();
     }
 });
@@ -306,7 +307,7 @@ privateRouter.get(API_ROUTES.GET_TEAMS, async (req, res) => {
     try {
         res.status(200).json(await listAllTeams());
     } catch (e) {
-        routeLog.error({ action: 'list_teams_error', err: (e as any)?.message }, 'error listing teams');
+        routeLog.error({ action: 'list_teams_error', err: serializeError(e) }, 'error listing teams');
         res.status(500).send();
     }
 });
@@ -331,7 +332,7 @@ privateRouter.get(API_ROUTES.GET_TEAM, async (req, res) => {
         }
         res.status(200).json(detail);
     } catch (e) {
-        routeLog.error({ action: 'get_team_error', err: (e as any)?.message }, 'error getting team detail');
+        routeLog.error({ action: 'get_team_error', err: serializeError(e) }, 'error getting team detail');
         res.status(500).send();
     }
 });
@@ -507,7 +508,7 @@ privateRouter.get(API_ROUTES.GET_GITHUB_OWNERS, async (req, res) => {
     try {
         res.status(200).json(await listInstallationOwners());
     } catch (e) {
-        routeLog.error({ action: 'list_github_owners_error', err: (e as any)?.message }, 'error listing GitHub App owners');
+        routeLog.error({ action: 'list_github_owners_error', err: serializeError(e) }, 'error listing GitHub App owners');
         res.status(200).json([]);
     }
 });
@@ -520,7 +521,7 @@ privateRouter.get(API_ROUTES.GET_GITHUB_REPOS, async (req, res) => {
     try {
         res.status(200).json(await listInstallationRepos(owner));
     } catch (e) {
-        routeLog.error({ action: 'list_github_repos_error', owner, err: (e as any)?.message }, `error listing GitHub repos for ${owner}`);
+        routeLog.error({ action: 'list_github_repos_error', owner, err: serializeError(e) }, `error listing GitHub repos for ${owner}`);
         res.status(200).json([]);
     }
 });
@@ -533,7 +534,7 @@ privateRouter.get(API_ROUTES.GET_GITHUB_BRANCHES, async (req, res) => {
     try {
         res.status(200).json(await listRepoBranches(owner.trim(), repo.trim()));
     } catch (e) {
-        routeLog.error({ action: 'list_github_branches_error', owner, repo, err: (e as any)?.message }, `error listing GitHub branches for ${owner}/${repo}`);
+        routeLog.error({ action: 'list_github_branches_error', owner, repo, err: serializeError(e) }, `error listing GitHub branches for ${owner}/${repo}`);
         res.status(200).json([]);
     }
 });
@@ -549,7 +550,7 @@ privateRouter.get(API_ROUTES.GET_DEPLOY_WEB, async (req, res) => {
         const logId = await enqueueDeploy(params.projectId);
         res.status(200).json(logId);
     } catch (e) {
-        routeLog.error({ action: 'deploy_web_error', err: (e as any)?.message }, 'error deploying (web)');
+        routeLog.error({ action: 'deploy_web_error', err: serializeError(e) }, 'error deploying (web)');
         res.status(500).send();
     }
 });
@@ -563,7 +564,7 @@ privateRouter.post(API_ROUTES.POST_CREATE_PROJECT, async (req, res) => {
         if (!(await requireCreateProjectForOwner(req, res, body.repoOwner))) return;
         res.status(200).json(await createProject(body));
     } catch (e) {
-        routeLog.error({ action: 'create_project_error', err: (e as any)?.message }, 'error creating project');
+        routeLog.error({ action: 'create_project_error', err: serializeError(e) }, 'error creating project');
         res.status(500).send();
     }
 });
@@ -578,7 +579,7 @@ privateRouter.post(API_ROUTES.POST_UPDATE_PROJECT, async (req, res) => {
         await updateProject(params.projectId, body);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'update_project_error', err: (e as any)?.message }, 'error updating project');
+        routeLog.error({ action: 'update_project_error', err: serializeError(e) }, 'error updating project');
         res.status(500).send();
     }
 });
@@ -592,7 +593,7 @@ privateRouter.post(API_ROUTES.POST_DELETE_PROJECT, async (req, res) => {
         await deleteProject(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'delete_project_error', err: (e as any)?.message }, 'error deleting project');
+        routeLog.error({ action: 'delete_project_error', err: serializeError(e) }, 'error deleting project');
         res.status(500).send();
     }
 });
@@ -606,7 +607,7 @@ privateRouter.post(API_ROUTES.POST_RESET_DEPLOYMENT_KEY, async (req, res) => {
         if (!newKey) return void res.status(404).send('Project not found');
         res.status(200).json(newKey);
     } catch (e) {
-        routeLog.error({ action: 'reset_deployment_key_error', err: (e as any)?.message }, 'error resetting deployment key');
+        routeLog.error({ action: 'reset_deployment_key_error', err: serializeError(e) }, 'error resetting deployment key');
         res.status(500).send();
     }
 });
@@ -621,7 +622,7 @@ privateRouter.post(API_ROUTES.POST_UPDATE_ENV_VAR, async (req, res) => {
         await updateEnvironmentVariable(params.projectId, body);
         res.status(200).send('Environment variable updated');
     } catch (e) {
-        routeLog.error({ action: 'update_env_var_error', err: (e as any)?.message }, 'error updating environment variable');
+        routeLog.error({ action: 'update_env_var_error', err: serializeError(e) }, 'error updating environment variable');
         res.status(500).send();
     }
 });
@@ -636,7 +637,7 @@ privateRouter.post(API_ROUTES.POST_SYNC_TO_REPO, async (req, res) => {
         if (!project) return void res.status(404).send('Project not found');
         res.status(200).json(project);
     } catch (e) {
-        routeLog.error({ action: 'sync_to_repo_error', err: (e as any)?.message }, 'error syncing project to repo data');
+        routeLog.error({ action: 'sync_to_repo_error', err: serializeError(e) }, 'error syncing project to repo data');
         res.status(500).send();
     }
 });
@@ -650,7 +651,7 @@ privateRouter.post(API_ROUTES.POST_TEARDOWN_PROJECT, async (req, res) => {
         await teardownProjectWithCleanup(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'teardown_project_error', err: (e as any)?.message }, 'error tearing down project');
+        routeLog.error({ action: 'teardown_project_error', err: serializeError(e) }, 'error tearing down project');
         res.status(500).send();
     }
 });
@@ -664,7 +665,7 @@ privateRouter.post(API_ROUTES.POST_CANCEL_DEPLOY, async (req, res) => {
         await cancelDeploy(params.projectId);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'cancel_deploy_error', err: (e as any)?.message }, 'error cancelling deployment');
+        routeLog.error({ action: 'cancel_deploy_error', err: serializeError(e) }, 'error cancelling deployment');
         res.status(500).send();
     }
 });
@@ -679,7 +680,7 @@ privateRouter.post(API_ROUTES.POST_SET_PROJECT_ASSIGNMENT, async (req, res) => {
         await setProjectAssignment(params.projectId, body.nodeId);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'assign_project_error', err: (e as any)?.message }, 'error assigning project');
+        routeLog.error({ action: 'assign_project_error', err: serializeError(e) }, 'error assigning project');
         res.status(500).send();
     }
 });
@@ -697,7 +698,7 @@ privateRouter.post(API_ROUTES.POST_CICD_SETUP, async (req, res) => {
         if (!project) return void res.status(404).send('Project not found');
         res.status(200).json(redactProjectSecrets(project, true));
     } catch (e) {
-        routeLog.error({ action: 'cicd_setup_error', err: (e as any)?.message }, 'error setting up managed CI/CD');
+        routeLog.error({ action: 'cicd_setup_error', err: serializeError(e) }, 'error setting up managed CI/CD');
         res.status(500).send((e as any)?.message || 'Failed to set up CI/CD');
     }
 });
@@ -713,7 +714,7 @@ privateRouter.post(API_ROUTES.POST_CICD_REMOVE, async (req, res) => {
         if (!project) return void res.status(404).send('Project not found');
         res.status(200).json(redactProjectSecrets(project, true));
     } catch (e) {
-        routeLog.error({ action: 'cicd_remove_error', err: (e as any)?.message }, 'error removing managed CI/CD');
+        routeLog.error({ action: 'cicd_remove_error', err: serializeError(e) }, 'error removing managed CI/CD');
         res.status(500).send((e as any)?.message || 'Failed to remove CI/CD');
     }
 });
@@ -728,7 +729,7 @@ privateRouter.post(API_ROUTES.POST_SET_TEAM_DEFAULTS, async (req, res) => {
         await setTeamDefaults(params.ownerId, body.capabilities || []);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'set_team_defaults_error', err: (e as any)?.message }, 'error setting team defaults');
+        routeLog.error({ action: 'set_team_defaults_error', err: serializeError(e) }, 'error setting team defaults');
         res.status(500).send();
     }
 });
@@ -743,7 +744,7 @@ privateRouter.post(API_ROUTES.POST_SET_TEAM_OVERRIDE, async (req, res) => {
         await setTeamOverride(params.ownerId, body.memberId, body.memberLogin || '', body.capabilities || []);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'set_team_override_error', err: (e as any)?.message }, 'error setting team override');
+        routeLog.error({ action: 'set_team_override_error', err: serializeError(e) }, 'error setting team override');
         res.status(500).send();
     }
 });
@@ -758,7 +759,7 @@ privateRouter.post(API_ROUTES.POST_DELETE_TEAM_OVERRIDE, async (req, res) => {
         await clearTeamOverride(params.ownerId, body.memberId);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'delete_team_override_error', err: (e as any)?.message }, 'error deleting team override');
+        routeLog.error({ action: 'delete_team_override_error', err: serializeError(e) }, 'error deleting team override');
         res.status(500).send();
     }
 });
@@ -774,7 +775,7 @@ privateRouter.post(API_ROUTES.POST_ADD_ADMIN, async (req, res) => {
         if (!admin) return void res.status(404).send('GitHub user not found');
         res.status(200).json(admin);
     } catch (e) {
-        routeLog.error({ action: 'add_admin_error', err: (e as any)?.message }, 'error adding admin');
+        routeLog.error({ action: 'add_admin_error', err: serializeError(e) }, 'error adding admin');
         res.status(500).send();
     }
 });
@@ -788,7 +789,7 @@ privateRouter.post(API_ROUTES.POST_REMOVE_ADMIN, async (req, res) => {
         await removeAdmin(body.id);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'remove_admin_error', err: (e as any)?.message }, 'error removing admin');
+        routeLog.error({ action: 'remove_admin_error', err: serializeError(e) }, 'error removing admin');
         res.status(500).send();
     }
 });
@@ -801,7 +802,7 @@ privateRouter.post(API_ROUTES.POST_GITHUB_LOGOUT, async (req, res) => {
         await signOutUser(params.token);
         res.status(200).send('Logged out');
     } catch (e) {
-        routeLog.error({ action: 'github_logout_error', err: (e as any)?.message }, 'error with GitHub logout');
+        routeLog.error({ action: 'github_logout_error', err: serializeError(e) }, 'error with GitHub logout');
         res.status(500).send();
     }
 });
@@ -825,7 +826,7 @@ privateRouter.post(API_ROUTES.POST_PUSH_SUBSCRIBE, async (req, res) => {
         if (!ok) return void res.status(400).send('Invalid subscription');
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'push_subscribe_error', err: (e as any)?.message }, 'error saving push subscription');
+        routeLog.error({ action: 'push_subscribe_error', err: serializeError(e) }, 'error saving push subscription');
         res.status(500).send();
     }
 });
@@ -838,7 +839,7 @@ privateRouter.post(API_ROUTES.POST_PUSH_UNSUBSCRIBE, async (req, res) => {
         await unsubscribe(body?.endpoint);
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'push_unsubscribe_error', err: (e as any)?.message }, 'error removing push subscription');
+        routeLog.error({ action: 'push_unsubscribe_error', err: serializeError(e) }, 'error removing push subscription');
         res.status(500).send();
     }
 });
@@ -852,7 +853,7 @@ privateRouter.get(API_ROUTES.GET_PROJECT_NOTIFICATION, async (req, res) => {
         const token = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
         res.status(200).json({ enabled: await getProjectNotificationEnabled(token, params.projectId) });
     } catch (e) {
-        routeLog.error({ action: 'get_project_notification_error', err: (e as any)?.message }, 'error reading notification preference');
+        routeLog.error({ action: 'get_project_notification_error', err: serializeError(e) }, 'error reading notification preference');
         res.status(500).send();
     }
 });
@@ -870,7 +871,7 @@ privateRouter.post(API_ROUTES.POST_SET_PROJECT_NOTIFICATION, async (req, res) =>
         if (!ok) return void res.status(400).send('Could not set preference');
         res.status(200).json(undefined);
     } catch (e) {
-        routeLog.error({ action: 'set_project_notification_error', err: (e as any)?.message }, 'error setting notification preference');
+        routeLog.error({ action: 'set_project_notification_error', err: serializeError(e) }, 'error setting notification preference');
         res.status(500).send();
     }
 });
@@ -882,7 +883,21 @@ privateRouter.post(API_ROUTES.POST_PUSH_TEST, async (req, res) => {
         const token = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
         res.status(200).json(await sendTestNotification(token));
     } catch (e) {
-        routeLog.error({ action: 'push_test_error', err: (e as any)?.message }, 'error sending test notification');
+        routeLog.error({ action: 'push_test_error', err: serializeError(e) }, 'error sending test notification');
+        res.status(500).send();
+    }
+});
+
+// Ingest structured client-side logs (errors, unhandled rejections, API failures) shipped by the
+// frontend logger. Not leader-gated: the entries are written to this node's log stream (and thus
+// Loki) tagged service:'client'. Best-effort - always returns 200 so logging never disrupts the SPA.
+privateRouter.post(API_ROUTES.POST_CLIENT_LOGS, async (req, res) => {
+    try {
+        const token = (req.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '');
+        const entries = req.body as API_BODY[API_ROUTES.POST_CLIENT_LOGS];
+        res.status(200).json(await ingestClientLogs(token, entries));
+    } catch (e) {
+        routeLog.error({ action: 'client_logs_ingest_error', err: serializeError(e) }, 'error ingesting client logs');
         res.status(500).send();
     }
 });
@@ -1400,7 +1415,7 @@ internalRouter.get('/install/bundle.tgz', requireClusterSecret, async (req, res)
     tar.stdout.pipe(res);
     tar.stderr.on('data', (d) => routeLog.error({ action: 'bundle_tar_stderr', out: d.toString() }, 'bundle tar stderr'));
     tar.on('error', (e) => {
-        routeLog.error({ action: 'bundle_tar_spawn_failed', err: (e as any)?.message }, 'failed to spawn tar for bundle');
+        routeLog.error({ action: 'bundle_tar_spawn_failed', err: serializeError(e) }, 'failed to spawn tar for bundle');
         if (!res.headersSent) res.status(500);
         res.end();
     });
@@ -1417,7 +1432,7 @@ internalRouter.post('/cluster/git-token', requireClusterSecret, async (req, res)
     try {
         res.status(200).json(await mintInstallationToken(String(repoOwner), String(repoName)));
     } catch (e: any) {
-        routeLog.error({ action: 'git_token_mint_failed', repoOwner, repoName, err: e?.message || String(e) }, `failed to mint git token for ${repoOwner}/${repoName}`);
+        routeLog.error({ action: 'git_token_mint_failed', repoOwner, repoName, err: serializeError(e) }, `failed to mint git token for ${repoOwner}/${repoName}`);
         res.status(502).send('failed to mint installation token');
     }
 });
@@ -1431,7 +1446,7 @@ internalRouter.get('/cluster/deploy-key', requireClusterSecret, async (req, res)
         res.setHeader('Content-Type', 'text/plain');
         res.status(200).send(key);
     } catch (e) {
-        routeLog.error({ action: 'read_deploy_key_error', err: (e as any)?.message }, 'error reading deploy key');
+        routeLog.error({ action: 'read_deploy_key_error', err: serializeError(e) }, 'error reading deploy key');
         res.status(404).send('deploy key not found');
     }
 });
@@ -1497,7 +1512,7 @@ internalRouter.post('/node/disk-snapshot', requireClusterSecret, async (_req, re
     try {
         res.status(200).json(await collectDiskUsage());
     } catch (e: any) {
-        routeLog.error({ action: 'disk_snapshot_error', err: e?.message }, 'error collecting disk snapshot');
+        routeLog.error({ action: 'disk_snapshot_error', err: serializeError(e) }, 'error collecting disk snapshot');
         res.status(500).send(e?.message);
     }
 });
@@ -1517,7 +1532,7 @@ internalRouter.post('/node/config-values', requireClusterSecret, async (_req, re
     try {
         res.status(200).json(readLocalConfig());
     } catch (e: any) {
-        routeLog.error({ action: 'node_config_read_error', err: e?.message }, 'failed to read local node config');
+        routeLog.error({ action: 'node_config_read_error', err: serializeError(e) }, 'failed to read local node config');
         res.status(500).send(e?.message);
     }
 });
@@ -1529,7 +1544,7 @@ internalRouter.post('/node/config-apply', requireClusterSecret, async (req, res)
         applyLocalConfig(req.body);
         res.status(200).json({ ok: true });
     } catch (e: any) {
-        routeLog.error({ action: 'node_config_apply_error', err: e?.message }, 'failed to apply local node config');
+        routeLog.error({ action: 'node_config_apply_error', err: serializeError(e) }, 'failed to apply local node config');
         res.status(400).send(e?.message || 'Failed to apply config');
     }
 });

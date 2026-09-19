@@ -3,7 +3,7 @@ import { CdTrigger } from '@mosaiq/nsm-common/types';
 import { cluster } from '@/cluster/node';
 import { enqueueDeploy } from '@/controllers/deployQueue';
 import { getAllProjects } from '@/controllers/projectController';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const schedLog = areaLog('cd-schedule');
 
@@ -22,7 +22,7 @@ export const registerScheduledDeploy = (projectId: string, expr: string): void =
     const task = cron.schedule(expr, () => {
         if (!cluster.isLeader()) return;
         schedLog.info({ action: 'cd_schedule_fired', projectId, expr }, `scheduled deploy firing for ${projectId}`);
-        void enqueueDeploy(projectId).catch((e) => schedLog.error({ action: 'cd_schedule_deploy_failed', projectId, err: e?.message }, `scheduled deploy failed for ${projectId}`));
+        void enqueueDeploy(projectId).catch((e) => schedLog.error({ action: 'cd_schedule_deploy_failed', projectId, err: serializeError(e) }, `scheduled deploy failed for ${projectId}`));
     });
     tasks.set(projectId, task);
     schedLog.info({ action: 'cd_schedule_registered', projectId, expr }, `registered scheduled deploy for ${projectId}`);

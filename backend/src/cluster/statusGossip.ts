@@ -7,7 +7,7 @@ import { cluster } from './node';
 import { postToLeader } from './leaderClient';
 import { touchNodeModel } from '@/persistence/nodePersistence';
 import { updateServiceInstanceModel, getServiceInstanceByIdModel } from '@/persistence/serviceInstancePersistence';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const gossipLog = areaLog('gossip');
 
@@ -51,7 +51,7 @@ const buildReport = async (): Promise<NodeStatusReport> => {
             .map((c) => ({ serviceInstanceId: c.Labels[NSM_LABEL_SERVICE_INSTANCE_ID], state: c.State as DockerStatus, containerId: c.ID }))
             .filter((c) => !!c.serviceInstanceId);
     } catch (e: any) {
-        gossipLog.warn({ action: 'docker_list_failed', err: e?.message }, 'failed to list containers for status report');
+        gossipLog.warn({ action: 'docker_list_failed', err: serializeError(e) }, 'failed to list containers for status report');
     }
     return {
         nodeId: config.nodeId,

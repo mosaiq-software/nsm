@@ -6,7 +6,10 @@ import { EventEmitter } from 'events';
 const { logCalls } = vi.hoisted(() => ({ logCalls: [] as { level: string; obj: any; msg: string }[] }));
 vi.mock('@/utils/log', () => {
     const push = (level: string) => (obj: any, msg: string) => logCalls.push({ level, obj, msg });
-    return { areaLog: () => ({ debug: push('debug'), info: push('info'), warn: push('warn'), error: push('error') }) };
+    return {
+        areaLog: () => ({ debug: push('debug'), info: push('info'), warn: push('warn'), error: push('error') }),
+        runWithRequestContext: (_ctx: unknown, fn: () => unknown) => fn(),
+    };
 });
 
 import { requestLogger } from '@/middleware/requestLog';

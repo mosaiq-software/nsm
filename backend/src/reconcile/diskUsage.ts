@@ -5,7 +5,7 @@ import { NodeFilesystemUsage, NodeStorageSpec, ProjectDiskUsage } from '@mosaiq/
 import { config } from '@/config';
 import { listLocalProjects } from './state';
 import { projectDiskUsageBytes } from '@/utils/metrics';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const execFileAsync = promisify(execFile);
 const diskLog = areaLog('diskUsage');
@@ -82,7 +82,7 @@ const dirSizeBytes = async (path: string): Promise<number> => {
         const n = parseInt(stdout.split(/\s+/)[0], 10);
         return Number.isFinite(n) ? n : 0;
     } catch (e: any) {
-        diskLog.warn({ action: 'du_failed', path, err: e?.message }, `du failed for ${path}`);
+        diskLog.warn({ action: 'du_failed', path, err: serializeError(e) }, `du failed for ${path}`);
         return 0;
     }
 };
@@ -104,7 +104,7 @@ const collectFilesystems = async (mounts: MountEntry[]): Promise<NodeFilesystemU
             const freeBytes = Number(st.bfree) * bsize;
             out.push({ device: m.device, mountpoint: m.mountpoint, fstype: m.fstype, sizeBytes, usedBytes: Math.max(0, sizeBytes - freeBytes), availBytes });
         } catch (e: any) {
-            diskLog.warn({ action: 'statfs_failed', mountpoint: m.mountpoint, err: e?.message }, `statfs failed for ${m.mountpoint}`);
+            diskLog.warn({ action: 'statfs_failed', mountpoint: m.mountpoint, err: serializeError(e) }, `statfs failed for ${m.mountpoint}`);
         }
     }
     return out;

@@ -7,7 +7,7 @@ import { CfDnsRecordInput, addDynamicTag, createDnsRecord, deleteDnsRecord, getD
 import { syncZoneRecords } from '@/reconcile/cloudflareSync';
 import { checkPublicIp, getKnownPublicIp } from '@/reconcile/publicIpWatcher';
 import { config } from '@/config';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 // Record types that carry a port NSM can drive from a reservation. SRV's port lives in `data.port`.
 const PORT_BINDABLE_TYPES = new Set(['SRV']);
@@ -94,7 +94,7 @@ export const getZoneAnalytics = async (zoneId: string): Promise<DnsZoneAnalytics
     try {
         rows = await getDnsAnalytics(zoneId, since, until);
     } catch (e: any) {
-        dnsLog.warn({ action: 'dns_analytics_failed', zoneId, err: e?.message }, `failed to load DNS analytics for zone ${zoneId}`);
+        dnsLog.warn({ action: 'dns_analytics_failed', zoneId, err: serializeError(e) }, `failed to load DNS analytics for zone ${zoneId}`);
         return empty;
     }
 
@@ -231,7 +231,7 @@ export const syncPortBoundRecords = async (reservationId: string): Promise<void>
             }
             touchedZones.add(rec.zoneId);
         } catch (e: any) {
-            dnsLog.error({ action: 'port_record_update_failed', recordId: rec.id, err: e?.message }, `failed to update port-bound record ${rec.name}`);
+            dnsLog.error({ action: 'port_record_update_failed', recordId: rec.id, err: serializeError(e) }, `failed to update port-bound record ${rec.name}`);
         }
     }
     for (const zoneId of touchedZones) await syncZoneRecords(zoneId);

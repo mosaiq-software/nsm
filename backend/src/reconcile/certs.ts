@@ -5,7 +5,7 @@ import { deleteCertModel, getAllCertsModel, upsertCertModel } from '@/persistenc
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 import { dashboardDomain } from './dashboardIngress';
 import { CertRecord } from '@mosaiq/nsm-common/clusterOps';
-import { areaLog } from '@/utils/log';
+import { areaLog, serializeError } from '@/utils/log';
 
 const certLog = areaLog('certs');
 
@@ -66,7 +66,7 @@ const obtainCert = async (domain: string): Promise<void> => {
         await upsertCertModel(cert);
         certLog.info({ action: 'cert_issued', domain, notAfter }, `issued/renewed cert for ${domain}`);
     } catch (e: any) {
-        certLog.error({ action: 'cert_record_failed', domain, err: e?.message }, `failed to record cert for ${domain}`);
+        certLog.error({ action: 'cert_record_failed', domain, err: serializeError(e) }, `failed to record cert for ${domain}`);
     }
 };
 
@@ -84,7 +84,7 @@ export const removeCertsForDomains = async (domains: string[]): Promise<void> =>
         try {
             await deleteCertModel(domain);
         } catch (e: any) {
-            certLog.error({ action: 'cert_record_delete_failed', domain, err: e?.message }, `failed to remove cert record for ${domain}`);
+            certLog.error({ action: 'cert_record_delete_failed', domain, err: serializeError(e) }, `failed to remove cert record for ${domain}`);
         }
     }
 };
