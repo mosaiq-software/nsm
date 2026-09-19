@@ -1,4 +1,4 @@
-import { Badge, Button, Group, NumberInput, Progress, Stack, Text } from '@mantine/core';
+import { Button, Group, NumberInput, Progress, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { ProjectResourceQuota, ProjectResourceUsage } from '@mosaiq/nsm-common/types';
@@ -21,16 +21,6 @@ const numberOrUndefined = (v: number | string | undefined): number | undefined =
     if (v === undefined || v === '') return undefined;
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
-};
-
-// True when any resource with a configured allocation is currently exceeded.
-export const isOverAllocation = (quota: ProjectResourceQuota | undefined, usage: ProjectResourceUsage | undefined): boolean => {
-    if (!quota || !usage) return false;
-    return (
-        (quota.cpuCores !== undefined && usage.cpuCores > quota.cpuCores) ||
-        (quota.memoryBytes !== undefined && usage.memoryBytes > quota.memoryBytes) ||
-        (quota.storageBytes !== undefined && usage.storageBytes > quota.storageBytes)
-    );
 };
 
 interface UsageBarProps {
@@ -133,16 +123,5 @@ export const ResourceAllocationEditor = ({ projectId, quota, onSaved }: EditorPr
                 Allocations are advisory: exceeding one notifies NSM admins and the project&apos;s team but never blocks the project. Leave a field blank to remove its allocation.
             </Text>
         </Stack>
-    );
-};
-
-// Small badge summarizing whether a project is within or over its allocation.
-export const AllocationStatusBadge = ({ quota, usage }: { quota: ProjectResourceQuota | undefined; usage: ProjectResourceUsage | undefined }) => {
-    const hasAnyQuota = !!quota && (quota.cpuCores !== undefined || quota.memoryBytes !== undefined || quota.storageBytes !== undefined);
-    if (!hasAnyQuota) return <Badge color="gray" variant="light">No allocation</Badge>;
-    return isOverAllocation(quota, usage) ? (
-        <Badge color="red" variant="filled">Over allocation</Badge>
-    ) : (
-        <Badge color="green" variant="light">Within allocation</Badge>
     );
 };

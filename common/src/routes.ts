@@ -1,4 +1,4 @@
-import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, ResourceAllocation, Secret, Team, TeamDetail, User } from './types';
+import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
 import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
 
 // ===== ROUTES =====
@@ -28,7 +28,6 @@ export enum API_ROUTES {
     GET_GITHUB_BRANCHES = '/github/branches',
     GET_VAPID_PUBLIC_KEY = '/push/vapid-public-key',
     GET_PROJECT_NOTIFICATION = '/push/preference/:projectId',
-    GET_RESOURCE_ALLOCATIONS = '/allocations',
     GET_PROJECT_RESOURCE_USAGE = '/project/:projectId/resource-usage',
     GET_DOMAINS = '/domains',
     GET_DOMAIN_REQUESTS = '/domains/requests',
@@ -106,7 +105,6 @@ export interface API_PARAMS {
     [API_ROUTES.GET_GITHUB_BRANCHES]: {};
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: {};
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { projectId: string };
-    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: {};
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: { projectId: string };
     [API_ROUTES.GET_DOMAINS]: {};
     [API_ROUTES.GET_DOMAIN_REQUESTS]: {};
@@ -185,7 +183,6 @@ export interface API_BODY {
     [API_ROUTES.GET_GITHUB_BRANCHES]: undefined;
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: undefined;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: undefined;
-    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: undefined;
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: undefined;
     [API_ROUTES.GET_DOMAINS]: undefined;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: undefined;
@@ -263,7 +260,6 @@ export interface API_RETURN {
     [API_ROUTES.GET_GITHUB_BRANCHES]: string[];
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { enabled: boolean };
-    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: ResourceAllocation[];
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: ProjectResourceUsage | undefined;
     [API_ROUTES.GET_DOMAINS]: DnsZone[];
     [API_ROUTES.GET_DOMAIN_REQUESTS]: DomainRequest[];
@@ -343,7 +339,6 @@ export interface API_AUTH {
     [API_ROUTES.GET_GITHUB_BRANCHES]: string;
     [API_ROUTES.GET_VAPID_PUBLIC_KEY]: string;
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: string;
-    [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: string;
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: string;
     [API_ROUTES.GET_DOMAINS]: string;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: string;

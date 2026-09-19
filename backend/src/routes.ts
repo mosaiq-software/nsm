@@ -11,7 +11,7 @@ import { updateEnvironmentVariable } from '@/controllers/secretController';
 import { getProjectInstance } from '@/controllers/projectInstanceController';
 import { getControlPlaneStatus } from '@/controllers/statusController';
 import { queryLogs, queryMetric, queryNsmLogs, queryStructuredLogs, queryLogFacets, queryNodeMetric, getNodeStorageSpec, queryNodeStorageSeries, getProjectResourceUsage, MetricKind } from '@/controllers/observabilityController';
-import { listResourceAllocations, setProjectQuota } from '@/controllers/quotaController';
+import { setProjectQuota } from '@/controllers/quotaController';
 import { NodeMetricKind } from '@mosaiq/nsm-common/types';
 import { collectDiskUsage } from '@/reconcile/diskUsage';
 import { getGithubAuthTokenFromTempCode } from '@/utils/authUtils';
@@ -372,18 +372,6 @@ privateRouter.post(API_ROUTES.POST_NODE_STORAGE_SNAPSHOT, async (req, res) => {
         const spec = await postToNode(node.address, node.apiPort, '/node/disk-snapshot', {}, 120000);
         if (!spec) return void res.status(502).send('failed to reach node for snapshot');
         res.status(200).json(spec);
-    } catch (e: any) {
-        res.status(400).send(e.message);
-    }
-});
-
-// Per-project resource allocations with current usage, for the admin allocations overview.
-// Leader-only (Prometheus lives on the leader) and admin-gated.
-privateRouter.get(API_ROUTES.GET_RESOURCE_ALLOCATIONS, async (req, res) => {
-    if (!requireLeader(req, res)) return;
-    if (!(await requireAdmin(req, res))) return;
-    try {
-        res.status(200).json(await listResourceAllocations());
     } catch (e: any) {
         res.status(400).send(e.message);
     }

@@ -45,15 +45,6 @@ export interface ProjectResourceUsage {
     memoryBytes: number;
     storageBytes: number;
 }
-
-// A project's allocation alongside its current usage, for the admin allocations overview.
-export interface ResourceAllocation {
-    projectId: string;
-    repoOwner: string;
-    quota: ProjectResourceQuota;
-    usage: ProjectResourceUsage;
-}
-
 // Trigger types a managed GitHub Actions workflow can react to.
 export enum CdTrigger {
     PUSH = 'push',

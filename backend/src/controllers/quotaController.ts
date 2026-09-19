@@ -1,4 +1,4 @@
-import { Project, ProjectResourceQuota, ResourceAllocation } from '@mosaiq/nsm-common/types';
+import { Project, ProjectResourceQuota } from '@mosaiq/nsm-common/types';
 import { getAllProjects, getProject, proposeProjectUpsert } from './projectController';
 import { getProjectResourceUsage } from './observabilityController';
 import { QuotaBreachInfo, sendQuotaBreachNotification } from './pushController';
@@ -41,18 +41,6 @@ export const setProjectQuota = async (projectId: string, quota: ProjectResourceQ
     delete (merged as any).instances;
     await proposeProjectUpsert(merged);
     quotaLog.info({ action: 'quota_set', projectId, quota: cleaned }, `resource allocation updated for ${projectId}`);
-};
-
-// All projects with their allocation and current usage, for the admin allocations overview.
-export const listResourceAllocations = async (): Promise<ResourceAllocation[]> => {
-    const projects = await getAllProjects();
-    const allocations = await Promise.all(
-        projects.map(async (p) => {
-            const usage = await getProjectResourceUsage(p.id).catch(() => ({ cpuCores: 0, memoryBytes: 0, storageBytes: 0 }));
-            return { projectId: p.id, repoOwner: p.repoOwner, quota: p.resourceQuota ?? {}, usage };
-        })
-    );
-    return allocations;
 };
 
 // The set of resource keys a project is currently over allocation on.
