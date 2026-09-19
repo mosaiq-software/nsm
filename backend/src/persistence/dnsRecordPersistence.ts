@@ -72,10 +72,17 @@ const recordToRow = (r: DnsRecord): DnsRecordRow => ({
     lastSyncedAt: Date.now(),
 });
 
-// Cloudflare-authoritative snapshot for a zone: replace the cached record set wholesale.
+// Cloudflare-authoritative snapshot for a zone: replace the cached record set wholesale. Records are
+// forced under the given zoneId (Cloudflare no longer returns zone_id per record). Incoming ids are
+// also cleared first so any rows previously cached under a stale/empty zoneId cannot collide on the
+// primary key.
 export const replaceZoneRecordsModel = async (zoneId: string, records: DnsRecord[]): Promise<void> => {
+    const rows = records.map((r) => recordToRow({ ...r, zoneId }));
     await DnsRecordModel.destroy({ where: { zoneId } });
-    if (records.length) await DnsRecordModel.bulkCreate(records.map(recordToRow) as any[]);
+    if (rows.length) {
+        await DnsRecordModel.destroy({ where: { id: rows.map((r) => r.id) } });
+        await DnsRecordModel.bulkCreate(rows as any[]);
+    }
 };
 
 export const getRecordsForZoneModel = async (zoneId: string): Promise<DnsRecord[]> => {

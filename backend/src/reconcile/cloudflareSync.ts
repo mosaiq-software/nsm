@@ -10,9 +10,11 @@ import { areaLog } from '@/utils/log';
 
 const syncLog = areaLog('cloudflare');
 
-const cfToRecord = (r: CfDnsRecord): DnsRecord => ({
+// Cloudflare stopped returning zone_id/zone_name on individual DNS records (EOL 2024-11-30), so the
+// zone the record belongs to is taken from the zone being synced, not from the record payload.
+const cfToRecord = (r: CfDnsRecord, zoneId: string): DnsRecord => ({
     id: r.id,
-    zoneId: r.zone_id,
+    zoneId,
     type: r.type as DnsRecordType,
     name: r.name,
     content: r.content,
@@ -59,7 +61,7 @@ const performCloudflareSync = async (): Promise<{ zoneCount: number }> => {
         const existing = await getDnsZoneModel(z.id);
         const reg = registrarByName.get(z.name.toLowerCase());
         const records = await listDnsRecords(z.id);
-        await replaceZoneRecordsModel(z.id, records.map(cfToRecord));
+        await replaceZoneRecordsModel(z.id, records.map((r) => cfToRecord(r, z.id)));
         await upsertDnsZoneModel({
             id: z.id,
             name: z.name,
@@ -111,7 +113,7 @@ export const syncZoneRecords = async (zoneId: string): Promise<void> => {
     if (!isCloudflareConfigured()) return;
     try {
         const records = await listDnsRecords(zoneId);
-        await replaceZoneRecordsModel(zoneId, records.map(cfToRecord));
+        await replaceZoneRecordsModel(zoneId, records.map((r) => cfToRecord(r, zoneId)));
         const existing = await getDnsZoneModel(zoneId);
         if (existing) await upsertDnsZoneModel({ ...existing, recordCount: records.length, lastSyncedAt: Date.now() });
     } catch (e: any) {
