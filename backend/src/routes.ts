@@ -290,10 +290,10 @@ privateRouter.get(API_ROUTES.GET_TEAM, async (req, res) => {
     }
 });
 
-// Admin management (super admin only).
+// Admins are viewable by any admin; only the super admin can add or remove them (see write routes).
 privateRouter.get(API_ROUTES.GET_ADMINS, async (req, res) => {
     if (!requireLeader(req, res)) return;
-    if (!(await requireSuperAdmin(req, res))) return;
+    if (!(await requireAdmin(req, res))) return;
     res.status(200).json(await getAdmins());
 });
 

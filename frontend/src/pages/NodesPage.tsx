@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Anchor, Badge, Button, Center, Code, CopyButton, Group, Loader, Paper, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { Alert, Anchor, Badge, Button, Card, Center, Code, CopyButton, Group, Loader, Paper, SimpleGrid, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useCluster } from '@/contexts/cluster-context';
@@ -78,6 +78,10 @@ const AddNodePanel = () => {
 
 const NodesPage = () => {
     const clusterCtx = useCluster();
+    const status = clusterCtx.status;
+
+    const reachableCount = status?.health.filter((h) => h.reachable).length ?? 0;
+    const totalCount = status?.nodes.length ?? clusterCtx.nodes.length;
 
     return (
         <Stack>
@@ -89,6 +93,34 @@ const NodesPage = () => {
                     No leader node is currently reachable. Cluster status and deployments are unavailable until a leader is up.
                 </Alert>
             )}
+            <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                <Card withBorder>
+                    <Stack gap="xs">
+                        <Text c="dimmed" size="sm">
+                            Leader
+                        </Text>
+                        <Text fw={600}>{status?.leaderId ?? clusterCtx.leader?.nodeId ?? 'None'}</Text>
+                    </Stack>
+                </Card>
+                <Card withBorder>
+                    <Stack gap="xs">
+                        <Text c="dimmed" size="sm">
+                            Nodes Reachable
+                        </Text>
+                        <Text fw={600}>
+                            {reachableCount} / {totalCount}
+                        </Text>
+                    </Stack>
+                </Card>
+                <Card withBorder>
+                    <Stack gap="xs">
+                        <Text c="dimmed" size="sm">
+                            Desired NSM Version
+                        </Text>
+                        <Text fw={600}>{status?.desiredNsmVersion ?? '—'}</Text>
+                    </Stack>
+                </Card>
+            </SimpleGrid>
             {clusterCtx.nodes.length === 0 ? (
                 <Center py="xl">
                     {clusterCtx.status === null ? <Loader /> : <Text c="dimmed">No nodes registered yet.</Text>}
@@ -103,6 +135,7 @@ const NodesPage = () => {
                             <Table.Th>Role</Table.Th>
                             <Table.Th>Health</Table.Th>
                             <Table.Th>NSM Version</Table.Th>
+                            <Table.Th>Version Match</Table.Th>
                             <Table.Th>Last Seen</Table.Th>
                         </Table.Tr>
                     </Table.Thead>
@@ -110,6 +143,7 @@ const NodesPage = () => {
                         {clusterCtx.nodes.map((node) => {
                             const health = clusterCtx.healthById[node.nodeId];
                             const reachable = health?.reachable ?? false;
+                            const matches = status?.desiredNsmVersion ? health?.nsmVersion === status.desiredNsmVersion : true;
                             return (
                                 <Table.Tr key={node.nodeId}>
                                     <Table.Td>
@@ -139,6 +173,11 @@ const NodesPage = () => {
                                         </Badge>
                                     </Table.Td>
                                     <Table.Td>{health?.nsmVersion ?? '—'}</Table.Td>
+                                    <Table.Td>
+                                        <Badge variant="light" color={matches ? 'green' : 'orange'}>
+                                            {matches ? 'Up to date' : 'Mismatch'}
+                                        </Badge>
+                                    </Table.Td>
                                     <Table.Td>{relativeTime(node.lastSeen)}</Table.Td>
                                 </Table.Tr>
                             );

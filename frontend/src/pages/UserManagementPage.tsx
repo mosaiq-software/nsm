@@ -1,34 +1,40 @@
 import { useAPI } from '@/utils/api';
+import { useMe } from '@/contexts/me-context';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { Admin } from '@mosaiq/nsm-common/types';
-import { ActionIcon, Avatar, Button, Center, Group, Loader, Modal, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import { Admin, Team, TeamType } from '@mosaiq/nsm-common/types';
+import { ActionIcon, Alert, Avatar, Badge, Button, Card, Center, Group, Loader, Modal, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { useDebouncedCallback } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { useEffect, useState } from 'react';
-import { MdOutlineDelete, MdOutlineLaunch, MdOutlineLock } from 'react-icons/md';
+import { Link } from 'react-router-dom';
+import { MdOutlineDelete, MdOutlineLaunch, MdOutlineLock, MdOutlineWarningAmber } from 'react-icons/md';
 
 interface GhUser {
     login: string;
     avatarUrl: string;
 }
 
-// Super-admin-only page to manage NSM admins (individual GitHub users with full access except admin
-// management itself). The super admin (VITE_GITHUB_OAUTH_DEFAULT_USER) is implicit and non-removable.
-const AdminsPage = () => {
+// Admin-only page combining the list of teams (GitHub orgs/users that have installed the NSM GitHub
+// App, plus configured-but-uninstalled ones) with the list of NSM admins. Any admin can view both
+// lists; only the super admin can add or remove admins.
+const UserManagementPage = () => {
     const api = useAPI();
+    const meCtx = useMe();
+    const [teams, setTeams] = useState<Team[] | undefined>(undefined);
     const [admins, setAdmins] = useState<Admin[] | undefined>(undefined);
     const [superAdminLogin, setSuperAdminLogin] = useState<string | null>(null);
     const [superAdminInfo, setSuperAdminInfo] = useState<GhUser | null>(null);
     const [modalOpen, setModalOpen] = useState(false);
 
-    const load = async () => {
+    const loadAdmins = async () => {
         const res = await api.get(API_ROUTES.GET_ADMINS, {});
         setAdmins(res?.admins ?? []);
         setSuperAdminLogin(res?.superAdminLogin ?? null);
     };
 
     useEffect(() => {
-        void load();
+        void api.get(API_ROUTES.GET_TEAMS, {}).then((res) => setTeams(res ?? []));
+        void loadAdmins();
     }, [api.token]);
 
     useEffect(() => {
@@ -48,16 +54,47 @@ const AdminsPage = () => {
             notifications.show({ message: 'Could not add admin (GitHub user not found)', color: 'red' });
             return;
         }
-        await load();
+        await loadAdmins();
         setModalOpen(false);
         notifications.show({ message: `Added admin ${created.login}`, color: 'green' });
     };
 
     return (
         <Stack maw={800}>
-            <AddAdminModal opened={modalOpen} onClose={() => setModalOpen(false)} onAdd={handleAdd} />
-            <Title order={2}>Access Management</Title>
-            <Text c="dimmed">NSM admins have full access to everything except managing this list. Teams and their members are configured separately under Teams.</Text>
+            {meCtx.isSuperAdmin && <AddAdminModal opened={modalOpen} onClose={() => setModalOpen(false)} onAdd={handleAdd} />}
+
+            <Title order={2}>User Management</Title>
+
+            <Title order={3}>Teams</Title>
+            <Text c="dimmed">Teams are the GitHub organizations and users that have installed the NSM GitHub App. Configure each team's default permissions and per-member overrides from its page.</Text>
+            {teams === undefined ? (
+                <Center>
+                    <Loader />
+                </Center>
+            ) : teams.length === 0 ? (
+                <Alert color="yellow" icon={<MdOutlineWarningAmber />} title="No teams yet">
+                    Install the NSM GitHub App on a GitHub organization or user account to create a team.
+                </Alert>
+            ) : (
+                <Stack gap="sm">
+                    {teams.map((team) => (
+                        <Card key={team.ownerId} withBorder component={Link} to={`/teams/${team.ownerId}`} style={{ textDecoration: 'none' }}>
+                            <Group justify="space-between">
+                                <Group>
+                                    <Text fw={600}>{team.login}</Text>
+                                    <Badge variant="light" color={team.type === TeamType.ORGANIZATION ? 'blue' : 'grape'}>
+                                        {team.type === TeamType.ORGANIZATION ? 'Organization' : 'User'}
+                                    </Badge>
+                                </Group>
+                                {team.installed ? <Badge color="green" variant="light">Installed</Badge> : <Badge color="red" variant="light" leftSection={<MdOutlineWarningAmber />}>App not installed</Badge>}
+                            </Group>
+                        </Card>
+                    ))}
+                </Stack>
+            )}
+
+            <Title order={3} mt="md">Admins</Title>
+            <Text c="dimmed">NSM admins have full access to everything except managing this list. Only the super admin can add or remove admins.</Text>
             {admins === undefined ? (
                 <Center>
                     <Loader />
@@ -91,20 +128,24 @@ const AdminsPage = () => {
                                     <Text>{admin.login}</Text>
                                 </Table.Td>
                                 <Table.Td>
-                                    <Tooltip label={`Remove admin ${admin.login}`}>
-                                        <ActionIcon color="red" variant="light" onClick={() => handleRemove(admin)}>
-                                            <MdOutlineDelete />
-                                        </ActionIcon>
-                                    </Tooltip>
+                                    {meCtx.isSuperAdmin && (
+                                        <Tooltip label={`Remove admin ${admin.login}`}>
+                                            <ActionIcon color="red" variant="light" onClick={() => handleRemove(admin)}>
+                                                <MdOutlineDelete />
+                                            </ActionIcon>
+                                        </Tooltip>
+                                    )}
                                 </Table.Td>
                             </Table.Tr>
                         ))}
                     </Table.Tbody>
                 </Table>
             )}
-            <Button onClick={() => setModalOpen(true)} disabled={admins === undefined} variant="outline" maw={200}>
-                Add Admin
-            </Button>
+            {meCtx.isSuperAdmin && (
+                <Button onClick={() => setModalOpen(true)} disabled={admins === undefined} variant="outline" maw={200}>
+                    Add Admin
+                </Button>
+            )}
         </Stack>
     );
 };
@@ -165,4 +206,4 @@ const getGhInfo = async (username: string): Promise<GhUser | null> => {
     }
 };
 
-export default AdminsPage;
+export default UserManagementPage;

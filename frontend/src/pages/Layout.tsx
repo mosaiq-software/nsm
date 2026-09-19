@@ -299,12 +299,10 @@ const Layout = (props: { children: React.ReactNode }) => {
                         <>
                             <RouterLink to="/nodes" label="Nodes" showActive />
                             <RouterLink to="/allocations" label="Allocations" showActive />
-                            <RouterLink to="/status" label="Cluster Status" showActive />
                             <RouterLink to="/logs" label="NSM Logs" showActive />
-                            <RouterLink to="/teams" label="Teams" showActive />
+                            <RouterLink to="/users" label="User Management" showActive />
                         </>
                     )}
-                    {meCtx.isSuperAdmin && <RouterLink to="/access" label="Access Management" showActive />}
                     <Space h="md" />
                     <Divider w="80%" mx="auto" my="sm" />
                     {meCtx.teams.map((team) => (
