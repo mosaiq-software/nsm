@@ -27,6 +27,10 @@ const METRIC_DEFS: { kind: NodeMetricKind; title: string; yLabel: string; color:
 
 const PROJECT_PALETTE = ['blue.6', 'teal.6', 'grape.6', 'cyan.6', 'lime.6', 'pink.6', 'indigo.6', 'yellow.7', 'red.6', 'green.6'];
 
+const REFRESH_MS = 30000;
+
+const TOP_PROJECTS_LIMIT = 5;
+
 function relativeTime(ts: number): string {
     if (!ts) return 'never';
     const diff = Date.now() - ts;
@@ -156,31 +160,34 @@ const FilesystemCard = ({ fs, projects }: { fs: NodeFilesystemUsage; projects: P
     }, [sorted, fs]);
 
     return (
-        <Card withBorder>
-            <Stack gap="sm">
-                <Group justify="space-between" wrap="nowrap">
-                    <Group gap="xs" wrap="nowrap">
-                        <Text fw={700}>{fs.device}</Text>
-                        <Badge variant="light" color="gray">
-                            {fs.mountpoint}
-                        </Badge>
-                        <Badge variant="outline" color="gray">
-                            {fs.fstype}
-                        </Badge>
+        <Accordion.Item value={fsKey(fs.device, fs.mountpoint)}>
+            <Accordion.Control>
+                <Stack gap="xs" pr="md">
+                    <Group justify="space-between" wrap="nowrap">
+                        <Group gap="xs" wrap="nowrap">
+                            <Text fw={700}>{fs.device}</Text>
+                            <Badge variant="light" color="gray">
+                                {fs.mountpoint}
+                            </Badge>
+                            <Badge variant="outline" color="gray">
+                                {fs.fstype}
+                            </Badge>
+                        </Group>
+                        <Text size="sm" c="dimmed">
+                            {formatBytes(fs.usedBytes)} used / {formatBytes(fs.availBytes)} free / {formatBytes(fs.sizeBytes)} total ({usedPct.toFixed(1)}%)
+                        </Text>
                     </Group>
-                    <Text size="sm" c="dimmed">
-                        {formatBytes(fs.usedBytes)} used / {formatBytes(fs.availBytes)} free / {formatBytes(fs.sizeBytes)} total ({usedPct.toFixed(1)}%)
-                    </Text>
-                </Group>
 
-                <Progress.Root size="xl">
-                    {sections.map((s, idx) => (
-                        <Tooltip key={`${s.label}-${idx}`} label={`${s.label}: ${formatBytes(s.bytes)}`}>
-                            <Progress.Section value={s.value} color={s.color} />
-                        </Tooltip>
-                    ))}
-                </Progress.Root>
-
+                    <Progress.Root size="xl">
+                        {sections.map((s, idx) => (
+                            <Tooltip key={`${s.label}-${idx}`} label={`${s.label}: ${formatBytes(s.bytes)}`}>
+                                <Progress.Section value={s.value} color={s.color} />
+                            </Tooltip>
+                        ))}
+                    </Progress.Root>
+                </Stack>
+            </Accordion.Control>
+            <Accordion.Panel>
                 {sorted.length === 0 ? (
                     <Text size="sm" c="dimmed">
                         No project data on this filesystem.
@@ -192,8 +199,8 @@ const FilesystemCard = ({ fs, projects }: { fs: NodeFilesystemUsage; projects: P
                         ))}
                     </Accordion>
                 )}
-            </Stack>
-        </Card>
+            </Accordion.Panel>
+        </Accordion.Item>
     );
 };
 
@@ -237,11 +244,12 @@ const NodeDetailPage = () => {
         } finally {
             setLoading(false);
         }
-    }, [api, nodeId, rangeMs]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [api.token, nodeId, rangeMs]);
 
     useEffect(() => {
         refresh();
-        const interval = setInterval(refresh, 30000);
+        const interval = setInterval(refresh, REFRESH_MS);
         return () => clearInterval(interval);
     }, [refresh]);
 
@@ -283,11 +291,21 @@ const NodeDetailPage = () => {
     }, [storage]);
 
     const seriesChart = useMemo(() => {
-        const s = series?.series ?? [];
-        if (s.length === 0) return { data: [] as Record<string, number | string>[], defs: [] as { name: string; color: string }[] };
+        const all = series?.series ?? [];
+        // Drop the node-summed "__total__" series and rank the remaining per-project series so we only
+        // chart the biggest disk users; hundreds of lines are unreadable.
+        const perProject = all.filter((entry) => entry.labels.projectId !== '__total__');
+        const rankValue = (entry: (typeof perProject)[number]) => {
+            for (let i = entry.values.length - 1; i >= 0; i--) {
+                if (Number.isFinite(entry.values[i].v)) return entry.values[i].v;
+            }
+            return entry.values.reduce((max, p) => (p.v > max ? p.v : max), 0);
+        };
+        const top = [...perProject].sort((a, b) => rankValue(b) - rankValue(a)).slice(0, TOP_PROJECTS_LIMIT);
+        if (top.length === 0) return { data: [] as Record<string, number | string>[], defs: [] as { name: string; color: string }[] };
         const byTime = new Map<number, Record<string, number | string>>();
-        const defs = s.map((entry, idx) => ({ name: projectLabel(entry.labels.projectId || `Project ${idx + 1}`), color: entry.labels.projectId === '__total__' ? 'dark.4' : PROJECT_PALETTE[idx % PROJECT_PALETTE.length] }));
-        s.forEach((entry, idx) => {
+        const defs = top.map((entry, idx) => ({ name: projectLabel(entry.labels.projectId || `Project ${idx + 1}`), color: PROJECT_PALETTE[idx % PROJECT_PALETTE.length] }));
+        top.forEach((entry, idx) => {
             const name = defs[idx].name;
             for (const point of entry.values) {
                 const row = byTime.get(point.t) ?? { time: formatAxisTime(point.t, rangeMs) };
@@ -393,17 +411,21 @@ const NodeDetailPage = () => {
             ) : storage.filesystems.length === 0 && unmatched.length === 0 ? (
                 <Text c="dimmed">No storage data reported for this node yet. Take a snapshot to scan now.</Text>
             ) : (
-                <Stack>
+                <Accordion variant="separated" multiple>
                     {storage.filesystems.map((fs) => (
                         <FilesystemCard key={fsKey(fs.device, fs.mountpoint)} fs={fs} projects={fsToProjects.get(fsKey(fs.device, fs.mountpoint)) ?? []} />
                     ))}
                     {unmatched.length > 0 && (
-                        <Card withBorder>
-                            <Stack gap="sm">
-                                <Text fw={700}>Other project storage</Text>
-                                <Text size="sm" c="dimmed">
-                                    Usage on filesystems not reported by node_exporter.
-                                </Text>
+                        <Accordion.Item value="__unmatched__">
+                            <Accordion.Control>
+                                <Stack gap={2} pr="md">
+                                    <Text fw={700}>Other project storage</Text>
+                                    <Text size="sm" c="dimmed">
+                                        Usage on filesystems not reported by node_exporter.
+                                    </Text>
+                                </Stack>
+                            </Accordion.Control>
+                            <Accordion.Panel>
                                 <Accordion variant="contained">
                                     {unmatched
                                         .sort((a, b) => b.totalBytes - a.totalBytes)
@@ -411,16 +433,17 @@ const NodeDetailPage = () => {
                                             <ProjectBreakdown key={`${p.projectId}|${p.device}|${p.mountpoint}`} project={p} driveSize={0} />
                                         ))}
                                 </Accordion>
-                            </Stack>
-                        </Card>
+                            </Accordion.Panel>
+                        </Accordion.Item>
                     )}
-                </Stack>
+                </Accordion>
             )}
 
             <Card withBorder mt="md">
-                <Title order={5} mb="sm">
-                    Project disk usage over time
-                </Title>
+                <Title order={5}>Project disk usage over time</Title>
+                <Text size="sm" c="dimmed" mb="sm">
+                    Top {TOP_PROJECTS_LIMIT} projects by current disk usage
+                </Text>
                 {seriesChart.data.length === 0 ? (
                     <Center py="xl">
                         <Text c="dimmed">No time-series storage data yet.</Text>
