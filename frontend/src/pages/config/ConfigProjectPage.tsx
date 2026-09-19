@@ -1,4 +1,4 @@
-import { Alert, Button, Code, Divider, Group, List, NumberInput, Select, Stack, Switch, Text, TextInput, Title, Tooltip, Modal } from '@mantine/core';
+import { Alert, Button, Code, Divider, Group, List, NumberInput, Select, Stack, Text, TextInput, Title, Tooltip, Modal } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { Capability } from '@mosaiq/nsm-common/types';
 import { useState } from 'react';
@@ -7,7 +7,6 @@ import { MdOutlineLan, MdOutlineLaunch } from 'react-icons/md';
 import { useDeleteProject, useSetProjectAssignment } from '@/hooks/mutations/projectMutations';
 import { useCluster } from '@/hooks/queries/useCluster';
 import { useMe } from '@/hooks/queries/useMe';
-import { CdWizardLauncher } from '@/components/cicd/CdWizardLauncher';
 import { useProjectConfig } from './projectConfigContext';
 
 const ConfigProjectPage = () => {
@@ -18,9 +17,6 @@ const ConfigProjectPage = () => {
     const meCtx = useMe();
     const navigate = useNavigate();
     const [deleteModal, setDeleteModal] = useState(false);
-
-    const projectTeam = meCtx.teams.find((t) => t.projects.some((p) => p.id === project.id));
-    const cdVisible = !!projectTeam?.installed;
 
     const handleAssignNode = async (nodeId: string | undefined) => {
         updateProject({ workerNodeId: nodeId });
@@ -127,18 +123,7 @@ const ConfigProjectPage = () => {
                             }
                         }}
                     />
-                    <Stack gap={2} align="center">
-                        <Text fz="var(--input-label-size, var(--mantine-font-size-sm))">Allow CI/CD</Text>
-                        <Switch checked={project.allowCICD} onChange={(e) => updateProject({ allowCICD: e.currentTarget.checked })} />
-                    </Stack>
                 </Group>
-
-                {cdVisible && (
-                    <>
-                        <Divider my="sm" />
-                        <CdWizardLauncher project={project} />
-                    </>
-                )}
 
                 {meCtx.canProject(project.id, Capability.DELETE) && (
                     <>

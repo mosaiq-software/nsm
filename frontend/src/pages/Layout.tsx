@@ -222,6 +222,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                                     <RouterLink to={`/p/${project.id}/config/resources`} label="Resources" showActive />
                                                     <RouterLink to={`/p/${project.id}/config/keys`} label="Keys" showActive />
                                                     <RouterLink to={`/p/${project.id}/config/webhooks`} label="Webhooks" showActive />
+                                                    <RouterLink to={`/p/${project.id}/config/cd`} label="Continuous Deployment" showActive />
                                                 </RouterLink>
                                             )}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}

@@ -9,6 +9,7 @@ import ConfigSystemPage from '@/pages/config/ConfigSystemPage';
 import ConfigResourcesPage from '@/pages/config/ConfigResourcesPage';
 import ConfigKeysPage from '@/pages/config/ConfigKeysPage';
 import ConfigWebhooksPage from '@/pages/config/ConfigWebhooksPage';
+import ConfigContinuousDeploymentPage from '@/pages/config/ConfigContinuousDeploymentPage';
 import MonitoringLogsPage from '@/pages/monitoring/MonitoringLogsPage';
 import MonitoringMetricsPage from '@/pages/monitoring/MonitoringMetricsPage';
 import MonitoringStatusPage from '@/pages/monitoring/MonitoringStatusPage';
@@ -85,6 +86,7 @@ const Router = () => {
                     <Route path="resources" element={<ConfigResourcesPage />} />
                     <Route path="keys" element={<ConfigKeysPage />} />
                     <Route path="webhooks" element={<ConfigWebhooksPage />} />
+                    <Route path="cd" element={<ConfigContinuousDeploymentPage />} />
                 </Route>
                 <Route path="/p/:projectId/monitoring" element={<MonitoringRedirect sub="status" />} />
                 <Route path="/p/:projectId/monitoring/logs" element={<MonitoringLogsPage />} />

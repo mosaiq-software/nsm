@@ -1,6 +1,6 @@
 import { Alert, Button, Card, Center, Divider, Group, Loader, Modal, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { Capability, DeploymentState, FullDirectoryMap, Project, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
+import { DeploymentState, FullDirectoryMap, Project, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useProjects } from '@/hooks/queries/useProjects';
@@ -8,9 +8,7 @@ import { usePatchProjectCache } from '@/hooks/mutations/projectMutations';
 import { useDeployWeb, useTeardownProject, useCancelDeploy } from '@/hooks/mutations/deployMutations';
 import { useProjectDeployAverage } from '@/hooks/queries/projectHooks';
 import { useCluster } from '@/hooks/queries/useCluster';
-import { useMe } from '@/hooks/queries/useMe';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { CdWizardLauncher } from '@/components/cicd/CdWizardLauncher';
 import { MdOutlineCancel, MdOutlineDelete, MdOutlineRocketLaunch } from 'react-icons/md';
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 import { DeploymentInstanceList } from '@/components/deploy/DeploymentInstanceList';
@@ -29,7 +27,6 @@ const ProjectDeployPage = () => {
     const teardownProject = useTeardownProject();
     const cancelDeploy = useCancelDeploy();
     const clusterCtx = useCluster();
-    const meCtx = useMe();
     const [project, setProject] = useState<Project | undefined | null>(undefined);
     const [modal, setModal] = useState<'deploy' | 'teardown' | 'cancel' | null>(null);
     const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
@@ -138,11 +135,6 @@ const ProjectDeployPage = () => {
             notifications.show({ message: 'Failed to cancel deployment', color: 'red' });
         }
     };
-
-    // The team the project belongs to (used to hide the CD card when the App isn't installed).
-    const projectTeam = meCtx.teams.find((t) => t.projects.some((p) => p.id === project.id));
-    const canConfigure = meCtx.canProject(project.id, Capability.CONFIGURE);
-    const cdCardVisible = canConfigure && !!projectTeam?.installed;
 
     const queueStatus = deployQueueStatusFor(clusterCtx.status, project.id);
     const inQueue = queueStatus.state !== null;
@@ -257,8 +249,6 @@ const ProjectDeployPage = () => {
                     </Group>
                 </Stack>
             </Card>
-
-            {cdCardVisible && <CdWizardLauncher project={project} />}
 
             {!project.hasDockerCompose && (
                 <Alert color="red" variant="filled" title="Undeployable Project">
