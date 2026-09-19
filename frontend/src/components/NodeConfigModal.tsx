@@ -81,7 +81,9 @@ export const NodeConfigModal = (props: NodeConfigModalProps) => {
         return () => {
             cancelled = true;
         };
-    }, [api, nodeId]);
+        // Depend on the stable token string, not the `api` object (which is recreated every render and
+        // would otherwise re-run this effect on every render, spamming requests).
+    }, [api.token, nodeId]);
 
     const setField = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
 
