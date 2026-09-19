@@ -9,7 +9,7 @@ export interface ObservabilitySelector {
     projectId?: string;
 }
 
-export type MetricKind = 'cpu' | 'mem' | 'net';
+export type MetricKind = 'cpu' | 'mem' | 'net' | 'storage';
 
 // Loki label stream selector, e.g. {projectInstanceId="abc"}. Precedence: service instance is
 // most specific, then project instance, then project.
@@ -56,8 +56,15 @@ const metricExpr = (metric: MetricKind, inner: string): string => {
     }
 };
 
+// The per-project disk gauge is only labeled with projectId (no instance/service labels), so the
+// storage metric can only be scoped at the project level.
+const projectSelector = (s: ObservabilitySelector): string => {
+    if (!s.projectId) throw new Error('storage metric requires projectId scope');
+    return `projectId="${s.projectId}"`;
+};
+
 export const queryMetric = async (s: ObservabilitySelector, metric: MetricKind, startS: string, endS: string, step = '30s'): Promise<ObservabilityMetricsResult> => {
-    const expr = metricExpr(metric, labelSelector(s));
+    const expr = metric === 'storage' ? `sum(nsm_project_disk_usage_bytes{${projectSelector(s)}})` : metricExpr(metric, labelSelector(s));
     const url = `${config.prometheusUrl}/api/v1/query_range?query=${encodeURIComponent(expr)}&start=${startS}&end=${endS}&step=${step}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) throw new Error(`prometheus ${res.status}`);

@@ -12,7 +12,7 @@ import { formatAxisTime, formatBytes, formatBytesPerSec, formatCores } from '@/u
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { MdOutlineRefresh } from 'react-icons/md';
 
-type MetricKind = 'cpu' | 'mem' | 'net';
+type MetricKind = 'cpu' | 'mem' | 'net' | 'storage';
 
 const TIME_RANGES: { label: string; ms: number }[] = [
     { label: '15m', ms: 15 * 60 * 1000 },
@@ -31,6 +31,8 @@ const metricLabel = (metric: MetricKind) => {
             return 'Memory';
         case 'net':
             return 'Network';
+        case 'storage':
+            return 'Storage';
     }
 };
 
@@ -42,6 +44,8 @@ const metricSeriesLabel = (metric: MetricKind) => {
             return 'Memory used';
         case 'net':
             return 'Throughput';
+        case 'storage':
+            return 'Storage used';
     }
 };
 
@@ -53,6 +57,8 @@ const metricFormatter = (metric: MetricKind): ((value: number) => string) => {
             return formatBytes;
         case 'net':
             return formatBytesPerSec;
+        case 'storage':
+            return formatBytes;
     }
 };
 
@@ -93,10 +99,11 @@ const MonitoringMetricsPage = () => {
     }, [scope, project]);
 
     const selector = useMemo((): LogSelector => {
+        if (metric === 'storage') return { projectId: projectId };
         if (scope === PROJECT_SCOPE) return { projectId: projectId };
         if (scope.startsWith('service:')) return { serviceInstanceId: scope.slice('service:'.length) };
         return { projectInstanceId: scope };
-    }, [scope, projectId]);
+    }, [scope, projectId, metric]);
 
     const refresh = async () => {
         if (!project) return;
@@ -177,7 +184,7 @@ const MonitoringMetricsPage = () => {
             <ProjectHeader project={project} section="Metrics" />
             <Group align="flex-end" justify="space-between">
                 <Group align="flex-end">
-                    <Select label="Scope" data={scopeOptions} value={scope} onChange={(v) => setScope(v || PROJECT_SCOPE)} w={320} />
+                    <Select label="Scope" data={scopeOptions} value={scope} onChange={(v) => setScope(v || PROJECT_SCOPE)} w={320} disabled={metric === 'storage'} />
                     <Stack gap={2}>
                         <Text fz="var(--input-label-size, var(--mantine-font-size-sm))">Metrics range</Text>
                         <SegmentedControl value={String(rangeMs)} onChange={(v) => setRangeMs(Number(v))} data={TIME_RANGES.map((r) => ({ value: String(r.ms), label: r.label }))} />
@@ -195,11 +202,16 @@ const MonitoringMetricsPage = () => {
                     <Title order={5}>Metrics</Title>
                     <SegmentedControl
                         value={metric}
-                        onChange={(v) => setMetric(v as MetricKind)}
+                        onChange={(v) => {
+                            const next = v as MetricKind;
+                            if (next === 'storage') setScope(PROJECT_SCOPE);
+                            setMetric(next);
+                        }}
                         data={[
                             { value: 'cpu', label: 'CPU' },
                             { value: 'mem', label: 'Memory' },
                             { value: 'net', label: 'Network' },
+                            { value: 'storage', label: 'Storage' },
                         ]}
                     />
                 </Group>
