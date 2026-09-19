@@ -1,9 +1,8 @@
 import { ActionIcon, Autocomplete, Button, Group, Stack, Title, Text, Switch, Textarea, TextInput, Menu, Tooltip, Fieldset, Space, NumberInput, Badge, SegmentedControl } from '@mantine/core';
 import { ConfigLocation, NginxConfigLocationType, Project, ProjectNginxConfig } from '@mosaiq/nsm-common/types';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MdOutlineCheckCircle, MdOutlineCode, MdOutlineDelete, MdOutlineDns, MdOutlineLink, MdOutlineWeb } from 'react-icons/md';
-import { useAPI } from '@/utils/api';
+import { useProjectDomains } from '@/hooks/queries/projectHooks';
 
 // A human-readable summary of what a route serves, shown in place of its UUID.
 const locationSummary = (location: ConfigLocation): string => {
@@ -25,23 +24,10 @@ interface NginxEditorProps {
     project: Project;
 }
 export const NginxEditor = (props: NginxEditorProps) => {
-    const api = useAPI();
     const [config, setConfig] = useState<ProjectNginxConfig>(JSON.parse(JSON.stringify(props.current)));
     // Domains allocated to this project's team, offered in the domain picker. Free text is still
     // allowed; a typed value that matches an allocated domain auto-links.
-    const [knownDomains, setKnownDomains] = useState<string[]>([]);
-
-    useEffect(() => {
-        if (!props.project?.id) return;
-        let cancelled = false;
-        void api.get(API_ROUTES.GET_PROJECT_DOMAINS, { projectId: props.project.id }).then((res) => {
-            if (!cancelled && res) setKnownDomains(res);
-        });
-        return () => {
-            cancelled = true;
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [props.project?.id, api.token]);
+    const { data: knownDomains = [] } = useProjectDomains(props.project?.id ?? '');
 
     useEffect(() => {
         const json = JSON.stringify(props.current);

@@ -1,10 +1,11 @@
 import { ActionIcon, Badge, Button, Card, Group, NumberInput, Select, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { PortProtocol, PortReservation, Project } from '@mosaiq/nsm-common/types';
-import { useEffect, useState } from 'react';
+import { PortProtocol, PortReservation } from '@mosaiq/nsm-common/types';
+import { useState } from 'react';
 import { MdOutlineDelete } from 'react-icons/md';
-import { useAPI } from '@/utils/api';
+import { useNodePortReservations } from '@/hooks/queries/nodeHooks';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { useCreateNodePortReservation, useDeleteNodePortReservation } from '@/hooks/mutations/nodeMutations';
 
 interface NodePortAllocationCardProps {
     nodeId: string;
@@ -21,28 +22,19 @@ const PROTOCOL_OPTIONS = [
 // host port+protocol on this node for one project; NSM keeps it out of the dynamic proxy pool and
 // injects it as an env var when that project deploys here.
 export const NodePortAllocationCard = ({ nodeId }: NodePortAllocationCardProps) => {
-    const api = useAPI();
-    const [reservations, setReservations] = useState<PortReservation[] | null>(null);
-    const [projects, setProjects] = useState<Project[]>([]);
-    const [busy, setBusy] = useState(false);
+    const reservationsQuery = useNodePortReservations(nodeId);
+    const { projects } = useProjects();
+    const createReservation = useCreateNodePortReservation(nodeId);
+    const deleteReservation = useDeleteNodePortReservation(nodeId);
+
+    const reservations = reservationsQuery.data ?? null;
+    const busy = createReservation.isPending || deleteReservation.isPending;
 
     const [port, setPort] = useState<number | ''>('');
     const [protocol, setProtocol] = useState<PortProtocol>(PortProtocol.TCP);
     const [projectId, setProjectId] = useState<string | null>(null);
     const [envVarName, setEnvVarName] = useState('');
     const [label, setLabel] = useState('');
-
-    const load = async () => {
-        if (!api.token) return;
-        const [res, projs] = await Promise.all([api.get(API_ROUTES.GET_NODE_PORT_RESERVATIONS, { nodeId }), api.get(API_ROUTES.GET_PROJECTS, {})]);
-        setReservations(res ?? []);
-        setProjects(projs ?? []);
-    };
-
-    useEffect(() => {
-        void load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [api.token, nodeId]);
 
     const projectName = (id: string) => projects.find((p) => p.id === id)?.id ?? id;
 
@@ -62,32 +54,21 @@ export const NodePortAllocationCard = ({ nodeId }: NodePortAllocationCardProps) 
             notifications.show({ color: 'red', message: err });
             return;
         }
-        setBusy(true);
         try {
-            const created = await api.post(API_ROUTES.POST_NODE_PORT_RESERVATION, { nodeId }, { port: port as number, protocol, projectId: projectId as string, envVarName: envVarName.trim(), label: label.trim() || undefined });
-            if (!created) throw new Error('Request failed');
+            await createReservation.mutateAsync({ port: port as number, protocol, projectId: projectId as string, envVarName: envVarName.trim(), label: label.trim() || undefined });
             notifications.show({ color: 'green', message: `Reserved ${port}/${protocol} for ${projectName(projectId as string)}.` });
             setPort('');
             setEnvVarName('');
             setLabel('');
             setProjectId(null);
-            await load();
         } catch {
             notifications.show({ color: 'red', message: 'Failed to reserve port. It may already be in use or reserved by NSM.' });
-        } finally {
-            setBusy(false);
         }
     };
 
     const remove = async (r: PortReservation) => {
         if (!window.confirm(`Delete reservation ${r.port}/${r.protocol} (${r.envVarName}) for ${projectName(r.projectId)}?`)) return;
-        setBusy(true);
-        try {
-            await api.post(API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION, { nodeId, reservationId: r.id }, {});
-            await load();
-        } finally {
-            setBusy(false);
-        }
+        await deleteReservation.mutateAsync(r.id);
     };
 
     return (

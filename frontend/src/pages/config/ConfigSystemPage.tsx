@@ -2,22 +2,27 @@ import { ActionIcon, ActionIconGroup, Alert, Badge, Button, Center, Code, Combob
 import { notifications } from '@mantine/notifications';
 import { DockerStatus, DynamicEnvVariable, NginxConfigLocationType, Project, ProjectService, Secret, UpperDynamicEnvVariableType } from '@mosaiq/nsm-common/types';
 import { useState } from 'react';
-import { useProjects } from '@/contexts/project-context';
+import { useSyncProjectToRepo } from '@/hooks/mutations/projectMutations';
 import { assembleDotenv, parseDynamicVariablePath } from '@mosaiq/nsm-common/secretUtil';
 import { MdOutlineCode, MdOutlineDns, MdOutlineDownload, MdOutlineInfo, MdOutlineLan, MdOutlineLink, MdOutlineLinkOff, MdOutlineMoreVert, MdOutlineRefresh, MdOutlineUmbrella, MdOutlineUpload, MdOutlineVisibility, MdOutlineVisibilityOff, MdOutlineWeb } from 'react-icons/md';
 import { useProjectConfig } from './projectConfigContext';
 
 const ConfigSystemPage = () => {
     const { project, updateProject, secrets, setSecrets, updateSecret, dynamicEnvVariables } = useProjectConfig();
-    const projectCtx = useProjects();
+    const syncToRepo = useSyncProjectToRepo();
     const [syncing, setSyncing] = useState(false);
     const [modal, setModal] = useState<'import-dotenv' | null>(null);
     const [importingDotenv, setImportingDotenv] = useState('');
 
     const handleSyncToRepo = async () => {
         setSyncing(true);
-        await projectCtx.syncProjectToRepo(project.id);
-        setSyncing(false);
+        try {
+            await syncToRepo.mutateAsync(project.id);
+        } catch {
+            // Notification handled by the mutation hook.
+        } finally {
+            setSyncing(false);
+        }
     };
 
     const handleImportDotenv = () => {

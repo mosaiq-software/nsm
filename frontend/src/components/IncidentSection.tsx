@@ -1,12 +1,12 @@
 import { ActionIcon, Badge, Button, Card, Group, Modal, Select, Stack, Text, Textarea, TextInput, Timeline, Title, Tooltip } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { AddIncidentUpdateBody, Capability, CreateIncidentBody, IncidentImpact, IncidentKind, IncidentStatus, IncidentWithUpdates } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
 import { MdDelete, MdOutlineAdd } from 'react-icons/md';
-import { useMe } from '@/contexts/me-context';
-import { useAPI } from '@/utils/api';
+import { useMe } from '@/hooks/queries/useMe';
+import { useProjectIncidents } from '@/hooks/queries/projectHooks';
+import { useCreateIncident, useAddIncidentUpdate, useDeleteIncident } from '@/hooks/mutations/projectResourceMutations';
 
 const INCIDENT_STATUSES: IncidentStatus[] = [IncidentStatus.INVESTIGATING, IncidentStatus.IDENTIFIED, IncidentStatus.MONITORING, IncidentStatus.RESOLVED];
 const MAINTENANCE_STATUSES: IncidentStatus[] = [IncidentStatus.SCHEDULED, IncidentStatus.IN_PROGRESS, IncidentStatus.COMPLETED];
@@ -64,7 +64,7 @@ interface CreateModalProps {
 }
 
 const CreateIncidentModal = ({ projectId, kind, opened, onClose, onSaved }: CreateModalProps) => {
-    const api = useAPI();
+    const createIncident = useCreateIncident(projectId);
     const isMaintenance = kind === IncidentKind.MAINTENANCE;
     const statuses = isMaintenance ? MAINTENANCE_STATUSES : INCIDENT_STATUSES;
     const [title, setTitle] = useState('');
@@ -73,7 +73,7 @@ const CreateIncidentModal = ({ projectId, kind, opened, onClose, onSaved }: Crea
     const [body, setBody] = useState('');
     const [scheduledStart, setScheduledStart] = useState('');
     const [scheduledEnd, setScheduledEnd] = useState('');
-    const [saving, setSaving] = useState(false);
+    const saving = createIncident.isPending;
 
     useEffect(() => {
         if (opened) {
@@ -95,7 +95,6 @@ const CreateIncidentModal = ({ projectId, kind, opened, onClose, onSaved }: Crea
             notifications.show({ message: 'A maintenance window (start and end) is required', color: 'red' });
             return;
         }
-        setSaving(true);
         const payload: CreateIncidentBody = {
             kind,
             title: title.trim(),
@@ -105,8 +104,7 @@ const CreateIncidentModal = ({ projectId, kind, opened, onClose, onSaved }: Crea
             scheduledStart: isMaintenance ? toEpoch(scheduledStart) : undefined,
             scheduledEnd: isMaintenance ? toEpoch(scheduledEnd) : undefined,
         };
-        const res = await api.post(API_ROUTES.POST_CREATE_INCIDENT, { projectId }, payload);
-        setSaving(false);
+        const res = await createIncident.mutateAsync(payload);
         if (res) {
             notifications.show({ message: isMaintenance ? 'Maintenance scheduled' : 'Incident created', color: 'green' });
             onSaved();
@@ -152,12 +150,12 @@ interface UpdateModalProps {
 }
 
 const AddUpdateModal = ({ projectId, item, onClose, onSaved }: UpdateModalProps) => {
-    const api = useAPI();
+    const addUpdate = useAddIncidentUpdate(projectId);
     const isMaintenance = item?.incident.kind === IncidentKind.MAINTENANCE;
     const statuses = isMaintenance ? MAINTENANCE_STATUSES : INCIDENT_STATUSES;
     const [status, setStatus] = useState<IncidentStatus>(statuses[0]);
     const [body, setBody] = useState('');
-    const [saving, setSaving] = useState(false);
+    const saving = addUpdate.isPending;
 
     useEffect(() => {
         if (item) {
@@ -172,10 +170,8 @@ const AddUpdateModal = ({ projectId, item, onClose, onSaved }: UpdateModalProps)
             notifications.show({ message: 'An update message is required', color: 'red' });
             return;
         }
-        setSaving(true);
         const payload: AddIncidentUpdateBody = { status, body: body.trim() };
-        const res = await api.post(API_ROUTES.POST_ADD_INCIDENT_UPDATE, { projectId, incidentId: item.incident.id }, payload);
-        setSaving(false);
+        const res = await addUpdate.mutateAsync({ incidentId: item.incident.id, payload });
         if (res) {
             notifications.show({ message: 'Update posted', color: 'green' });
             onSaved();
@@ -257,23 +253,14 @@ const IncidentCard = ({ item, canManage, onUpdate, onDelete }: { item: IncidentW
 };
 
 export const IncidentSection = ({ projectId }: { projectId: string }) => {
-    const api = useAPI();
     const meCtx = useMe();
     const canManage = meCtx.canProject(projectId, Capability.MANAGE_INCIDENTS);
 
-    const [items, setItems] = useState<IncidentWithUpdates[]>([]);
+    const { data: items = [] } = useProjectIncidents(projectId);
+    const deleteIncident = useDeleteIncident(projectId);
     const [createKind, setCreateKind] = useState<IncidentKind | null>(null);
     const [updateTarget, setUpdateTarget] = useState<IncidentWithUpdates | null>(null);
     const [incidentModal, incidentModalCtl] = useDisclosure(false);
-
-    const load = () => {
-        if (!api.token) return;
-        api.get(API_ROUTES.GET_PROJECT_INCIDENTS, { projectId }).then((res) => setItems(res ?? []));
-    };
-
-    useEffect(() => {
-        load();
-    }, [projectId, api.token]);
 
     const openCreate = (kind: IncidentKind) => {
         setCreateKind(kind);
@@ -282,9 +269,8 @@ export const IncidentSection = ({ projectId }: { projectId: string }) => {
 
     const remove = async (item: IncidentWithUpdates) => {
         if (!window.confirm(`Delete "${item.incident.title}"? This cannot be undone.`)) return;
-        await api.post(API_ROUTES.POST_DELETE_INCIDENT, { projectId, incidentId: item.incident.id }, {});
+        await deleteIncident.mutateAsync(item.incident.id);
         notifications.show({ message: 'Incident deleted', color: 'green' });
-        load();
     };
 
     return (
@@ -324,10 +310,10 @@ export const IncidentSection = ({ projectId }: { projectId: string }) => {
                         incidentModalCtl.close();
                         setCreateKind(null);
                     }}
-                    onSaved={load}
+                    onSaved={() => undefined}
                 />
             )}
-            <AddUpdateModal projectId={projectId} item={updateTarget} onClose={() => setUpdateTarget(null)} onSaved={load} />
+            <AddUpdateModal projectId={projectId} item={updateTarget} onClose={() => setUpdateTarget(null)} onSaved={() => undefined} />
         </Card>
     );
 };

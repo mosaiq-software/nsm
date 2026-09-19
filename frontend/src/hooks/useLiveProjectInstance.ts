@@ -1,7 +1,8 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { DeploymentState, ProjectInstance } from '@mosaiq/nsm-common/types';
-import { useCallback, useEffect, useState } from 'react';
 import { useAPI } from '@/utils/api';
+import { queryKeys } from '@/query/keys';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -12,47 +13,20 @@ const isLiveState = (state?: DeploymentState) => state === DeploymentState.QUEUE
 // reaches a terminal state. Refetches from scratch whenever the selected instance id changes.
 export const useLiveProjectInstance = (instanceId: string | undefined | null) => {
     const api = useAPI();
-    const [instance, setInstance] = useState<ProjectInstance | null>(null);
-    const [loading, setLoading] = useState(false);
+    const queryClient = useQueryClient();
+    const id = instanceId || '';
 
-    const fetchInstance = useCallback(async () => {
-        if (!instanceId) return undefined;
-        const res = await api.get(API_ROUTES.GET_PROJECT_INSTANCE, { projectInstanceId: instanceId });
-        if (res) setInstance(res);
-        return res ?? undefined;
-    }, [instanceId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const query = useQuery({
+        queryKey: queryKeys.projectInstance(id),
+        queryFn: async () => (await api.get(API_ROUTES.GET_PROJECT_INSTANCE, { projectInstanceId: id })) ?? null,
+        enabled: !!api.token && !!id,
+        // Poll while the deployment is in a live state; stop once it reaches a terminal state.
+        refetchInterval: (q) => (isLiveState((q.state.data as ProjectInstance | null)?.state) ? POLL_INTERVAL_MS : false),
+    });
 
-    const refresh = useCallback(async () => {
-        setLoading(true);
-        try {
-            await fetchInstance();
-        } finally {
-            setLoading(false);
-        }
-    }, [fetchInstance]);
+    const refresh = async () => {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.projectInstance(id) });
+    };
 
-    useEffect(() => {
-        setInstance(null);
-        if (!instanceId) return;
-        let cancelled = false;
-
-        const tick = async () => {
-            const res = await fetchInstance();
-            if (cancelled) return;
-            if (!isLiveState(res?.state)) clearInterval(intervalId);
-        };
-
-        setLoading(true);
-        void tick().finally(() => {
-            if (!cancelled) setLoading(false);
-        });
-        const intervalId = setInterval(tick, POLL_INTERVAL_MS);
-
-        return () => {
-            cancelled = true;
-            clearInterval(intervalId);
-        };
-    }, [instanceId, fetchInstance]);
-
-    return { instance, loading, refresh };
+    return { instance: query.data ?? null, loading: query.isFetching, refresh };
 };

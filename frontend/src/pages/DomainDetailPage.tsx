@@ -1,13 +1,14 @@
 import { ActionIcon, Alert, Anchor, Badge, Button, Center, Divider, Fieldset, Group, Loader, Modal, MultiSelect, NumberInput, Select, Stack, Switch, Table, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core';
 import { Sparkline } from '@mantine/charts';
 import { notifications } from '@mantine/notifications';
-import { DnsNameAnalytics, DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, DnsZoneAnalytics, PortReservation, Team } from '@mosaiq/nsm-common/types';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
+import { DnsNameAnalytics, DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, PortReservation, Team } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useAPI } from '@/utils/api';
-import { useMe } from '@/contexts/me-context';
-import { useDomains } from '@/contexts/domains-context';
+import { useMe } from '@/hooks/queries/useMe';
+import { useDomains } from '@/hooks/queries/useDomains';
+import { useTeams } from '@/hooks/queries/teamHooks';
+import { usePublicIp, useDnsRecords, useDnsAnalytics, usePortReservations } from '@/hooks/queries/domainHooks';
+import { useSetDomainAllocations, useCreateDnsRecord, useUpdateDnsRecord, useDeleteDnsRecord, useDeleteDomain } from '@/hooks/mutations/domainMutations';
 import { MdArrowBack, MdOpenInNew, MdOutlineDelete, MdOutlineEdit } from 'react-icons/md';
 
 const PROXYABLE = new Set<DnsRecordType>(['A', 'AAAA', 'CNAME']);
@@ -26,21 +27,13 @@ const tempId = (): string => `${NEW_ID_PREFIX}${Date.now()}-${Math.random().toSt
 const isNewRecord = (id: string): boolean => id.startsWith(NEW_ID_PREFIX);
 
 const DomainDetailPage = () => {
-    const api = useAPI();
     const meCtx = useMe();
     const domainsCtx = useDomains();
     const navigate = useNavigate();
     const { zoneId = '' } = useParams();
 
-    const [teams, setTeams] = useState<Team[]>([]);
-    const [publicIp, setPublicIp] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!meCtx.isAdmin) return;
-        void api.get(API_ROUTES.GET_TEAMS, {}).then((res) => setTeams(res ?? []));
-        void api.get(API_ROUTES.GET_PUBLIC_IP, {}).then((res) => setPublicIp((res as { ip: string | null })?.ip ?? null));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [meCtx.isAdmin, api.token]);
+    const teams = useTeams(meCtx.isAdmin).data ?? [];
+    const publicIp = usePublicIp(meCtx.isAdmin).data ?? null;
 
     const zone = domainsCtx.domains.find((z) => z.id === zoneId);
 
@@ -101,13 +94,22 @@ interface DomainDetailProps {
 }
 
 const DomainDetail = (props: DomainDetailProps) => {
-    const api = useAPI();
     const { zone } = props;
+    const recordsQuery = useDnsRecords(zone.id, props.isAdmin);
+    const analytics = useDnsAnalytics(zone.id, props.isAdmin).data ?? null;
+    const reservations = usePortReservations(props.isAdmin).data ?? [];
+
+    const setAllocationsMutation = useSetDomainAllocations(zone.id);
+    const createRecordMutation = useCreateDnsRecord(zone.id);
+    const updateRecordMutation = useUpdateDnsRecord(zone.id);
+    const deleteRecordMutation = useDeleteDnsRecord(zone.id);
+    const deleteDomainMutation = useDeleteDomain(zone.id);
+
+    // Local working copy of records, seeded from the query. Edits are staged here (add/edit/remove)
+    // and only pushed to Cloudflare on Save; a refetch reseeds and clears the staged sets.
     const [records, setRecords] = useState<DnsRecord[] | null>(null);
     const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
     const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
-    const [analytics, setAnalytics] = useState<DnsZoneAnalytics | null>(null);
-    const [reservations, setReservations] = useState<PortReservation[]>([]);
     const [editing, setEditing] = useState<null | 'new' | string>(null);
     const [draft, setDraft] = useState<Draft>(emptyDraft());
     const [dataJson, setDataJson] = useState('');
@@ -127,25 +129,14 @@ const DomainDetail = (props: DomainDetailProps) => {
     const normName = (n: string): string => n.trim().toLowerCase().replace(/\.$/, '');
     const analyticsByName = new Map<string, DnsNameAnalytics>((analytics?.byName ?? []).map((a) => [a.name, a]));
 
-    const loadRecords = async () => {
-        if (!props.isAdmin) return;
-        const res = await api.get(API_ROUTES.GET_DNS_RECORDS, { zoneId: zone.id });
-        setRecords(res ?? []);
-        setDeletedIds(new Set());
-        setDirtyIds(new Set());
-    };
-
+    // Reseed the local working copy whenever fresh records arrive from the server, clearing staged edits.
     useEffect(() => {
-        void loadRecords();
-        if (props.isAdmin) void api.get(API_ROUTES.GET_DNS_ANALYTICS, { zoneId: zone.id }).then((res) => setAnalytics(res ?? null));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [zone.id]);
-
-    useEffect(() => {
-        if (!props.isAdmin) return;
-        void api.get(API_ROUTES.GET_PORT_RESERVATIONS, {}).then((res) => setReservations(res ?? []));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [props.isAdmin]);
+        if (recordsQuery.data) {
+            setRecords(recordsQuery.data);
+            setDeletedIds(new Set());
+            setDirtyIds(new Set());
+        }
+    }, [recordsQuery.data]);
 
     const startNew = () => {
         setDraft(emptyDraft());
@@ -212,7 +203,7 @@ const DomainDetail = (props: DomainDetailProps) => {
     const saveAll = async () => {
         setBusy(true);
         try {
-            const alloc = await api.post(API_ROUTES.POST_DOMAIN_ALLOCATIONS, { zoneId: zone.id }, { ownerIds: allocations });
+            const alloc = await setAllocationsMutation.mutateAsync(allocations);
             if (alloc && alloc.ok === false) {
                 const list = (alloc.blockedBy || []).map((b) => `${b.projectId} (${b.ownerLogin})`).join(', ');
                 notifications.show({ color: 'red', title: 'Domain in use', message: `Cannot remove a team while these projects use the domain: ${list}` });
@@ -225,7 +216,7 @@ const DomainDetail = (props: DomainDetailProps) => {
 
             for (const id of deletedIds) {
                 try {
-                    await api.post(API_ROUTES.POST_DNS_RECORD_DELETE, { zoneId: zone.id, recordId: id }, {});
+                    await deleteRecordMutation.mutateAsync(id);
                 } catch (e) {
                     errors.push(e instanceof Error ? e.message : 'delete failed');
                 }
@@ -233,8 +224,7 @@ const DomainDetail = (props: DomainDetailProps) => {
             for (const r of working) {
                 if (!dirtyIds.has(r.id)) continue;
                 try {
-                    const res = await api.post(API_ROUTES.POST_DNS_RECORD_UPDATE, { zoneId: zone.id, recordId: r.id }, recordBody(r));
-                    if (res === undefined) throw new Error(`Failed to update ${r.name}`);
+                    await updateRecordMutation.mutateAsync({ recordId: r.id, body: recordBody(r) });
                 } catch (e) {
                     errors.push(e instanceof Error ? e.message : `Failed to update ${r.name}`);
                 }
@@ -242,14 +232,13 @@ const DomainDetail = (props: DomainDetailProps) => {
             for (const r of working) {
                 if (!isNewRecord(r.id)) continue;
                 try {
-                    const res = await api.post(API_ROUTES.POST_DNS_RECORD_CREATE, { zoneId: zone.id }, recordBody(r));
-                    if (res === undefined) throw new Error(`Failed to create ${r.name}`);
+                    await createRecordMutation.mutateAsync(recordBody(r));
                 } catch (e) {
                     errors.push(e instanceof Error ? e.message : `Failed to create ${r.name}`);
                 }
             }
 
-            await loadRecords();
+            await recordsQuery.refetch();
             props.onChanged();
             if (errors.length) {
                 notifications.show({ color: 'red', title: 'Some changes failed', message: errors.join('; ') });
@@ -264,7 +253,7 @@ const DomainDetail = (props: DomainDetailProps) => {
     const doDelete = async () => {
         setBusy(true);
         try {
-            await api.post(API_ROUTES.POST_DOMAIN_DELETE, { zoneId: zone.id }, { confirmName });
+            await deleteDomainMutation.mutateAsync(confirmName);
             notifications.show({ color: 'green', message: `${zone.name} deleted from Cloudflare.` });
             setDeleteOpen(false);
             props.onChanged();

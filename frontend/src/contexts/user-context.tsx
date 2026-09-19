@@ -1,5 +1,6 @@
 import { User } from '@mosaiq/nsm-common/types';
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getGithubLoginUrl } from '@/utils/auth';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { rawApiPostNoHook } from '@/utils/api';
@@ -20,6 +21,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 const UserProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(null);
     const [ready, setReady] = useState(false);
+    const queryClient = useQueryClient();
 
     const tryAutoSignIn = async () => {
         const storedToken = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY);
@@ -39,6 +41,8 @@ const UserProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) =>
     const signOut = async () => {
         setUser(null);
         setLogAuthToken(undefined);
+        // Drop every cached query so a new sign-in starts from a clean slate (no stale user data).
+        queryClient.clear();
         const storedToken = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY);
         if (!storedToken) return;
         try {

@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Modal, Select, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { Capability, DomainBillingSummary, DomainRequest, DomainRequestStatus, DomainSearchResult, Team } from '@mosaiq/nsm-common/types';
+import { useQueryClient } from '@tanstack/react-query';
+import { Capability, DomainRequest, DomainRequestStatus, DomainSearchResult } from '@mosaiq/nsm-common/types';
 import { useNavigate } from 'react-router-dom';
-import { useAPI } from '@/utils/api';
-import { useMe } from '@/contexts/me-context';
-import { useDomains } from '@/contexts/domains-context';
+import { useMe } from '@/hooks/queries/useMe';
+import { useDomains } from '@/hooks/queries/useDomains';
+import { useDomainRequests, useDomainBilling } from '@/hooks/queries/domainHooks';
+import { useTeams } from '@/hooks/queries/teamHooks';
+import { queryKeys } from '@/query/keys';
+import { useDomainSearch, useCreateDomainRequest, useDecideDomainRequest, useCloudflareSync, usePublicIpRefresh } from '@/hooks/mutations/domainMutations';
 import { MdOutlineCloudSync, MdOutlineRefresh, MdOutlineSearch, MdOutlineSync } from 'react-icons/md';
 
 const requestStatusColor: Record<DomainRequestStatus, string> = {
@@ -18,64 +21,58 @@ const requestStatusColor: Record<DomainRequestStatus, string> = {
 };
 
 const DomainsPage = () => {
-    const api = useAPI();
     const meCtx = useMe();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const domainsCtx = useDomains();
     const isAdmin = meCtx.isAdmin;
     const isSuperAdmin = meCtx.isSuperAdmin;
     const domains = domainsCtx.domains;
 
-    const [requests, setRequests] = useState<DomainRequest[]>([]);
-    const [billing, setBilling] = useState<DomainBillingSummary | null>(null);
-    const [teams, setTeams] = useState<Team[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [syncingIp, setSyncingIp] = useState(false);
-    const [syncingCf, setSyncingCf] = useState(false);
+    const requestsQuery = useDomainRequests();
+    const billingQuery = useDomainBilling(isAdmin);
+    const teamsQuery = useTeams(isAdmin);
+    const requests = requestsQuery.data ?? [];
+    const billing = billingQuery.data ?? null;
+    const teams = teamsQuery.data ?? [];
+
+    const searchMutation = useDomainSearch();
+    const createRequest = useCreateDomainRequest();
+    const decideRequest = useDecideDomainRequest();
+    const cloudflareSync = useCloudflareSync();
+    const publicIpRefresh = usePublicIpRefresh();
+
+    const loading = requestsQuery.isFetching || (isAdmin && (billingQuery.isFetching || teamsQuery.isFetching)) || !domainsCtx.ready;
+    const syncingIp = publicIpRefresh.isPending;
+    const syncingCf = cloudflareSync.isPending;
+    const searching = searchMutation.isPending;
+    const submitting = createRequest.isPending || decideRequest.isPending;
 
     // Search + request flow
     const [query, setQuery] = useState('');
-    const [searching, setSearching] = useState(false);
     const [results, setResults] = useState<DomainSearchResult[] | null>(null);
     const [pending, setPending] = useState<DomainSearchResult | null>(null);
     const [targetTeam, setTargetTeam] = useState<string | null>(null);
-    const [submitting, setSubmitting] = useState(false);
 
     const requestableTeams = meCtx.teams.filter((t) => t.installed && t.capabilities.includes(Capability.CREATE_PROJECT));
 
-    const refresh = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [reqs, bill, tms] = await Promise.all([
-                api.get(API_ROUTES.GET_DOMAIN_REQUESTS, {}),
-                isAdmin ? api.get(API_ROUTES.GET_DOMAIN_BILLING, {}) : Promise.resolve(null),
-                isAdmin ? api.get(API_ROUTES.GET_TEAMS, {}) : Promise.resolve([]),
-                domainsCtx.refresh(),
-            ]);
-            setRequests(reqs ?? []);
-            setBilling((bill as DomainBillingSummary) ?? null);
-            setTeams(tms ?? []);
-        } finally {
-            setLoading(false);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [api.token, isAdmin]);
-
-    useEffect(() => {
-        void refresh();
-    }, [refresh]);
+    const refresh = async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.domainRequests() }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.domainBilling() }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.teams() }),
+            domainsCtx.refresh(),
+        ]);
+    };
 
     const runSearch = async () => {
         if (!query.trim()) return;
-        setSearching(true);
         setResults(null);
         try {
-            const res = await api.post(API_ROUTES.POST_DOMAIN_SEARCH, {}, { query: query.trim() });
+            const res = await searchMutation.mutateAsync(query.trim());
             setResults(res ?? []);
         } catch {
             notifications.show({ color: 'red', message: 'Search failed. Cloudflare registrar may not be configured.' });
-        } finally {
-            setSearching(false);
         }
     };
 
@@ -90,63 +87,44 @@ const DomainsPage = () => {
 
     const submitRequest = async () => {
         if (!pending || !targetTeam) return;
-        setSubmitting(true);
         try {
-            const created = await api.post(
-                API_ROUTES.POST_DOMAIN_REQUEST,
-                {},
-                { domainName: pending.name, ownerId: targetTeam, priceCurrency: pending.currency, priceRegistration: pending.registrationCost, priceRenewal: pending.renewalCost }
-            );
-            if (!created) throw new Error('Request failed');
+            const created = await createRequest.mutateAsync({ domainName: pending.name, ownerId: targetTeam, priceCurrency: pending.currency, priceRegistration: pending.registrationCost, priceRenewal: pending.renewalCost });
             // Super admins buy directly: create the request, then immediately approve it.
             if (isSuperAdmin) {
                 notifications.show({ color: 'blue', message: `Purchasing ${pending.name}...` });
-                await api.post(API_ROUTES.POST_DOMAIN_REQUEST_DECIDE, { requestId: created.id }, { approve: true });
+                await decideRequest.mutateAsync({ requestId: created.id, approve: true });
             } else {
                 notifications.show({ color: 'green', message: `Requested ${pending.name}. The super admin has been notified.` });
             }
             setPending(null);
-            await refresh();
         } catch (e) {
             notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Request failed.' });
-        } finally {
-            setSubmitting(false);
         }
     };
 
     const runCloudflareSync = async () => {
-        setSyncingCf(true);
         try {
-            const res = await api.post(API_ROUTES.POST_CLOUDFLARE_SYNC, {}, {});
-            if (!res) throw new Error('Request failed');
+            const res = await cloudflareSync.mutateAsync();
             if (res.ok) {
                 notifications.show({ color: 'green', title: 'Cloudflare synced', message: `Synced ${res.zoneCount ?? 0} zone(s) from Cloudflare.` });
-                await refresh();
             } else {
                 notifications.show({ color: 'red', title: 'Cloudflare sync failed', message: res.error || 'Sync failed.', autoClose: false });
             }
         } catch (e) {
             notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Cloudflare sync failed.' });
-        } finally {
-            setSyncingCf(false);
         }
     };
 
     const syncPublicIp = async () => {
-        setSyncingIp(true);
         try {
-            const res = await api.post(API_ROUTES.POST_PUBLIC_IP_REFRESH, {}, {});
-            if (!res) throw new Error('Request failed');
+            const res = await publicIpRefresh.mutateAsync();
             if (res.changed) {
                 notifications.show({ color: 'green', title: 'Dynamic DNS updated', message: `Public IP changed to ${res.ip}. Dynamic records were repushed to Cloudflare.` });
-                await refresh();
             } else {
                 notifications.show({ color: 'blue', message: res.ip ? `Public IP unchanged (${res.ip}).` : 'No public IP detected.' });
             }
         } catch (e) {
             notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Public IP refresh failed.' });
-        } finally {
-            setSyncingIp(false);
         }
     };
 
@@ -158,8 +136,7 @@ const DomainsPage = () => {
             return;
         }
         try {
-            await api.post(API_ROUTES.POST_DOMAIN_REQUEST_DECIDE, { requestId: req.id }, { approve, reason });
-            await refresh();
+            await decideRequest.mutateAsync({ requestId: req.id, approve, reason });
         } catch (e) {
             notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Decision failed.' });
         }

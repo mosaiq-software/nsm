@@ -1,12 +1,12 @@
 import { Alert, Button, Center, Loader, Group, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { useWindowEvent } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { DynamicEnvVariable, PortReservation, Project, Secret } from '@mosaiq/nsm-common/types';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
+import { DynamicEnvVariable, Project, Secret } from '@mosaiq/nsm-common/types';
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useParams } from 'react-router-dom';
-import { useProjects } from '@/contexts/project-context';
-import { useAPI } from '@/utils/api';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { useProjectPortReservations } from '@/hooks/queries/projectHooks';
+import { useUpdateProject, useUpdateSecrets } from '@/hooks/mutations/projectMutations';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { assembleDotenv, extractVariables } from '@mosaiq/nsm-common/secretUtil';
 import { ProjectConfigContext, ProjectConfigContextValue } from './projectConfigContext';
@@ -14,16 +14,17 @@ import { ProjectConfigContext, ProjectConfigContextValue } from './projectConfig
 const ProjectConfigLayout = () => {
     const params = useParams();
     const projectId = params.projectId;
-    const projectCtx = useProjects();
-    const api = useAPI();
+    const { projects } = useProjects();
+    const updateProjectMutation = useUpdateProject();
+    const updateSecretsMutation = useUpdateSecrets();
+    const { data: portReservations = [] } = useProjectPortReservations(projectId);
 
     const [project, setProject] = useState<Project | undefined | null>(undefined);
     const [secrets, setSecrets] = useState<Secret[]>([]);
     const [dynamicEnvVariables, setDynamicEnvVariables] = useState<DynamicEnvVariable[]>([]);
-    const [portReservations, setPortReservations] = useState<PortReservation[]>([]);
 
     useEffect(() => {
-        const foundProject = projectCtx.projects.find((proj) => proj.id === projectId);
+        const foundProject = projects.find((proj) => proj.id === projectId);
         if (foundProject) {
             const vars = extractVariables(foundProject);
             setProject({ ...foundProject });
@@ -32,13 +33,7 @@ const ProjectConfigLayout = () => {
         } else {
             setProject(foundProject);
         }
-    }, [projectId, projectCtx.projects]);
-
-    useEffect(() => {
-        if (!projectId || !api.token) return;
-        void api.get(API_ROUTES.GET_PROJECT_PORT_RESERVATIONS, { projectId }).then((res) => setPortReservations(res ?? []));
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [projectId, api.token]);
+    }, [projectId, projects]);
 
     const updateProject = (updatedFields: Partial<Project>) => {
         setProject((prev) => {
@@ -57,7 +52,7 @@ const ProjectConfigLayout = () => {
     };
 
     const same = (): boolean => {
-        const oldProject = projectCtx.projects.find((proj) => proj.id === projectId);
+        const oldProject = projects.find((proj) => proj.id === projectId);
         if (!oldProject) return false;
         const oldEnv = assembleDotenv(oldProject.secrets ?? []);
         const newEnv = assembleDotenv(secrets);
@@ -71,8 +66,8 @@ const ProjectConfigLayout = () => {
             message: 'Saving your changes...',
         });
         try {
-            await projectCtx.update(project.id, project);
-            await projectCtx.updateSecrets(project.id, secrets);
+            await updateProjectMutation.mutateAsync({ id: project.id, patch: project });
+            await updateSecretsMutation.mutateAsync({ projectId: project.id, secrets });
             notifications.show({
                 title: 'Success',
                 message: 'Project updated successfully',

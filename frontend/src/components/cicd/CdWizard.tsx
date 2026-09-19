@@ -1,9 +1,9 @@
 import { Alert, Autocomplete, Button, Checkbox, Group, List, Stack, Stepper, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { CdTrigger, Project } from '@mosaiq/nsm-common/types';
-import { useEffect, useState } from 'react';
-import { useAPI } from '@/utils/api';
+import { useState } from 'react';
+import { useGithubBranches } from '@/hooks/queries/githubHooks';
+import { useSetupCicd } from '@/hooks/mutations/deployMutations';
 
 const TRIGGER_LABELS: { value: CdTrigger; label: string; description: string }[] = [
     { value: CdTrigger.PUSH, label: 'On push', description: 'Deploy when commits are pushed to the deploy branch.' },
@@ -22,24 +22,14 @@ interface CdWizardProps {
 // Multi-step wizard that collects the trigger/branch choices and calls POST_CICD_SETUP to have NSM
 // register a GitHub repository webhook (secret + event filter) that drives deployments.
 export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
-    const api = useAPI();
     const [active, setActive] = useState(0);
     const [triggers, setTriggers] = useState<CdTrigger[]>([CdTrigger.PUSH]);
     const [branch, setBranch] = useState(project.repoBranch || 'main');
     const [tagPattern, setTagPattern] = useState('v*');
     const [cron, setCron] = useState('0 0 * * *');
-    const [branches, setBranches] = useState<string[]>([]);
-    const [submitting, setSubmitting] = useState(false);
-
-    useEffect(() => {
-        let cancelled = false;
-        void api.get(API_ROUTES.GET_GITHUB_BRANCHES, {}, { owner: project.repoOwner, repo: project.repoName }).then((res) => {
-            if (!cancelled) setBranches(res || []);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [project.repoOwner, project.repoName]); // eslint-disable-line react-hooks/exhaustive-deps
+    const branches = useGithubBranches(project.repoOwner ?? '', project.repoName ?? '').data ?? [];
+    const setupCicd = useSetupCicd();
+    const submitting = setupCicd.isPending;
 
     const toggleTrigger = (trigger: CdTrigger, checked: boolean) => {
         setTriggers((prev) => (checked ? [...prev, trigger] : prev.filter((t) => t !== trigger)));
@@ -53,18 +43,14 @@ export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
     const nextDisabled = (active === 0 && !triggersValid) || (active === 1 && !branchValid);
 
     const handleSubmit = async () => {
-        setSubmitting(true);
         try {
-            const updated = await api.post(
-                API_ROUTES.POST_CICD_SETUP,
-                { projectId: project.id },
-                {
-                    branch: branch.trim(),
-                    triggers,
-                    tagPattern: has(CdTrigger.TAG) ? tagPattern.trim() : undefined,
-                    cron: has(CdTrigger.SCHEDULE) ? cron.trim() : undefined,
-                }
-            );
+            const updated = await setupCicd.mutateAsync({
+                projectId: project.id,
+                branch: branch.trim(),
+                triggers,
+                tagPattern: has(CdTrigger.TAG) ? tagPattern.trim() : undefined,
+                cron: has(CdTrigger.SCHEDULE) ? cron.trim() : undefined,
+            });
             if (!updated) {
                 notifications.show({ message: 'Failed to set up CI/CD', color: 'red' });
                 return;
@@ -73,8 +59,6 @@ export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
             onComplete(updated);
         } catch {
             notifications.show({ message: 'Failed to set up CI/CD', color: 'red' });
-        } finally {
-            setSubmitting(false);
         }
     };
 

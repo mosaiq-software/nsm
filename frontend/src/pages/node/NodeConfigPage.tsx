@@ -2,8 +2,8 @@ import { Alert, Button, Card, Group, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { MdOutlineSettings } from 'react-icons/md';
-import { useCluster } from '@/contexts/cluster-context';
-import { useMe } from '@/contexts/me-context';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useMe } from '@/hooks/queries/useMe';
 import { NodeConfigModal } from '@/components/NodeConfigModal';
 import { NodePortAllocationCard } from '@/components/NodePortAllocationCard';
 

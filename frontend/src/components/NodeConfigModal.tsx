@@ -1,10 +1,10 @@
 import { ActionIcon, Alert, Badge, Button, Center, Fieldset, Group, Loader, Modal, NumberInput, PasswordInput, Select, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { EDITABLE_ENV_SPECS, EnvVarSpec, NodeConfigUpdate, NodeConfigValues } from '@mosaiq/nsm-common/envSchema';
 import { useEffect, useMemo, useState } from 'react';
 import { MdOutlineVisibilityOff, MdWarningAmber } from 'react-icons/md';
-import { useAPI } from '@/utils/api';
+import { useNodeConfig } from '@/hooks/queries/nodeHooks';
+import { useSaveNodeConfig } from '@/hooks/mutations/nodeMutations';
 
 interface NodeConfigModalProps {
     nodeId: string;
@@ -32,10 +32,9 @@ const categoriesInOrder = (): string[] => {
 
 export const NodeConfigModal = (props: NodeConfigModalProps) => {
     const { nodeId, isLeader, isAdmin } = props;
-    const api = useAPI();
+    const configQuery = useNodeConfig(nodeId, isAdmin);
+    const saveConfig = useSaveNodeConfig(nodeId);
 
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
     const [confirming, setConfirming] = useState(false);
     // Working values for every editable var (booleans/numbers stored as strings). Secrets start empty.
     const [draft, setDraft] = useState<Record<string, string>>({});
@@ -46,44 +45,36 @@ export const NodeConfigModal = (props: NodeConfigModalProps) => {
     // Which secrets the admin has chosen to change (only these are submitted).
     const [secretEditing, setSecretEditing] = useState<Record<string, boolean>>({});
 
+    const loading = configQuery.isLoading;
+
+    // Populate the working draft from the fetched values whenever they arrive/refresh.
     useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            setLoading(true);
-            try {
-                const res = (await api.get(API_ROUTES.GET_NODE_CONFIG, { nodeId })) as NodeConfigValues | undefined;
-                if (cancelled) return;
-                const nextDraft: Record<string, string> = {};
-                const nextInitial: Record<string, string> = {};
-                const nextSecretLen: Record<string, number> = {};
-                for (const spec of EDITABLE_ENV_SPECS) {
-                    const v = res?.[spec.key];
-                    if (spec.secret) {
-                        nextSecretLen[spec.key] = v && 'isSecret' in v && v.isSecret ? v.length : 0;
-                        nextDraft[spec.key] = '';
-                    } else {
-                        const raw = v && !('isSecret' in v && v.isSecret) ? (v.value ?? null) : null;
-                        const normalized = raw ?? spec.defaultValue ?? '';
-                        nextDraft[spec.key] = normalized;
-                        nextInitial[spec.key] = normalized;
-                    }
-                }
-                setDraft(nextDraft);
-                setInitial(nextInitial);
-                setSecretLen(nextSecretLen);
-                setSecretEditing({});
-            } catch {
-                if (!cancelled) notifications.show({ color: 'red', message: 'Failed to load node configuration.' });
-            } finally {
-                if (!cancelled) setLoading(false);
+        if (configQuery.data === undefined) return;
+        const res = configQuery.data as NodeConfigValues | null;
+        const nextDraft: Record<string, string> = {};
+        const nextInitial: Record<string, string> = {};
+        const nextSecretLen: Record<string, number> = {};
+        for (const spec of EDITABLE_ENV_SPECS) {
+            const v = res?.[spec.key];
+            if (spec.secret) {
+                nextSecretLen[spec.key] = v && 'isSecret' in v && v.isSecret ? v.length : 0;
+                nextDraft[spec.key] = '';
+            } else {
+                const raw = v && !('isSecret' in v && v.isSecret) ? (v.value ?? null) : null;
+                const normalized = raw ?? spec.defaultValue ?? '';
+                nextDraft[spec.key] = normalized;
+                nextInitial[spec.key] = normalized;
             }
-        })();
-        return () => {
-            cancelled = true;
-        };
-        // Depend on the stable token string, not the `api` object (which is recreated every render and
-        // would otherwise re-run this effect on every render, spamming requests).
-    }, [api.token, nodeId]);
+        }
+        setDraft(nextDraft);
+        setInitial(nextInitial);
+        setSecretLen(nextSecretLen);
+        setSecretEditing({});
+    }, [configQuery.data]);
+
+    useEffect(() => {
+        if (configQuery.isError) notifications.show({ color: 'red', message: 'Failed to load node configuration.' });
+    }, [configQuery.isError]);
 
     const setField = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
 
@@ -114,10 +105,8 @@ export const NodeConfigModal = (props: NodeConfigModalProps) => {
     const changeCount = Object.keys(update.set).length + update.unset.length;
 
     const save = async () => {
-        setSaving(true);
         try {
-            const res = await api.post(API_ROUTES.POST_NODE_CONFIG, { nodeId }, update);
-            if (!res?.ok) throw new Error('Request failed');
+            await saveConfig.mutateAsync(update);
             notifications.show({
                 color: 'yellow',
                 title: 'Node restarting',
@@ -126,10 +115,10 @@ export const NodeConfigModal = (props: NodeConfigModalProps) => {
             props.onClose();
         } catch (e) {
             notifications.show({ color: 'red', message: e instanceof Error && e.message ? e.message : 'Failed to apply configuration.' });
-        } finally {
-            setSaving(false);
         }
     };
+
+    const saving = saveConfig.isPending;
 
     const renderField = (spec: EnvVarSpec) => {
         const leaderNote = spec.leaderOnly && !isLeader ? (

@@ -1,11 +1,11 @@
 import { Accordion, ActionIcon, Badge, Button, Card, Center, Group, Loader, Progress, SegmentedControl, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { LineChart } from '@mantine/charts';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { NodeFilesystemUsage, NodeStorageSpec, ObservabilityMetricsResult, ProjectDiskUsage } from '@mosaiq/nsm-common/types';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { NodeFilesystemUsage, ProjectDiskUsage } from '@mosaiq/nsm-common/types';
+import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { MdOutlineCameraAlt, MdOutlineRefresh } from 'react-icons/md';
-import { useAPI } from '@/utils/api';
+import { useNodeStorage, useNodeStorageSeries } from '@/hooks/queries/nodeHooks';
+import { useSnapshotNodeStorage } from '@/hooks/mutations/nodeMutations';
 import { formatAxisTime, formatBytes } from '@/utils/format';
 
 const TIME_RANGES: { label: string; ms: number }[] = [
@@ -16,8 +16,6 @@ const TIME_RANGES: { label: string; ms: number }[] = [
 ];
 
 const PROJECT_PALETTE = ['blue.6', 'teal.6', 'grape.6', 'cyan.6', 'lime.6', 'pink.6', 'indigo.6', 'yellow.7', 'red.6', 'green.6'];
-
-const REFRESH_MS = 30000;
 
 const TOP_PROJECTS_LIMIT = 5;
 
@@ -153,49 +151,22 @@ const FilesystemCard = ({ fs, projects }: { fs: NodeFilesystemUsage; projects: P
 const NodeStoragePage = () => {
     const params = useParams();
     const nodeId = params.nodeId as string;
-    const api = useAPI();
 
     const [rangeMs, setRangeMs] = useState<number>(TIME_RANGES[1].ms);
-    const [storage, setStorage] = useState<NodeStorageSpec | null>(null);
-    const [series, setSeries] = useState<ObservabilityMetricsResult | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [snapshotting, setSnapshotting] = useState(false);
+    const storageQuery = useNodeStorage(nodeId);
+    const seriesQuery = useNodeStorageSeries(nodeId, rangeMs);
+    const snapshot = useSnapshotNodeStorage(nodeId);
 
-    const refresh = useCallback(async () => {
-        if (!api.token) return;
-        setLoading(true);
-        const now = Date.now();
-        const start = `${Math.floor((now - rangeMs) / 1000)}`;
-        const end = `${Math.floor(now / 1000)}`;
-        const step = rangeMs > 24 * 60 * 60 * 1000 ? '1h' : rangeMs > 6 * 60 * 60 * 1000 ? '10m' : '1m';
-        try {
-            const [storageRes, seriesRes] = await Promise.all([
-                api.get(API_ROUTES.GET_NODE_STORAGE, {}, { nodeId }),
-                api.get(API_ROUTES.GET_NODE_STORAGE_SERIES, {}, { nodeId, start, end, step }),
-            ]);
-            if (storageRes) setStorage(storageRes);
-            setSeries(seriesRes ?? { metric: 'disk', series: [] });
-        } finally {
-            setLoading(false);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [api.token, nodeId, rangeMs]);
+    const storage = storageQuery.data ?? null;
+    const series = seriesQuery.data ?? null;
+    const loading = storageQuery.isFetching || seriesQuery.isFetching;
 
-    useEffect(() => {
-        refresh();
-        const interval = setInterval(refresh, REFRESH_MS);
-        return () => clearInterval(interval);
-    }, [refresh]);
-
-    const takeSnapshot = async () => {
-        setSnapshotting(true);
-        try {
-            const spec = await api.post(API_ROUTES.POST_NODE_STORAGE_SNAPSHOT, {}, { nodeId });
-            if (spec) setStorage(spec);
-        } finally {
-            setSnapshotting(false);
-        }
+    const refresh = () => {
+        void storageQuery.refetch();
+        void seriesQuery.refetch();
     };
+
+    const takeSnapshot = () => snapshot.mutate();
 
     // Group each project's usage under the filesystem it lives on; anything whose mount doesn't match
     // a listed filesystem is surfaced under a synthetic "unmatched" bucket so nothing is hidden.
@@ -261,7 +232,7 @@ const NodeStoragePage = () => {
                             <MdOutlineRefresh />
                         </ActionIcon>
                     </Tooltip>
-                    <Button leftSection={<MdOutlineCameraAlt />} variant="light" onClick={takeSnapshot} loading={snapshotting}>
+                    <Button leftSection={<MdOutlineCameraAlt />} variant="light" onClick={takeSnapshot} loading={snapshot.isPending}>
                         Take snapshot
                     </Button>
                 </Group>

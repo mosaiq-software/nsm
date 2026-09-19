@@ -1,9 +1,10 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAPI } from '@/utils/api';
+import { queryKeys } from '@/query/keys';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { Capability, MeResponse, MeTeam } from '@mosaiq/nsm-common/types';
-import React, { createContext, useContext, useEffect, useState } from 'react';
 
-type MeContextType = {
+type UseMeResult = {
     me: MeResponse | null;
     ready: boolean;
     refresh: () => Promise<void>;
@@ -16,26 +17,21 @@ type MeContextType = {
     canTeam: (ownerId: string, cap: Capability) => boolean;
 };
 
-const MeContext = createContext<MeContextType | undefined>(undefined);
-
-const MeProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+// Current user's permissions/teams. Replaces MeProvider: React Query's cache shares this single
+// GET_ME result across every consumer, so no context is needed.
+export const useMe = (): UseMeResult => {
     const api = useAPI();
-    const [me, setMe] = useState<MeResponse | null>(null);
-    const [ready, setReady] = useState(false);
+    const queryClient = useQueryClient();
 
-    const refresh = async () => {
-        if (!api.token) {
-            setMe(null);
-            return;
-        }
-        const res = await api.get(API_ROUTES.GET_ME, {});
-        setMe(res ?? null);
-    };
+    const query = useQuery({
+        queryKey: queryKeys.me(),
+        queryFn: async () => (await api.get(API_ROUTES.GET_ME, {})) ?? null,
+        enabled: !!api.token,
+    });
 
-    useEffect(() => {
-        setReady(false);
-        refresh().finally(() => setReady(true));
-    }, [api.token]);
+    const me = api.token ? (query.data ?? null) : null;
+    // Settled once the query has resolved; with no token there is nothing to load so we are ready.
+    const ready = api.token ? query.isSuccess || query.isError : true;
 
     const teams = me?.teams ?? [];
     const isAdmin = !!me?.isAdmin;
@@ -55,15 +51,9 @@ const MeProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
         return !!team && team.capabilities.includes(cap);
     };
 
-    return <MeContext.Provider value={{ me, ready, refresh, isAdmin, isSuperAdmin, teams, hasNoAccess, canProject, canTeam }}>{children}</MeContext.Provider>;
-};
+    const refresh = async () => {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.me() });
+    };
 
-const useMe = () => {
-    const context = useContext(MeContext);
-    if (context === undefined) {
-        throw new Error('useMe must be used within a MeProvider');
-    }
-    return context;
+    return { me, ready, refresh, isAdmin, isSuperAdmin, teams, hasNoAccess, canProject, canTeam };
 };
-
-export { MeProvider, useMe };

@@ -1,11 +1,10 @@
 import { ActionIcon, Card, Center, Group, SegmentedControl, SimpleGrid, Text, Title, Tooltip } from '@mantine/core';
 import { LineChart } from '@mantine/charts';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeMetricKind, ObservabilityMetricsResult } from '@mosaiq/nsm-common/types';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { MdOutlineRefresh } from 'react-icons/md';
-import { useAPI } from '@/utils/api';
+import { useNodeMetrics } from '@/hooks/queries/nodeHooks';
 import { formatAxisTime, formatBytes, formatBytesPerSec, formatPercent01 } from '@/utils/format';
 
 const TIME_RANGES: { label: string; ms: number }[] = [
@@ -21,8 +20,6 @@ const METRIC_DEFS: { kind: NodeMetricKind; title: string; yLabel: string; color:
     { kind: 'net', title: 'Network', yLabel: 'Throughput', color: 'grape.6', format: formatBytesPerSec },
     { kind: 'disk', title: 'Disk', yLabel: 'Disk used', color: 'orange.6', format: formatBytes },
 ];
-
-const REFRESH_MS = 30000;
 
 // Collapse a (possibly multi-series) node metric result into one { time, value } line by summing
 // series per timestamp - node-level expressions return a single series, but this is robust either way.
@@ -71,45 +68,16 @@ const MetricChart = ({ def, result, rangeMs }: { def: (typeof METRIC_DEFS)[numbe
 const NodeOverviewPage = () => {
     const params = useParams();
     const nodeId = params.nodeId as string;
-    const api = useAPI();
 
     const [rangeMs, setRangeMs] = useState<number>(TIME_RANGES[1].ms);
-    const [metrics, setMetrics] = useState<Partial<Record<NodeMetricKind, ObservabilityMetricsResult>>>({});
-    const [loading, setLoading] = useState(false);
-
-    const refresh = useCallback(async () => {
-        if (!api.token) return;
-        setLoading(true);
-        const now = Date.now();
-        const start = `${Math.floor((now - rangeMs) / 1000)}`;
-        const end = `${Math.floor(now / 1000)}`;
-        const step = rangeMs > 24 * 60 * 60 * 1000 ? '1h' : rangeMs > 6 * 60 * 60 * 1000 ? '10m' : '1m';
-        try {
-            const [cpu, mem, net, disk] = await Promise.all([
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'cpu', start, end, step }),
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'mem', start, end, step }),
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'net', start, end, step }),
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'disk', start, end, step }),
-            ]);
-            setMetrics({ cpu, mem, net, disk });
-        } finally {
-            setLoading(false);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [api.token, nodeId, rangeMs]);
-
-    useEffect(() => {
-        refresh();
-        const interval = setInterval(refresh, REFRESH_MS);
-        return () => clearInterval(interval);
-    }, [refresh]);
+    const { metrics, isFetching, refetch } = useNodeMetrics(nodeId, rangeMs);
 
     return (
         <>
             <Group justify="flex-end">
                 <SegmentedControl value={String(rangeMs)} onChange={(v) => setRangeMs(Number(v))} data={TIME_RANGES.map((r) => ({ value: String(r.ms), label: r.label }))} />
                 <Tooltip label="Refresh">
-                    <ActionIcon variant="light" size="lg" onClick={refresh} loading={loading}>
+                    <ActionIcon variant="light" size="lg" onClick={() => void refetch()} loading={isFetching}>
                         <MdOutlineRefresh />
                     </ActionIcon>
                 </Tooltip>

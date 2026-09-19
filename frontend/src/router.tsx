@@ -29,7 +29,7 @@ import NoAccessPage from '@/pages/NoAccessPage';
 import { Center, Loader } from '@mantine/core';
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { useUser } from './contexts/user-context';
-import { useMe } from './contexts/me-context';
+import { useMe } from '@/hooks/queries/useMe';
 
 // Redirect the retired flat project routes (/p/:id/logs, /p/:id/status) to their Monitoring homes.
 const MonitoringRedirect = ({ sub }: { sub: string }) => {

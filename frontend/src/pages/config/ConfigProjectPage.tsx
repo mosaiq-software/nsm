@@ -1,23 +1,21 @@
 import { Alert, Button, Code, Divider, Group, List, NumberInput, Select, Stack, Switch, Text, TextInput, Title, Tooltip, Modal } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { Capability } from '@mosaiq/nsm-common/types';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MdOutlineLan, MdOutlineLaunch } from 'react-icons/md';
-import { useProjects } from '@/contexts/project-context';
-import { useCluster } from '@/contexts/cluster-context';
-import { useMe } from '@/contexts/me-context';
-import { useAPI } from '@/utils/api';
+import { useDeleteProject, useSetProjectAssignment } from '@/hooks/mutations/projectMutations';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useMe } from '@/hooks/queries/useMe';
 import { CdWizardLauncher } from '@/components/cicd/CdWizardLauncher';
 import { useProjectConfig } from './projectConfigContext';
 
 const ConfigProjectPage = () => {
     const { project, updateProject, portReservations } = useProjectConfig();
-    const projectCtx = useProjects();
+    const deleteProject = useDeleteProject();
+    const setAssignment = useSetProjectAssignment();
     const clusterCtx = useCluster();
     const meCtx = useMe();
-    const api = useAPI();
     const navigate = useNavigate();
     const [deleteModal, setDeleteModal] = useState(false);
 
@@ -27,14 +25,13 @@ const ConfigProjectPage = () => {
     const handleAssignNode = async (nodeId: string | undefined) => {
         updateProject({ workerNodeId: nodeId });
         if (!nodeId) return;
-        await api.post(API_ROUTES.POST_SET_PROJECT_ASSIGNMENT, { projectId: project.id }, { nodeId });
-        projectCtx.update(project.id, { workerNodeId: nodeId }, true);
+        await setAssignment.mutateAsync({ projectId: project.id, nodeId });
         notifications.show({ message: `Assigned ${project.id} to ${nodeId}`, color: 'green' });
     };
 
     const handleDeleteProject = async () => {
         try {
-            await projectCtx.delete(project.id);
+            await deleteProject.mutateAsync(project.id);
             notifications.show({ title: 'Success', message: 'Project deleted successfully', color: 'green' });
             navigate('/');
         } catch (error) {

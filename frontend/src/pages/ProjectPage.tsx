@@ -1,9 +1,9 @@
 import { Badge, Button, Card, Center, Group, Loader, SimpleGrid, Stack, Text, Title } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useProjects } from '@/contexts/project-context';
-import { useCluster } from '@/contexts/cluster-context';
-import { useMe } from '@/contexts/me-context';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useMe } from '@/hooks/queries/useMe';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { Capability, DeploymentState, Project } from '@mosaiq/nsm-common/types';
 import { MdOutlineRocketLaunch, MdOutlineSettings, MdOutlineViewList } from 'react-icons/md';

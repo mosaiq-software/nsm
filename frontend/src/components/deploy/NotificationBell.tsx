@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { MdOutlineNotificationsActive, MdOutlineNotificationsOff } from 'react-icons/md';
 import { Link } from 'react-router-dom';
 import { useAPI } from '@/utils/api';
-import { getProjectNotificationEnabled, isPushSubscribed, isPushSupported, setProjectNotificationEnabled } from '@/utils/push';
+import { usePushPreference } from '@/hooks/queries/pushHooks';
+import { useSetProjectNotification } from '@/hooks/mutations/pushMutations';
+import { isPushSubscribed, isPushSupported } from '@/utils/push';
 
 interface NotificationBellProps {
     projectId: string;
@@ -17,20 +19,24 @@ interface NotificationBellProps {
 export const NotificationBell = ({ projectId }: NotificationBellProps) => {
     const api = useAPI();
     const token = api.token;
-    const [enabled, setEnabled] = useState(false);
-    const [busy, setBusy] = useState(false);
+    const prefQuery = usePushPreference(projectId);
+    const setNotification = useSetProjectNotification(projectId);
+    // Whether this browser currently has a push subscription (browser-only state, not a query).
+    const [subscribed, setSubscribed] = useState(false);
+    const busy = setNotification.isPending;
 
     useEffect(() => {
         if (!token || !isPushSupported()) return;
         let cancelled = false;
-        void (async () => {
-            const [subscribed, prefEnabled] = await Promise.all([isPushSubscribed(), getProjectNotificationEnabled(token, projectId)]);
-            if (!cancelled) setEnabled(subscribed && prefEnabled);
-        })();
+        void isPushSubscribed().then((sub) => {
+            if (!cancelled) setSubscribed(sub);
+        });
         return () => {
             cancelled = true;
         };
     }, [token, projectId]);
+
+    const enabled = subscribed && Boolean(prefQuery.data);
 
     if (!token) return null;
 
@@ -48,24 +54,20 @@ export const NotificationBell = ({ projectId }: NotificationBellProps) => {
 
     const toggle = async () => {
         const next = !enabled;
-        setBusy(true);
         try {
-            await setProjectNotificationEnabled(token, projectId, next);
-            setEnabled(next && (await isPushSubscribed()));
+            await setNotification.mutateAsync(next);
+            setSubscribed(await isPushSubscribed());
             notifications.show(
                 next
                     ? { title: 'Notifications enabled', message: `You will be notified about deploy events for ${projectId}.`, color: 'green' }
                     : { title: 'Notifications muted', message: `You will no longer receive deploy notifications for ${projectId}.`, color: 'gray' }
             );
         } catch (error) {
-            setEnabled(false);
             notifications.show({
                 title: 'Could not update notifications',
                 message: error instanceof Error ? error.message : 'Failed to update notification settings',
                 color: 'red',
             });
-        } finally {
-            setBusy(false);
         }
     };
 

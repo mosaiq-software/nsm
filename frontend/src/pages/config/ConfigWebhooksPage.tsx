@@ -1,5 +1,5 @@
 import { WebhooksSection } from '@/components/WebhooksSection';
-import { useMe } from '@/contexts/me-context';
+import { useMe } from '@/hooks/queries/useMe';
 import { useProjectConfig } from './projectConfigContext';
 
 const ConfigWebhooksPage = () => {

@@ -1,12 +1,11 @@
 import { ActionIcon, Alert, Anchor, Card, Center, Group, Loader, SegmentedControl, Select, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { LineChart } from '@mantine/charts';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { LogSelector, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceUsage } from '@mosaiq/nsm-common/types';
+import { LogSelector, Project } from '@mosaiq/nsm-common/types';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useProjects } from '@/contexts/project-context';
-import { useMe } from '@/contexts/me-context';
-import { useAPI } from '@/utils/api';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { useMe } from '@/hooks/queries/useMe';
+import { useProjectInstance, useObservabilityMetrics, useProjectResourceUsage } from '@/hooks/queries/projectHooks';
 import { ResourceUsageBars } from '@/components/ResourceAllocation';
 import { formatAxisTime, formatBytes, formatBytesPerSec, formatCores } from '@/utils/format';
 import { ProjectHeader } from '@/components/ProjectHeader';
@@ -65,38 +64,23 @@ const metricFormatter = (metric: MetricKind): ((value: number) => string) => {
 const MonitoringMetricsPage = () => {
     const params = useParams();
     const projectId = params.projectId;
-    const projectCtx = useProjects();
+    const { projects } = useProjects();
     const meCtx = useMe();
-    const api = useAPI();
 
     const [project, setProject] = useState<Project | undefined | null>(undefined);
-    const [instance, setInstance] = useState<ProjectInstance | null>(null);
     const [scope, setScope] = useState<string>(PROJECT_SCOPE);
     const [rangeMs, setRangeMs] = useState<number>(TIME_RANGES[1].ms);
     const [metric, setMetric] = useState<MetricKind>('cpu');
-    const [metrics, setMetrics] = useState<ObservabilityMetricsResult | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [resourceUsage, setResourceUsage] = useState<ProjectResourceUsage | null>(null);
 
     useEffect(() => {
-        const foundProject = projectCtx.projects.find((proj) => proj.id === projectId);
+        const foundProject = projects.find((proj) => proj.id === projectId);
         setProject(foundProject);
-    }, [projectId, projectCtx.projects]);
+    }, [projectId, projects]);
 
-    useEffect(() => {
-        const header = project?.instances?.find((i) => i.id === scope);
-        if (!header) {
-            setInstance(null);
-            return;
-        }
-        let cancelled = false;
-        api.get(API_ROUTES.GET_PROJECT_INSTANCE, { projectInstanceId: header.id }).then((res) => {
-            if (!cancelled && res) setInstance(res);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [scope, project]);
+    // Fetch the selected instance (only when the scope points at a concrete project instance) so its
+    // services can be listed in the scope picker.
+    const scopedInstanceId = project?.instances?.find((i) => i.id === scope)?.id;
+    const { data: instance } = useProjectInstance(scopedInstanceId);
 
     const selector = useMemo((): LogSelector => {
         if (metric === 'storage') return { projectId: projectId };
@@ -105,41 +89,12 @@ const MonitoringMetricsPage = () => {
         return { projectInstanceId: scope };
     }, [scope, projectId, metric]);
 
-    const refresh = async () => {
-        if (!project) return;
-        setLoading(true);
-        const now = Date.now();
-        const start = now - rangeMs;
-        try {
-            const metricsRes = await api.get(API_ROUTES.GET_OBSERVABILITY_METRICS, {}, { ...selector, metric, start: `${Math.floor(start / 1000)}`, end: `${Math.floor(now / 1000)}`, step: '30s' });
-            setMetrics(metricsRes ?? { metric, series: [] });
-        } finally {
-            setLoading(false);
-        }
-    };
+    const metricsQuery = useObservabilityMetrics(selector, metric, rangeMs, !!project);
+    const metrics = metricsQuery.data ?? null;
+    const loading = metricsQuery.isFetching;
+    const refresh = () => void metricsQuery.refetch();
 
-    useEffect(() => {
-        if (!project) return;
-        refresh();
-        const interval = setInterval(refresh, 15000);
-        return () => clearInterval(interval);
-    }, [project, scope, rangeMs, metric]);
-
-    useEffect(() => {
-        if (!projectId) return;
-        let cancelled = false;
-        const load = () => {
-            api.get(API_ROUTES.GET_PROJECT_RESOURCE_USAGE, { projectId }).then((res) => {
-                if (!cancelled && res) setResourceUsage(res);
-            });
-        };
-        load();
-        const interval = setInterval(load, 15000);
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-        };
-    }, [projectId]);
+    const { data: resourceUsage } = useProjectResourceUsage(projectId);
 
     const chartData = useMemo(() => {
         const series = metrics?.series ?? [];

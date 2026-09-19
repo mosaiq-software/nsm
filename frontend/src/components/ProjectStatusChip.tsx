@@ -1,15 +1,16 @@
 import { Badge, Loader, MantineSize } from '@mantine/core';
-import { useCluster } from '@/contexts/cluster-context';
-import { useProjects } from '@/contexts/project-context';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useProjects, useProjectStatuses } from '@/hooks/queries/useProjects';
 import { deployQueueStatusFor } from '@/utils/deployQueue';
 import { deriveProjectState, projectStatusInfo } from '@/utils/projectStatus';
 
 export const ProjectStatusChip = ({ projectId, size = 'xs' }: { projectId: string; size?: MantineSize }) => {
-    const projectCtx = useProjects();
+    const { projects } = useProjects();
+    const statusById = useProjectStatuses();
     const clusterCtx = useCluster();
 
-    const state = projectCtx.statusById[projectId] ?? (() => {
-        const project = projectCtx.projects.find((p) => p.id === projectId);
+    const state = statusById[projectId] ?? (() => {
+        const project = projects.find((p) => p.id === projectId);
         return project ? deriveProjectState(project) : undefined;
     })();
 

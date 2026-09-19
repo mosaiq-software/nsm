@@ -1,5 +1,5 @@
 import { Badge, MantineSize, Tooltip } from '@mantine/core';
-import { useCluster } from '@/contexts/cluster-context';
+import { useCluster } from '@/hooks/queries/useCluster';
 import { deployQueueStatusFor, formatDeployEta } from '@/utils/deployQueue';
 
 // Renders "Deploying" / "In queue #N" for a project based on the leader's deploy queue, or nothing

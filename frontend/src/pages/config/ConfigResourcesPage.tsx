@@ -1,6 +1,6 @@
 import { Alert, Card, Stack, Title } from '@mantine/core';
-import { useProjects } from '@/contexts/project-context';
-import { useMe } from '@/contexts/me-context';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { useMe } from '@/hooks/queries/useMe';
 import { ResourceAllocationEditor } from '@/components/ResourceAllocation';
 import { useProjectConfig } from './projectConfigContext';
 

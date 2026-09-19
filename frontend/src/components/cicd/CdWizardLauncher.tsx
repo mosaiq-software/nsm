@@ -1,38 +1,34 @@
 import { Button, Card, Group, Modal, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { Project } from '@mosaiq/nsm-common/types';
 import { useState } from 'react';
 import { MdOutlineDelete, MdOutlineRocketLaunch, MdOutlineSync } from 'react-icons/md';
-import { useProjects } from '@/contexts/project-context';
-import { useAPI } from '@/utils/api';
+import { usePatchProjectCache } from '@/hooks/mutations/projectMutations';
+import { useRemoveCicd } from '@/hooks/mutations/deployMutations';
 import { CdWizard } from './CdWizard';
 
 // Encapsulates the CI/CD setup wizard together with the current-configuration display and the
 // setup/remove modals so the Deploy page and the Project config page can launch it identically.
 export const CdWizardLauncher = ({ project }: { project: Project }) => {
-    const projectCtx = useProjects();
-    const api = useAPI();
+    const patchProject = usePatchProjectCache();
+    const removeCicd = useRemoveCicd();
     const [modal, setModal] = useState<'cd-wizard' | 'cd-remove' | null>(null);
-    const [removingCd, setRemovingCd] = useState(false);
+    const removingCd = removeCicd.isPending;
 
     const cd = project.cicd;
 
     const handleRemoveCd = async () => {
-        setRemovingCd(true);
         notifications.show({ message: 'Removing CI/CD...', color: 'orange' });
         try {
-            const updated = await api.post(API_ROUTES.POST_CICD_REMOVE, { projectId: project.id }, {});
+            const updated = await removeCicd.mutateAsync(project.id);
             if (!updated) {
                 notifications.show({ message: 'Failed to remove CI/CD', color: 'red' });
                 return;
             }
-            projectCtx.update(project.id, { cicd: undefined }, true);
+            patchProject(project.id, { cicd: undefined });
             notifications.show({ message: 'CI/CD removed', color: 'green' });
         } catch {
             notifications.show({ message: 'Failed to remove CI/CD', color: 'red' });
-        } finally {
-            setRemovingCd(false);
         }
     };
 
@@ -43,7 +39,7 @@ export const CdWizardLauncher = ({ project }: { project: Project }) => {
                     project={project}
                     onCancel={() => setModal(null)}
                     onComplete={(updated) => {
-                        projectCtx.update(project.id, { cicd: updated.cicd, allowCICD: updated.allowCICD }, true);
+                        patchProject(project.id, { cicd: updated.cicd, allowCICD: updated.allowCICD });
                         setModal(null);
                     }}
                 />

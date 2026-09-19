@@ -1,10 +1,12 @@
 import { ActionIcon, Anchor, Badge, Button, Card, Checkbox, Collapse, Group, Modal, Radio, Stack, Switch, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { ALL_GITHUB_SCENARIOS, GITHUB_SCENARIO_SUBEVENTS, GithubScenario, GithubScenarioConfig, GithubScenarioLifecycle, ProjectEventType, ProjectWebhook, ProjectWebhookType } from '@mosaiq/nsm-common/types';
-import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { ALL_GITHUB_SCENARIOS, GITHUB_SCENARIO_SUBEVENTS, GithubScenario, GithubScenarioConfig, GithubScenarioLifecycle, ProjectEventType, ProjectWebhook } from '@mosaiq/nsm-common/types';
+import { useState } from 'react';
 import { MdDelete, MdEdit, MdSend } from 'react-icons/md';
-import { useAPI } from '@/utils/api';
+import { queryKeys } from '@/query/keys';
+import { useProjectWebhooks } from '@/hooks/queries/projectHooks';
+import { useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useTestWebhook } from '@/hooks/mutations/projectResourceMutations';
 
 // Subscribable NSM events, grouped for the picker. Labels are UI-only; the values are the stable wire ids.
 const EVENT_GROUPS: { group: string; events: { value: ProjectEventType; label: string }[] }[] = [
@@ -70,8 +72,12 @@ const LIFECYCLE_OPTIONS: { value: GithubScenarioLifecycle; label: string; help: 
 const BRANCH_FILTERABLE = new Set<GithubScenario>([GithubScenario.PULL_REQUEST, GithubScenario.PUSH, GithubScenario.WORKFLOW_RUN]);
 
 export const WebhooksSection = ({ projectId, githubAppInstalled }: { projectId: string; githubAppInstalled: boolean }) => {
-    const api = useAPI();
-    const [webhooks, setWebhooks] = useState<ProjectWebhook[]>([]);
+    const queryClient = useQueryClient();
+    const { data: webhooks = [] } = useProjectWebhooks(projectId);
+    const createWebhook = useCreateWebhook(projectId);
+    const updateWebhook = useUpdateWebhook(projectId);
+    const deleteWebhook = useDeleteWebhook(projectId);
+    const testWebhook = useTestWebhook(projectId);
     const [modalOpen, setModalOpen] = useState(false);
     const [editing, setEditing] = useState<ProjectWebhook | null>(null);
     const [name, setName] = useState('');
@@ -79,18 +85,9 @@ export const WebhooksSection = ({ projectId, githubAppInstalled }: { projectId: 
     const [events, setEvents] = useState<ProjectEventType[]>([]);
     const [scenarios, setScenarios] = useState<GithubScenarioConfig[]>([]);
     const [enabled, setEnabled] = useState(true);
-    const [saving, setSaving] = useState(false);
     const [testingId, setTestingId] = useState<string | null>(null);
 
-    const load = () => {
-        if (!api.token) return;
-        api.get(API_ROUTES.GET_PROJECT_WEBHOOKS, { projectId }).then((res) => setWebhooks(res ?? []));
-    };
-
-    useEffect(() => {
-        load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [projectId, api.token]);
+    const saving = createWebhook.isPending || updateWebhook.isPending;
 
     const openCreate = () => {
         setEditing(null);
@@ -152,43 +149,35 @@ export const WebhooksSection = ({ projectId, githubAppInstalled }: { projectId: 
             notifications.show({ message: 'Select at least one event or GitHub scenario', color: 'red' });
             return;
         }
-        setSaving(true);
         try {
             if (editing) {
-                const res = await api.post(API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK, { projectId, webhookId: editing.id }, { name: name.trim(), url, events, githubScenarios: cleanScenarios, enabled });
-                if (!res) throw new Error();
+                await updateWebhook.mutateAsync({ webhookId: editing.id, body: { name: name.trim(), url, events, githubScenarios: cleanScenarios, enabled } });
             } else {
-                const res = await api.post(API_ROUTES.POST_CREATE_PROJECT_WEBHOOK, { projectId }, { type: ProjectWebhookType.DISCORD, name: name.trim(), url, events, githubScenarios: cleanScenarios, enabled });
-                if (!res) throw new Error();
+                await createWebhook.mutateAsync({ name: name.trim(), url, events, githubScenarios: cleanScenarios, enabled });
             }
             setModalOpen(false);
             notifications.show({ message: editing ? 'Webhook updated' : 'Webhook created', color: 'green' });
-            load();
         } catch {
             notifications.show({ message: `Failed to ${editing ? 'update' : 'create'} webhook`, color: 'red' });
-        } finally {
-            setSaving(false);
         }
     };
 
     const remove = async (webhook: ProjectWebhook) => {
         if (!window.confirm(`Delete "${webhook.name}"? It will stop receiving events.`)) return;
-        await api.post(API_ROUTES.POST_DELETE_PROJECT_WEBHOOK, { projectId, webhookId: webhook.id }, {});
+        await deleteWebhook.mutateAsync(webhook.id);
         notifications.show({ message: 'Webhook deleted', color: 'green' });
-        load();
     };
 
     const toggleEnabled = async (webhook: ProjectWebhook, next: boolean) => {
         // Optimistic flip; the masked url is echoed back so the stored secret is left unchanged.
-        setWebhooks((prev) => prev.map((w) => (w.id === webhook.id ? { ...w, enabled: next } : w)));
-        await api.post(API_ROUTES.POST_UPDATE_PROJECT_WEBHOOK, { projectId, webhookId: webhook.id }, { enabled: next });
-        load();
+        queryClient.setQueryData<ProjectWebhook[]>(queryKeys.projectWebhooks(projectId), (prev) => (prev ?? []).map((w) => (w.id === webhook.id ? { ...w, enabled: next } : w)));
+        await updateWebhook.mutateAsync({ webhookId: webhook.id, body: { enabled: next } });
     };
 
     const test = async (webhook: ProjectWebhook) => {
         setTestingId(webhook.id);
         try {
-            const res = await api.post(API_ROUTES.POST_TEST_PROJECT_WEBHOOK, { projectId, webhookId: webhook.id }, {});
+            const res = await testWebhook.mutateAsync(webhook.id);
             if (res?.ok) {
                 notifications.show({ message: 'Test message sent', color: 'green' });
             } else {

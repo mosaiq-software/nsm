@@ -1,10 +1,10 @@
 import { ActionIcon, Alert, Badge, Button, Card, Checkbox, CopyButton, Group, Modal, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { ApiKeyPermission, ApiKeyView, CreateApiKeyResult } from '@mosaiq/nsm-common/types';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { MdContentCopy, MdDelete, MdDone } from 'react-icons/md';
-import { useAPI } from '@/utils/api';
+import { useProjectApiKeys } from '@/hooks/queries/projectHooks';
+import { useCreateApiKey, useRevokeApiKey } from '@/hooks/mutations/projectResourceMutations';
 
 // Label for each API key permission. Only GET_STATUS exists today.
 const PERMISSION_LABELS: { value: ApiKeyPermission; label: string; description: string }[] = [{ value: ApiKeyPermission.GET_STATUS, label: 'Get status', description: 'Read current status, uptime and recent incidents' }];
@@ -12,25 +12,17 @@ const PERMISSION_LABELS: { value: ApiKeyPermission; label: string; description: 
 const permissionLabel = (p: ApiKeyPermission): string => PERMISSION_LABELS.find((x) => x.value === p)?.label ?? p;
 
 export const ApiKeysCard = ({ projectId }: { projectId: string }) => {
-    const api = useAPI();
-    const [keys, setKeys] = useState<ApiKeyView[]>([]);
+    const { data: keys = [] } = useProjectApiKeys(projectId);
+    const createKey = useCreateApiKey(projectId);
+    const revokeKey = useRevokeApiKey(projectId);
     const [createOpen, setCreateOpen] = useState(false);
     const [name, setName] = useState('');
     const [permissions, setPermissions] = useState<ApiKeyPermission[]>([ApiKeyPermission.GET_STATUS]);
-    const [saving, setSaving] = useState(false);
     const [created, setCreated] = useState<CreateApiKeyResult | null>(null);
     const [keyToRevoke, setKeyToRevoke] = useState<ApiKeyView | null>(null);
-    const [revoking, setRevoking] = useState(false);
 
-    const load = () => {
-        if (!api.token) return;
-        api.get(API_ROUTES.GET_PROJECT_API_KEYS, { projectId }).then((res) => setKeys(res ?? []));
-    };
-
-    useEffect(() => {
-        load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [projectId, api.token]);
+    const saving = createKey.isPending;
+    const revoking = revokeKey.isPending;
 
     const openCreate = () => {
         setName('');
@@ -47,13 +39,10 @@ export const ApiKeysCard = ({ projectId }: { projectId: string }) => {
             notifications.show({ message: 'Select at least one permission', color: 'red' });
             return;
         }
-        setSaving(true);
-        const res = await api.post(API_ROUTES.POST_CREATE_API_KEY, { projectId }, { name: name.trim(), permissions });
-        setSaving(false);
+        const res = await createKey.mutateAsync({ name: name.trim(), permissions });
         if (res) {
             setCreateOpen(false);
             setCreated(res);
-            load();
         } else {
             notifications.show({ message: 'Failed to create API key', color: 'red' });
         }
@@ -61,12 +50,9 @@ export const ApiKeysCard = ({ projectId }: { projectId: string }) => {
 
     const confirmRevoke = async () => {
         if (!keyToRevoke) return;
-        setRevoking(true);
-        await api.post(API_ROUTES.POST_REVOKE_API_KEY, { projectId, apiKeyId: keyToRevoke.id }, {});
-        setRevoking(false);
+        await revokeKey.mutateAsync(keyToRevoke.id);
         notifications.show({ message: 'API key revoked', color: 'green' });
         setKeyToRevoke(null);
-        load();
     };
 
     const togglePermission = (p: ApiKeyPermission, checked: boolean) => {

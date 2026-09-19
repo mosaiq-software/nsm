@@ -1,6 +1,6 @@
-import { useAPI } from '@/utils/api';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { Capability, TeamDetail, TeamType } from '@mosaiq/nsm-common/types';
+import { useTeam } from '@/hooks/queries/teamHooks';
+import { useSetTeamDefaults, useSetTeamOverride, useDeleteTeamOverride } from '@/hooks/mutations/teamMutations';
+import { Capability, TeamType } from '@mosaiq/nsm-common/types';
 import { Alert, Avatar, Badge, Button, Center, Checkbox, Group, Loader, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useEffect, useMemo, useState } from 'react';
@@ -18,21 +18,20 @@ const CAPABILITY_LABELS: { cap: Capability; label: string }[] = [
 ];
 
 const TeamDetailPage = () => {
-    const api = useAPI();
     const { ownerId = '' } = useParams();
-    const [detail, setDetail] = useState<TeamDetail | undefined | null>(undefined);
+    const detailQuery = useTeam(ownerId);
+    const detail = detailQuery.isLoading ? undefined : (detailQuery.data ?? null);
     const [defaults, setDefaults] = useState<Capability[]>([]);
-    const [savingDefaults, setSavingDefaults] = useState(false);
 
-    const load = async () => {
-        const res = await api.get(API_ROUTES.GET_TEAM, { ownerId });
-        setDetail(res ?? null);
-        setDefaults(res?.team.defaultCapabilities ?? []);
-    };
+    const setTeamDefaults = useSetTeamDefaults(ownerId);
+    const setTeamOverride = useSetTeamOverride(ownerId);
+    const deleteTeamOverride = useDeleteTeamOverride(ownerId);
+    const savingDefaults = setTeamDefaults.isPending;
 
+    // Sync the editable defaults draft whenever fresh team data arrives.
     useEffect(() => {
-        void load();
-    }, [ownerId, api.token]);
+        setDefaults(detailQuery.data?.team.defaultCapabilities ?? []);
+    }, [detailQuery.data]);
 
     const canManage = !!detail?.canManage;
 
@@ -41,11 +40,8 @@ const TeamDetailPage = () => {
     };
 
     const saveDefaults = async () => {
-        setSavingDefaults(true);
-        await api.post(API_ROUTES.POST_SET_TEAM_DEFAULTS, { ownerId }, { capabilities: defaults });
-        setSavingDefaults(false);
+        await setTeamDefaults.mutateAsync(defaults);
         notifications.show({ message: 'Default permissions saved', color: 'green' });
-        await load();
     };
 
     // Persist a member's override as the capabilities granted BEYOND the team default (additive-only).
@@ -57,11 +53,10 @@ const TeamDetailPage = () => {
         else current.delete(cap);
         const extra = [...current].filter((c) => !defaults.includes(c));
         if (extra.length === 0) {
-            await api.post(API_ROUTES.POST_DELETE_TEAM_OVERRIDE, { ownerId }, { memberId });
+            await deleteTeamOverride.mutateAsync(memberId);
         } else {
-            await api.post(API_ROUTES.POST_SET_TEAM_OVERRIDE, { ownerId }, { memberId, memberLogin, capabilities: extra });
+            await setTeamOverride.mutateAsync({ memberId, memberLogin, capabilities: extra });
         }
-        await load();
     };
 
     const defaultsChanged = useMemo(() => {

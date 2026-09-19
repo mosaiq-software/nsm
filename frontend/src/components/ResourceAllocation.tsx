@@ -1,9 +1,8 @@
 import { Button, Group, NumberInput, Progress, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { ProjectResourceQuota, ProjectResourceUsage } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
-import { useAPI } from '@/utils/api';
+import { useSetProjectQuota } from '@/hooks/mutations/projectMutations';
 import { formatBytes, formatCores } from '@/utils/format';
 
 export const GIB = 1024 ** 3;
@@ -79,11 +78,11 @@ interface EditorProps {
 // Admin-only editor for a project's advisory allocation. CPU is entered in cores, memory and storage
 // in GB. Leaving a field blank clears that resource's allocation. Saves via the dedicated endpoint.
 export const ResourceAllocationEditor = ({ projectId, quota, onSaved }: EditorProps) => {
-    const api = useAPI();
+    const setQuota = useSetProjectQuota(projectId);
     const [cpuCores, setCpuCores] = useState<number | string>('');
     const [memGiB, setMemGiB] = useState<number | string>('');
     const [storageGiB, setStorageGiB] = useState<number | string>('');
-    const [saving, setSaving] = useState(false);
+    const saving = setQuota.isPending;
 
     useEffect(() => {
         setCpuCores(quota?.cpuCores ?? '');
@@ -92,20 +91,17 @@ export const ResourceAllocationEditor = ({ projectId, quota, onSaved }: EditorPr
     }, [projectId, quota?.cpuCores, quota?.memoryBytes, quota?.storageBytes]);
 
     const save = async () => {
-        setSaving(true);
         try {
             const body: ProjectResourceQuota = {
                 cpuCores: numberOrUndefined(cpuCores),
                 memoryBytes: giBToBytes(memGiB),
                 storageBytes: giBToBytes(storageGiB),
             };
-            await api.post(API_ROUTES.POST_SET_PROJECT_QUOTA, { projectId }, body);
+            await setQuota.mutateAsync(body);
             notifications.show({ title: 'Saved', message: 'Resource allocation updated', color: 'green' });
             await onSaved?.();
         } catch (e) {
             notifications.show({ title: 'Error', message: 'Failed to update allocation', color: 'red' });
-        } finally {
-            setSaving(false);
         }
     };
 

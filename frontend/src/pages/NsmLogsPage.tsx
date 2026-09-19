@@ -1,5 +1,5 @@
 import { Alert, Stack, Title } from '@mantine/core';
-import { useCluster } from '@/contexts/cluster-context';
+import { useCluster } from '@/hooks/queries/useCluster';
 import { LogViewer } from '@/components/LogViewer/LogViewer';
 
 const NsmLogsPage = () => {

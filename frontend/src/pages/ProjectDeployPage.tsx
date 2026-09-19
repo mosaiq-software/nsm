@@ -1,12 +1,14 @@
 import { Alert, Button, Card, Center, Divider, Group, Loader, Modal, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { Capability, DeploymentState, FullDirectoryMap, Project, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useProjects } from '@/contexts/project-context';
-import { useCluster } from '@/contexts/cluster-context';
-import { useMe } from '@/contexts/me-context';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { usePatchProjectCache } from '@/hooks/mutations/projectMutations';
+import { useDeployWeb, useTeardownProject, useCancelDeploy } from '@/hooks/mutations/deployMutations';
+import { useProjectDeployAverage } from '@/hooks/queries/projectHooks';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useMe } from '@/hooks/queries/useMe';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { CdWizardLauncher } from '@/components/cicd/CdWizardLauncher';
 import { MdOutlineCancel, MdOutlineDelete, MdOutlineRocketLaunch } from 'react-icons/md';
@@ -15,15 +17,17 @@ import { DeploymentInstanceList } from '@/components/deploy/DeploymentInstanceLi
 import { DeploymentInstanceDetail } from '@/components/deploy/DeploymentInstanceDetail';
 import { isInProgressState } from '@/components/deploy/DeploymentStateBadge';
 import { deployQueueStatusFor, formatDeployEta } from '@/utils/deployQueue';
-import { useAPI } from '@/utils/api';
 
 const LIST_REFRESH_INTERVAL_MS = 5000;
 
 const ProjectDeployPage = () => {
-    const api = useAPI();
     const params = useParams();
     const projectId = params.projectId;
-    const projectCtx = useProjects();
+    const { projects, refresh } = useProjects();
+    const patchProject = usePatchProjectCache();
+    const deployWeb = useDeployWeb();
+    const teardownProject = useTeardownProject();
+    const cancelDeploy = useCancelDeploy();
     const clusterCtx = useCluster();
     const meCtx = useMe();
     const [project, setProject] = useState<Project | undefined | null>(undefined);
@@ -32,30 +36,19 @@ const ProjectDeployPage = () => {
     const [pendingHeader, setPendingHeader] = useState<ProjectInstanceHeader | null>(null);
 
     useEffect(() => {
-        const foundProject = projectCtx.projects.find((proj) => proj.id === projectId);
+        const foundProject = projects.find((proj) => proj.id === projectId);
         setProject(foundProject);
-    }, [projectId, projectCtx.projects]);
+    }, [projectId, projects]);
 
     const serverHeaders = useMemo(() => [...(project?.instances ?? [])].sort((a, b) => b.created - a.created), [project?.instances]);
 
     // Average deploy time for this project, computed server-side from the exact same rolling average
     // the leader uses to estimate the deploy queue (config sample size, successful deploys only), so
     // the two numbers always agree. Undefined until fetched or when the project has no history.
-    const [avgDeployMs, setAvgDeployMs] = useState<number | undefined>(undefined);
-
-    // Re-fetch the average whenever a new successful deploy lands (or the project changes).
+    // Re-fetched whenever a new successful deploy lands (deployedCount is part of the query key).
     const deployedCount = useMemo(() => serverHeaders.filter((h) => h.state === DeploymentState.DEPLOYED).length, [serverHeaders]);
-    useEffect(() => {
-        if (!projectId) return;
-        let cancelled = false;
-        void api.get(API_ROUTES.GET_PROJECT_DEPLOY_AVERAGE, { projectId }).then((res) => {
-            if (cancelled) return;
-            setAvgDeployMs(res && res.sampleCount > 0 && res.deployMs != null ? res.deployMs : undefined);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [projectId, deployedCount]); // eslint-disable-line react-hooks/exhaustive-deps
+    const { data: deployAverage } = useProjectDeployAverage(projectId, deployedCount);
+    const avgDeployMs = deployAverage && deployAverage.sampleCount > 0 && deployAverage.deployMs != null ? deployAverage.deployMs : undefined;
 
     // Include a freshly-triggered deployment before the project list has caught up with it.
     const headers = useMemo(() => {
@@ -81,7 +74,7 @@ const ProjectDeployPage = () => {
     const anyInProgress = headers.some((h) => isInProgressState(h.state));
     useEffect(() => {
         if (!anyInProgress) return;
-        const id = setInterval(() => void projectCtx.refresh(), LIST_REFRESH_INTERVAL_MS);
+        const id = setInterval(() => void refresh(), LIST_REFRESH_INTERVAL_MS);
         return () => clearInterval(id);
     }, [anyInProgress]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -106,7 +99,7 @@ const ProjectDeployPage = () => {
     const handleDeploy = async () => {
         if (!project) return;
         notifications.show({ message: 'Queued for deployment...', color: 'blue' });
-        const newLogId = await api.get(API_ROUTES.GET_DEPLOY_WEB, { projectId: project.id });
+        const newLogId = await deployWeb.mutateAsync(project.id);
         if (!newLogId) {
             notifications.show({ message: 'Failed to get deployment log ID. Reload to see log', color: 'yellow' });
         } else {
@@ -123,15 +116,15 @@ const ProjectDeployPage = () => {
             });
             setSelectedInstanceId(newLogId);
         }
-        projectCtx.update(project.id, { dirtyConfig: false }, true);
-        void projectCtx.refresh();
+        patchProject(project.id, { dirtyConfig: false });
+        void refresh();
     };
 
     const handleTeardown = async () => {
         if (!project) return;
         notifications.show({ message: 'Tearing down project...', color: 'blue' });
-        await api.post(API_ROUTES.POST_TEARDOWN_PROJECT, { projectId: project.id }, {});
-        projectCtx.update(project.id, { state: DeploymentState.DESTROYING }, true);
+        await teardownProject.mutateAsync(project.id);
+        patchProject(project.id, { state: DeploymentState.DESTROYING });
         notifications.show({ message: 'Teardown requested', color: 'green' });
     };
 
@@ -139,7 +132,7 @@ const ProjectDeployPage = () => {
         if (!project) return;
         notifications.show({ message: 'Cancelling deployment...', color: 'orange' });
         try {
-            await api.post(API_ROUTES.POST_CANCEL_DEPLOY, { projectId: project.id }, {});
+            await cancelDeploy.mutateAsync(project.id);
             notifications.show({ message: 'Deployment cancellation requested', color: 'green' });
         } catch {
             notifications.show({ message: 'Failed to cancel deployment', color: 'red' });

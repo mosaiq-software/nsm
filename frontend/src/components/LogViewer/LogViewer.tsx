@@ -1,10 +1,12 @@
 import { ActionIcon, Badge, Card, Group, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { LogEntry, LogFacet, LogFilter, LogSelector } from '@mosaiq/nsm-common/types';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { LogEntry, LogFilter, LogSelector } from '@mosaiq/nsm-common/types';
+import { useMemo, useState } from 'react';
 import { MdClose, MdOutlineRefresh, MdOutlineSearch } from 'react-icons/md';
 import { useAPI } from '@/utils/api';
+import { queryKeys } from '@/query/keys';
 import { FacetSidebar, Selections } from './FacetSidebar';
 import { LogTable } from './LogTable';
 import { LogDetailDrawer } from './LogDetailDrawer';
@@ -57,13 +59,6 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
     const [debouncedSearch] = useDebouncedValue(searchInput, 300);
     const [selections, setSelections] = useState<Selections>({});
     const [levelMin, setLevelMin] = useState<number | undefined>(undefined);
-    const [entries, setEntries] = useState<LogEntry[]>([]);
-    const [nextCursorNs, setNextCursorNs] = useState<string | undefined>();
-    const [facets, setFacets] = useState<LogFacet[]>([]);
-    const [total, setTotal] = useState(0);
-    const [loading, setLoading] = useState(false);
-    const [loadingMore, setLoadingMore] = useState(false);
-    const [facetsLoading, setFacetsLoading] = useState(false);
     const [selected, setSelected] = useState<LogEntry | null>(null);
     const [live, setLive] = useState(true);
 
@@ -71,75 +66,69 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
     const selectionsKey = JSON.stringify(selections);
     const rangeKey = range.mode === 'preset' ? `p:${range.presetMs}` : `c:${range.startMs}-${range.endMs}`;
     const filters = useMemo(() => selectionsToFilters(selections), [selectionsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    const search = debouncedSearch || undefined;
 
-    // Keep the latest cursor in a ref so "Load older" doesn't need to be an effect dependency.
-    const cursorRef = useRef<string | undefined>(undefined);
-    cursorRef.current = nextCursorNs;
+    // Live tailing only makes sense for now-relative preset ranges.
+    const livePreset = live && range.mode === 'preset';
+    // Stable inputs identity: every input that changes the query result contributes a segment.
+    const inputsKey = `${selectorKey}|${debouncedSearch}|${selectionsKey}|${levelMin ?? ''}|${rangeKey}`;
 
-    const loadPage = useCallback(
-        async (append: boolean) => {
+    const entriesQuery = useInfiniteQuery({
+        queryKey: queryKeys.logs(inputsKey),
+        queryFn: async ({ pageParam }) => {
             const { startNs, endNs } = boundsNs(range);
-            append ? setLoadingMore(true) : setLoading(true);
-            try {
-                const res = await api.post(API_ROUTES.POST_LOG_QUERY, {}, {
+            return (
+                (await api.post(API_ROUTES.POST_LOG_QUERY, {}, {
                     selector,
                     startNs,
                     endNs,
-                    search: debouncedSearch || undefined,
+                    search,
                     filters,
                     levelMin,
                     limit: PAGE_SIZE,
-                    cursorNs: append ? cursorRef.current : undefined,
-                });
-                const data = res ?? { entries: [], nextCursorNs: undefined };
-                setEntries((prev) => (append ? [...prev, ...data.entries] : data.entries));
-                setNextCursorNs(data.nextCursorNs);
-            } finally {
-                append ? setLoadingMore(false) : setLoading(false);
-            }
+                    cursorNs: pageParam,
+                })) ?? { entries: [], nextCursorNs: undefined }
+            );
         },
-        [selectorKey, debouncedSearch, selectionsKey, rangeKey, levelMin] // eslint-disable-line react-hooks/exhaustive-deps
-    );
+        initialPageParam: undefined as string | undefined,
+        getNextPageParam: (lastPage) => lastPage.nextCursorNs,
+        placeholderData: keepPreviousData,
+        enabled: !!api.token,
+        refetchInterval: livePreset ? LIVE_INTERVAL_MS : false,
+    });
 
-    const loadFacets = useCallback(
-        async () => {
-            if (facetFields.length === 0) return;
+    const facetsQuery = useQuery({
+        queryKey: queryKeys.logFacets(inputsKey),
+        queryFn: async () => {
             const { startNs, endNs } = boundsNs(range);
-            setFacetsLoading(true);
-            try {
-                const res = await api.post(API_ROUTES.POST_LOG_FACETS, {}, {
+            return (
+                (await api.post(API_ROUTES.POST_LOG_FACETS, {}, {
                     selector,
                     startNs,
                     endNs,
-                    search: debouncedSearch || undefined,
+                    search,
                     filters,
                     levelMin,
                     fields: facetFields,
-                });
-                setFacets(res?.facets ?? []);
-                setTotal(res?.total ?? 0);
-            } finally {
-                setFacetsLoading(false);
-            }
+                })) ?? { facets: [], total: 0 }
+            );
         },
-        [selectorKey, debouncedSearch, selectionsKey, rangeKey, levelMin] // eslint-disable-line react-hooks/exhaustive-deps
-    );
+        placeholderData: keepPreviousData,
+        enabled: !!api.token && facetFields.length > 0,
+        refetchInterval: livePreset ? LIVE_INTERVAL_MS : false,
+    });
 
-    // Refetch page 1 + facets whenever the query inputs change.
-    useEffect(() => {
-        void loadPage(false);
-        void loadFacets();
-    }, [loadPage, loadFacets]);
+    const entries = useMemo(() => entriesQuery.data?.pages.flatMap((p) => p.entries) ?? [], [entriesQuery.data]);
+    const facets = facetsQuery.data?.facets ?? [];
+    const total = facetsQuery.data?.total ?? 0;
+    const loading = entriesQuery.isFetching && !entriesQuery.isFetchingNextPage;
+    const loadingMore = entriesQuery.isFetchingNextPage;
+    const facetsLoading = facetsQuery.isFetching;
 
-    // Live tail: only meaningful for now-relative preset ranges.
-    useEffect(() => {
-        if (!live || range.mode !== 'preset') return;
-        const id = setInterval(() => {
-            void loadPage(false);
-            void loadFacets();
-        }, LIVE_INTERVAL_MS);
-        return () => clearInterval(id);
-    }, [live, range.mode, loadPage, loadFacets]);
+    const refreshAll = () => {
+        void entriesQuery.refetch();
+        void facetsQuery.refetch();
+    };
 
     const toggleSelection = (field: string, value: string) => {
         setSelections((prev) => {
@@ -187,7 +176,7 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
                     <TimeRangeControl value={range} onChange={setRange} />
                     <Switch label="Live" checked={live} onChange={(e) => setLive(e.currentTarget.checked)} disabled={range.mode !== 'preset'} />
                     <Tooltip label="Refresh">
-                        <ActionIcon variant="light" size="lg" loading={loading} onClick={() => { void loadPage(false); void loadFacets(); }}>
+                        <ActionIcon variant="light" size="lg" loading={loading} onClick={refreshAll}>
                             <MdOutlineRefresh />
                         </ActionIcon>
                     </Tooltip>
@@ -221,9 +210,9 @@ export const LogViewer = ({ selector, facetFields, defaultColumns }: LogViewerPr
                         entries={entries}
                         columns={columns}
                         loading={loading}
-                        hasMore={!!nextCursorNs}
+                        hasMore={!!entriesQuery.hasNextPage}
                         loadingMore={loadingMore}
-                        onLoadMore={() => void loadPage(true)}
+                        onLoadMore={() => void entriesQuery.fetchNextPage()}
                         onSelect={setSelected}
                         selectedTs={selected?.ts}
                     />

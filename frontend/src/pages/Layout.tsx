@@ -1,18 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
 import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, Group, Loader, Menu, Modal, Space, Stack, Text, TextInput, Title } from '@mantine/core';
 import RouterLink, { pathMatchesShape } from '@/components/RouterLink';
 import { ProjectStatusChip } from '@/components/ProjectStatusChip';
-import { useProjects } from '@/contexts/project-context';
-import { useMe } from '@/contexts/me-context';
-import { useDomains } from '@/contexts/domains-context';
-import { useCluster } from '@/contexts/cluster-context';
+import { useCreateProject } from '@/hooks/mutations/projectMutations';
+import { useMe } from '@/hooks/queries/useMe';
+import { useDomains } from '@/hooks/queries/useDomains';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useGithubRepos, useGithubBranches } from '@/hooks/queries/githubHooks';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Capability, Project } from '@mosaiq/nsm-common/types';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
 import { MdOutlineWarningAmber } from 'react-icons/md';
-import { rawApiGetNoHook, useAPI } from '@/utils/api';
 
 const emptyProject: Project = {
     id: '',
@@ -24,7 +23,7 @@ const emptyProject: Project = {
 
 const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle }] = useDisclosure();
-    const projectCtx = useProjects();
+    const createProject = useCreateProject();
     const meCtx = useMe();
     const domainsCtx = useDomains();
     const clusterCtx = useCluster();
@@ -40,42 +39,13 @@ const Layout = (props: { children: React.ReactNode }) => {
         setNewProject(emptyProject);
     };
 
-    const { token } = useAPI();
-    const [repos, setRepos] = useState<string[]>([]);
-    const [branches, setBranches] = useState<string[]>([]);
     // Debounce the free-text owner/repo so typing doesn't fire a GitHub lookup on every keystroke.
     const [debouncedOwner] = useDebouncedValue(newProject.repoOwner?.trim() || '', 400);
     const [debouncedRepo] = useDebouncedValue(newProject.repoName?.trim() || '', 400);
 
-    // Repos the App can access for the chosen owner.
-    useEffect(() => {
-        if (modal !== 'create' || !debouncedOwner) {
-            setRepos([]);
-            return;
-        }
-        let cancelled = false;
-        void rawApiGetNoHook(API_ROUTES.GET_GITHUB_REPOS, {}, token, { owner: debouncedOwner }).then((res) => {
-            if (!cancelled) setRepos(res || []);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [modal, debouncedOwner, token]);
-
-    // Branches of the chosen repo.
-    useEffect(() => {
-        if (modal !== 'create' || !debouncedOwner || !debouncedRepo) {
-            setBranches([]);
-            return;
-        }
-        let cancelled = false;
-        void rawApiGetNoHook(API_ROUTES.GET_GITHUB_BRANCHES, {}, token, { owner: debouncedOwner, repo: debouncedRepo }).then((res) => {
-            if (!cancelled) setBranches(res || []);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [modal, debouncedOwner, debouncedRepo, token]);
+    const isCreateModalOpen = modal === 'create';
+    const repos = useGithubRepos(debouncedOwner, isCreateModalOpen).data ?? [];
+    const branches = useGithubBranches(debouncedOwner, debouncedRepo, isCreateModalOpen).data ?? [];
 
     return (
         <>
@@ -128,7 +98,13 @@ const Layout = (props: { children: React.ReactNode }) => {
                                 onClick={async () => {
                                     const createdId = newProject.id;
                                     setCreatingProject(true);
-                                    await projectCtx.create(newProject);
+                                    try {
+                                        await createProject.mutateAsync(newProject);
+                                    } catch {
+                                        // Notification handled by the mutation hook.
+                                        setCreatingProject(false);
+                                        return;
+                                    }
                                     await meCtx.refresh();
                                     await new Promise((resolve) => setTimeout(resolve, 1000));
                                     setCreatingProject(false);

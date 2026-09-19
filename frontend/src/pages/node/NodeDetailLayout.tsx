@@ -1,8 +1,8 @@
 import { Alert, Anchor, Badge, Group, Stack, Tabs, Text, Title, Tooltip } from '@mantine/core';
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MdArrowBack, MdOutlineStar } from 'react-icons/md';
-import { useCluster } from '@/contexts/cluster-context';
-import { useMe } from '@/contexts/me-context';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useMe } from '@/hooks/queries/useMe';
 
 const NodeDetailLayout = () => {
     const params = useParams();

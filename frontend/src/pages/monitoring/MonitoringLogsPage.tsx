@@ -1,11 +1,10 @@
 import { Alert, Center, Loader, Select, Stack, Title } from '@mantine/core';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { LogSelector, Project, ProjectInstance } from '@mosaiq/nsm-common/types';
+import { LogSelector, Project } from '@mosaiq/nsm-common/types';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useProjects } from '@/contexts/project-context';
-import { useCluster } from '@/contexts/cluster-context';
-import { useAPI } from '@/utils/api';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useProjectInstance } from '@/hooks/queries/projectHooks';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { LogViewer } from '@/components/LogViewer/LogViewer';
 
@@ -14,19 +13,17 @@ const PROJECT_SCOPE = '__project__';
 const MonitoringLogsPage = () => {
     const params = useParams();
     const projectId = params.projectId;
-    const projectCtx = useProjects();
+    const { projects } = useProjects();
     const clusterCtx = useCluster();
-    const api = useAPI();
     const [searchParams] = useSearchParams();
 
     const [project, setProject] = useState<Project | undefined | null>(undefined);
-    const [instance, setInstance] = useState<ProjectInstance | null>(null);
     const [scope, setScope] = useState<string>(PROJECT_SCOPE);
 
     useEffect(() => {
-        const foundProject = projectCtx.projects.find((proj) => proj.id === projectId);
+        const foundProject = projects.find((proj) => proj.id === projectId);
         setProject(foundProject);
-    }, [projectId, projectCtx.projects]);
+    }, [projectId, projects]);
 
     // Deep-link support: ?instance=<id> filters logs to a single deployment instance.
     useEffect(() => {
@@ -35,20 +32,8 @@ const MonitoringLogsPage = () => {
     }, [searchParams]);
 
     // A service-instance scope requires the full instance to resolve its service instance ids.
-    useEffect(() => {
-        const header = project?.instances?.find((i) => i.id === scope);
-        if (!header) {
-            setInstance(null);
-            return;
-        }
-        let cancelled = false;
-        api.get(API_ROUTES.GET_PROJECT_INSTANCE, { projectInstanceId: header.id }).then((res) => {
-            if (!cancelled && res) setInstance(res);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [scope, project]);
+    const scopedInstanceId = project?.instances?.find((i) => i.id === scope)?.id;
+    const { data: instance } = useProjectInstance(scopedInstanceId);
 
     const selector = useMemo((): LogSelector => {
         if (scope === PROJECT_SCOPE) return { projectId: projectId };

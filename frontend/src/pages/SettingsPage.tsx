@@ -1,11 +1,14 @@
 import { Alert, Button, Card, Container, Divider, Group, List, Loader, Stack, Switch, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { useQueries } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { MdOutlineNotificationsActive } from 'react-icons/md';
 import { Capability } from '@mosaiq/nsm-common/types';
-import { useMe } from '@/contexts/me-context';
+import { useMe } from '@/hooks/queries/useMe';
 import { useAPI } from '@/utils/api';
-import { disablePush, enablePush, getProjectNotificationEnabled, isPushSubscribed, isPushSupported, sendTestNotification, setProjectNotificationEnabled } from '@/utils/push';
+import { queryKeys } from '@/query/keys';
+import { useEnablePush, useDisablePush, useSendTestNotification, useSetAnyProjectNotification } from '@/hooks/mutations/pushMutations';
+import { getProjectNotificationEnabled, isPushSubscribed, isPushSupported } from '@/utils/push';
 
 // User-specific settings. Today this is notification preferences: a per-device push toggle, a test
 // button, and a per-project on/off list built from the projects the user can VIEW.
@@ -31,46 +34,50 @@ const SettingsPage = () => {
     }, [meCtx.teams]);
 
     const [subscribed, setSubscribed] = useState(false);
-    const [deviceBusy, setDeviceBusy] = useState(false);
-    const [testBusy, setTestBusy] = useState(false);
-    const [prefs, setPrefs] = useState<Record<string, boolean>>({});
+    const enablePushMutation = useEnablePush();
+    const disablePushMutation = useDisablePush();
+    const sendTestMutation = useSendTestNotification();
+    const setProjectNotification = useSetAnyProjectNotification();
+    const deviceBusy = enablePushMutation.isPending || disablePushMutation.isPending;
+    const testBusy = sendTestMutation.isPending;
     const [projectBusy, setProjectBusy] = useState<Record<string, boolean>>({});
-    const [loadingPrefs, setLoadingPrefs] = useState(true);
+
+    // Per-project server preferences, one query each. Browser subscription state stays local.
+    const prefQueries = useQueries({
+        queries: projects.map((id) => ({
+            queryKey: queryKeys.pushPreference(id),
+            queryFn: async () => (token ? getProjectNotificationEnabled(token, id) : false),
+            enabled: !!token && pushSupported,
+        })),
+    });
+    const loadingPrefs = pushSupported && prefQueries.some((q) => q.isLoading);
+    const prefs: Record<string, boolean> = Object.fromEntries(projects.map((id, i) => [id, Boolean(prefQueries[i]?.data)]));
 
     useEffect(() => {
-        if (!token) return;
+        if (!token || !pushSupported) return;
         let cancelled = false;
-        void (async () => {
-            setLoadingPrefs(true);
-            const sub = pushSupported ? await isPushSubscribed() : false;
-            const entries = await Promise.all(projects.map(async (id) => [id, await getProjectNotificationEnabled(token, id)] as const));
-            if (cancelled) return;
-            setSubscribed(sub);
-            setPrefs(Object.fromEntries(entries));
-            setLoadingPrefs(false);
-        })();
+        void isPushSubscribed().then((sub) => {
+            if (!cancelled) setSubscribed(sub);
+        });
         return () => {
             cancelled = true;
         };
-    }, [token, projects, pushSupported]);
+    }, [token, pushSupported]);
 
     const toggleDevice = async () => {
         if (!token) return;
-        setDeviceBusy(true);
         try {
             if (subscribed) {
-                await disablePush(token);
+                await disablePushMutation.mutateAsync();
                 setSubscribed(false);
                 notifications.show({ title: 'Push disabled', message: 'This device will no longer receive notifications.', color: 'gray' });
             } else {
-                await enablePush(token);
+                await enablePushMutation.mutateAsync();
                 setSubscribed(await isPushSubscribed());
                 notifications.show({ title: 'Push enabled', message: 'This device is now set up to receive notifications.', color: 'green' });
             }
         } catch (error) {
             notifications.show({ title: 'Could not update device', message: error instanceof Error ? error.message : 'Failed to update push subscription', color: 'red' });
-        } finally {
-            setDeviceBusy(false);
         }
     };
 
@@ -79,8 +86,7 @@ const SettingsPage = () => {
         const next = !prefs[projectId];
         setProjectBusy((b) => ({ ...b, [projectId]: true }));
         try {
-            await setProjectNotificationEnabled(token, projectId, next);
-            setPrefs((p) => ({ ...p, [projectId]: next }));
+            await setProjectNotification.mutateAsync({ projectId, enabled: next });
             // Enabling a project may have lazily created a browser subscription; reflect that here.
             if (next) setSubscribed(await isPushSubscribed());
         } catch (error) {
@@ -92,9 +98,8 @@ const SettingsPage = () => {
 
     const sendTest = async () => {
         if (!token) return;
-        setTestBusy(true);
         try {
-            const res = await sendTestNotification(token);
+            const res = await sendTestMutation.mutateAsync();
             setSubscribed(await isPushSubscribed());
             if (res.sent > 0) {
                 notifications.show({ title: 'Test notification sent', message: `Delivered to ${res.sent} device(s). Check your notifications.`, color: 'green' });
@@ -103,8 +108,6 @@ const SettingsPage = () => {
             }
         } catch (error) {
             notifications.show({ title: 'Could not send test', message: error instanceof Error ? error.message : 'Failed to send test notification', color: 'red' });
-        } finally {
-            setTestBusy(false);
         }
     };
 

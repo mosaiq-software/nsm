@@ -1,7 +1,7 @@
-import { useAPI } from '@/utils/api';
-import { useMe } from '@/contexts/me-context';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { Admin, Team, TeamType } from '@mosaiq/nsm-common/types';
+import { useMe } from '@/hooks/queries/useMe';
+import { useTeams, useAdmins } from '@/hooks/queries/teamHooks';
+import { useAddAdmin, useRemoveAdmin } from '@/hooks/mutations/teamMutations';
+import { Admin, TeamType } from '@mosaiq/nsm-common/types';
 import { ActionIcon, Alert, Avatar, Badge, Button, Card, Center, Group, Loader, Modal, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { useDebouncedCallback } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -18,24 +18,17 @@ interface GhUser {
 // App, plus configured-but-uninstalled ones) with the list of NSM admins. Any admin can view both
 // lists; only the super admin can add or remove admins.
 const UserManagementPage = () => {
-    const api = useAPI();
     const meCtx = useMe();
-    const [teams, setTeams] = useState<Team[] | undefined>(undefined);
-    const [admins, setAdmins] = useState<Admin[] | undefined>(undefined);
-    const [superAdminLogin, setSuperAdminLogin] = useState<string | null>(null);
+    const teamsQuery = useTeams();
+    const adminsQuery = useAdmins();
+    const teams = teamsQuery.data;
+    const admins = adminsQuery.data?.admins;
+    const superAdminLogin = adminsQuery.data?.superAdminLogin ?? null;
     const [superAdminInfo, setSuperAdminInfo] = useState<GhUser | null>(null);
     const [modalOpen, setModalOpen] = useState(false);
 
-    const loadAdmins = async () => {
-        const res = await api.get(API_ROUTES.GET_ADMINS, {});
-        setAdmins(res?.admins ?? []);
-        setSuperAdminLogin(res?.superAdminLogin ?? null);
-    };
-
-    useEffect(() => {
-        void api.get(API_ROUTES.GET_TEAMS, {}).then((res) => setTeams(res ?? []));
-        void loadAdmins();
-    }, [api.token]);
+    const addAdmin = useAddAdmin();
+    const removeAdmin = useRemoveAdmin();
 
     useEffect(() => {
         if (!superAdminLogin) return;
@@ -43,18 +36,16 @@ const UserManagementPage = () => {
     }, [superAdminLogin]);
 
     const handleRemove = async (admin: Admin) => {
-        await api.post(API_ROUTES.POST_REMOVE_ADMIN, {}, { id: admin.id });
-        setAdmins((prev) => (prev ?? []).filter((a) => a.id !== admin.id));
+        await removeAdmin.mutateAsync(admin.id);
         notifications.show({ message: `Removed admin ${admin.login}`, color: 'gray' });
     };
 
     const handleAdd = async (login: string) => {
-        const created = await api.post(API_ROUTES.POST_ADD_ADMIN, {}, { login });
+        const created = await addAdmin.mutateAsync(login);
         if (!created) {
             notifications.show({ message: 'Could not add admin (GitHub user not found)', color: 'red' });
             return;
         }
-        await loadAdmins();
         setModalOpen(false);
         notifications.show({ message: `Added admin ${created.login}`, color: 'green' });
     };

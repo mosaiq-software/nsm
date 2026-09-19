@@ -1,10 +1,8 @@
-import { useEffect, useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Collapse, CopyButton, Group, Loader, Paper, SimpleGrid, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useNavigate } from 'react-router-dom';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { useCluster } from '@/contexts/cluster-context';
-import { useAPI } from '@/utils/api';
+import { useCluster } from '@/hooks/queries/useCluster';
+import { useJoinInfo } from '@/hooks/queries/nodeHooks';
 import { MdExpandLess, MdExpandMore, MdOutlineStar } from 'react-icons/md';
 
 const relativeTime = (ts: number) => {
@@ -21,24 +19,10 @@ const relativeTime = (ts: number) => {
 };
 
 const AddNodePanel = () => {
-    const api = useAPI();
-    const [command, setCommand] = useState<string | null>(null);
-    const [deployPublicKey, setDeployPublicKey] = useState<string | null>(null);
+    const { data: info } = useJoinInfo();
+    const command = info?.command ?? null;
+    const deployPublicKey = info?.deployPublicKey ?? null;
     const [opened, { toggle }] = useDisclosure(false);
-
-    useEffect(() => {
-        let cancelled = false;
-        if (!api.token) return;
-        void (async () => {
-            const info = await api.get(API_ROUTES.GET_JOIN_INFO, {});
-            if (cancelled || !info) return;
-            setCommand(info.command);
-            setDeployPublicKey(info.deployPublicKey);
-        })();
-        return () => {
-            cancelled = true;
-        };
-    }, [api.token]);
 
     if (!command) return null;
 

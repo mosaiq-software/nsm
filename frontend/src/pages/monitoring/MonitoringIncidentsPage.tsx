@@ -2,7 +2,7 @@ import { Center, Loader, Stack, Title } from '@mantine/core';
 import { Project } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useProjects } from '@/contexts/project-context';
+import { useProjects } from '@/hooks/queries/useProjects';
 import { ProjectHeader } from '@/components/ProjectHeader';
 import { IncidentSection } from '@/components/IncidentSection';
 

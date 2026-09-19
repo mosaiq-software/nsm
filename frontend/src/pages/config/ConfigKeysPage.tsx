@@ -1,37 +1,31 @@
 import { ActionIcon, Alert, Button, Card, Code, CopyButton, Group, Modal, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { Capability } from '@mosaiq/nsm-common/types';
 import { useState } from 'react';
 import { MdOutlineCheckBox, MdOutlineContentCopy, MdOutlineWarningAmber } from 'react-icons/md';
-import { useMe } from '@/contexts/me-context';
-import { useAPI } from '@/utils/api';
+import { useMe } from '@/hooks/queries/useMe';
+import { useResetDeploymentKey } from '@/hooks/mutations/deployMutations';
 import { ApiKeysCard } from '@/components/ApiKeysCard';
 import { useProjectConfig } from './projectConfigContext';
 
 const ConfigKeysPage = () => {
     const { project } = useProjectConfig();
     const meCtx = useMe();
-    const api = useAPI();
+    const resetKey = useResetDeploymentKey(project.id);
     const [confirmModal, setConfirmModal] = useState(false);
-    const [rotating, setRotating] = useState(false);
+    const rotating = resetKey.isPending;
     // The raw key is only ever available in-memory right after a rotate; it is never fetched again.
     const [revealedKey, setRevealedKey] = useState<string | null>(null);
 
     const handleRotate = async () => {
-        setRotating(true);
-        try {
-            const newKey = await api.post(API_ROUTES.POST_RESET_DEPLOYMENT_KEY, { projectId: project.id }, {});
-            if (!newKey) {
-                notifications.show({ message: 'Failed to rotate deployment key!', color: 'red' });
-                return;
-            }
-            setConfirmModal(false);
-            setRevealedKey(newKey);
-            notifications.show({ message: 'Deployment key rotated', color: 'green' });
-        } finally {
-            setRotating(false);
+        const newKey = await resetKey.mutateAsync();
+        if (!newKey) {
+            notifications.show({ message: 'Failed to rotate deployment key!', color: 'red' });
+            return;
         }
+        setConfirmModal(false);
+        setRevealedKey(newKey);
+        notifications.show({ message: 'Deployment key rotated', color: 'green' });
     };
 
     const canDeploy = meCtx.canProject(project.id, Capability.DEPLOY);

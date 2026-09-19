@@ -1,16 +1,15 @@
-import { useProjects } from '@/contexts/project-context';
-import { useCluster } from '@/contexts/cluster-context';
+import { useProjects, useProjectStatuses } from '@/hooks/queries/useProjects';
+import { useCluster } from '@/hooks/queries/useCluster';
 import { useUser } from '@/contexts/user-context';
-import { useMe } from '@/contexts/me-context';
+import { useMe } from '@/hooks/queries/useMe';
 import { Alert, Badge, Button, Card, Group, Loader, Stack, Table, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { Capability, DeploymentState, Project } from '@mosaiq/nsm-common/types';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { deriveProjectState } from '@/utils/projectStatus';
 import { summarizeDeployQueue, formatDeployEta } from '@/utils/deployQueue';
-import { useAPI } from '@/utils/api';
+import { useCancelDeploy } from '@/hooks/mutations/deployMutations';
 
 const relativeTime = (ts: number): string => {
     const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -55,10 +54,11 @@ const DashboardPage = () => {
     const token = queryParams.get('token');
     const userCtx = useUser();
     const meCtx = useMe();
-    const projectCtx = useProjects();
+    const { projects } = useProjects();
+    const statusById = useProjectStatuses();
     const clusterCtx = useCluster();
     const navigate = useNavigate();
-    const api = useAPI();
+    const cancelDeploy = useCancelDeploy();
 
     useEffect(() => {
         if (token) {
@@ -70,15 +70,14 @@ const DashboardPage = () => {
     const handleCancelDeploy = async (projectId: string) => {
         notifications.show({ message: `Cancelling deployment of ${projectId}...`, color: 'orange' });
         try {
-            await api.post(API_ROUTES.POST_CANCEL_DEPLOY, { projectId }, {});
+            await cancelDeploy.mutateAsync(projectId);
             notifications.show({ message: `Cancelled deployment of ${projectId}`, color: 'green' });
         } catch {
             notifications.show({ message: `Failed to cancel deployment of ${projectId}`, color: 'red' });
         }
     };
 
-    const projects = projectCtx.projects;
-    const stateOf = (project: Project): DeploymentState => projectCtx.statusById[project.id] ?? deriveProjectState(project);
+    const stateOf = (project: Project): DeploymentState => statusById[project.id] ?? deriveProjectState(project);
 
     const attention = projects.flatMap((project) => attentionItemsFor(project, stateOf(project)));
 

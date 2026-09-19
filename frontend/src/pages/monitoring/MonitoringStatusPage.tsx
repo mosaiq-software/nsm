@@ -1,10 +1,9 @@
 import { Badge, Box, Card, Center, Group, Loader, SegmentedControl, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core';
-import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { HealthCheckType, HealthStatus, Project, ProjectHealthCheck, ProjectHealthSummary, UptimeBucket, UptimeWindowKey } from '@mosaiq/nsm-common/types';
+import { HealthCheckType, HealthStatus, Project, ProjectHealthCheck, UptimeBucket, UptimeWindowKey } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useProjects } from '@/contexts/project-context';
-import { useAPI } from '@/utils/api';
+import { useProjects } from '@/hooks/queries/useProjects';
+import { useProjectHealth } from '@/hooks/queries/projectHooks';
 import { ProjectHeader } from '@/components/ProjectHeader';
 
 const WINDOWS: { value: UptimeWindowKey; label: string }[] = [
@@ -92,32 +91,15 @@ const HeatmapBar = ({ bucket }: { bucket: UptimeBucket }) => {
 const MonitoringStatusPage = () => {
     const params = useParams();
     const projectId = params.projectId;
-    const projectCtx = useProjects();
-    const api = useAPI();
+    const { projects } = useProjects();
 
     const [project, setProject] = useState<Project | undefined | null>(undefined);
     const [window, setWindow] = useState<UptimeWindowKey>('90d');
-    const [summary, setSummary] = useState<ProjectHealthSummary | null>(null);
+    const { data: summary } = useProjectHealth(projectId, window);
 
     useEffect(() => {
-        setProject(projectCtx.projects.find((proj) => proj.id === projectId));
-    }, [projectId, projectCtx.projects]);
-
-    useEffect(() => {
-        if (!projectId || !api.token) return;
-        let cancelled = false;
-        const load = () => {
-            api.get(API_ROUTES.GET_PROJECT_HEALTH, { projectId }, { window }).then((res) => {
-                if (!cancelled && res) setSummary(res);
-            });
-        };
-        load();
-        const interval = setInterval(load, 30000);
-        return () => {
-            cancelled = true;
-            clearInterval(interval);
-        };
-    }, [projectId, api.token, window]);
+        setProject(projects.find((proj) => proj.id === projectId));
+    }, [projectId, projects]);
 
     if (project === undefined) {
         return (
