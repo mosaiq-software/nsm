@@ -19,6 +19,8 @@ export const ApiKeysCard = ({ projectId }: { projectId: string }) => {
     const [permissions, setPermissions] = useState<ApiKeyPermission[]>([ApiKeyPermission.GET_STATUS]);
     const [saving, setSaving] = useState(false);
     const [created, setCreated] = useState<CreateApiKeyResult | null>(null);
+    const [keyToRevoke, setKeyToRevoke] = useState<ApiKeyView | null>(null);
+    const [revoking, setRevoking] = useState(false);
 
     const load = () => {
         if (!api.token) return;
@@ -57,10 +59,13 @@ export const ApiKeysCard = ({ projectId }: { projectId: string }) => {
         }
     };
 
-    const revoke = async (key: ApiKeyView) => {
-        if (!window.confirm(`Revoke "${key.name}"? Any integrations using it will stop working.`)) return;
-        await api.post(API_ROUTES.POST_REVOKE_API_KEY, { projectId, apiKeyId: key.id }, {});
+    const confirmRevoke = async () => {
+        if (!keyToRevoke) return;
+        setRevoking(true);
+        await api.post(API_ROUTES.POST_REVOKE_API_KEY, { projectId, apiKeyId: keyToRevoke.id }, {});
+        setRevoking(false);
         notifications.show({ message: 'API key revoked', color: 'green' });
+        setKeyToRevoke(null);
         load();
     };
 
@@ -132,7 +137,7 @@ export const ApiKeysCard = ({ projectId }: { projectId: string }) => {
                                 <Table.Td>
                                     {!key.revokedAt && (
                                         <Tooltip label="Revoke">
-                                            <ActionIcon color="red" variant="light" onClick={() => revoke(key)}>
+                                            <ActionIcon color="red" variant="light" onClick={() => setKeyToRevoke(key)}>
                                                 <MdDelete />
                                             </ActionIcon>
                                         </Tooltip>
@@ -143,6 +148,20 @@ export const ApiKeysCard = ({ projectId }: { projectId: string }) => {
                     </Table.Tbody>
                 </Table>
             )}
+
+            <Modal opened={!!keyToRevoke} onClose={() => setKeyToRevoke(null)} title="Revoke API key">
+                <Stack>
+                    <Text size="sm">Revoke &quot;{keyToRevoke?.name}&quot;? Any integrations using it will stop working.</Text>
+                    <Group justify="flex-end">
+                        <Button variant="default" onClick={() => setKeyToRevoke(null)} disabled={revoking}>
+                            Cancel
+                        </Button>
+                        <Button color="red" onClick={confirmRevoke} loading={revoking}>
+                            Revoke
+                        </Button>
+                    </Group>
+                </Stack>
+            </Modal>
 
             <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="Create API key">
                 <Stack>
