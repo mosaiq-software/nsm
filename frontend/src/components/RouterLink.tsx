@@ -1,18 +1,18 @@
 import React, { useEffect } from 'react';
-import { NavLink as MantineNavLink, NavLinkProps as MantineNavLinkProps } from '@mantine/core';
+import { Box, Group, NavLink as MantineNavLink, NavLinkProps as MantineNavLinkProps } from '@mantine/core';
+import { MdChevronRight } from 'react-icons/md';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export interface RouterLinkProps extends MantineNavLinkProps {
     to: string;
     showActive?: boolean;
-    collapseTo?: string;
     activeWithin?: boolean;
     children?: React.ReactNode;
 }
 export default function RouterLink(props: RouterLinkProps) {
     const navigate = useNavigate();
     const location = useLocation();
-    const { to, showActive, collapseTo, activeWithin, children, ...rest } = props;
+    const { to, showActive, activeWithin, children, rightSection, ...rest } = props;
     const shape = children ? `${to}/*` : to;
     const selfActive = pathMatchesShape(location.pathname, shape);
     const active = !!(showActive && selfActive);
@@ -23,21 +23,41 @@ export default function RouterLink(props: RouterLinkProps) {
             setOpened(true);
         }
     }, [activeHere]);
+    const composedRightSection =
+        children || rightSection ? (
+            <Group gap={6} wrap="nowrap">
+                {rightSection}
+                {children && (
+                    <Box
+                        component="span"
+                        aria-label="Toggle section"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setOpened((o) => !o);
+                        }}
+                        style={{
+                            display: 'flex',
+                            cursor: 'pointer',
+                            transition: 'transform 150ms ease',
+                            transform: opened ? 'rotate(90deg)' : 'none',
+                        }}
+                    >
+                        <MdChevronRight />
+                    </Box>
+                )}
+            </Group>
+        ) : undefined;
     return (
         <MantineNavLink
             onClick={(e) => {
                 e.preventDefault();
-                e.stopPropagation();
-                if (children && opened) {
-                    setOpened(false);
-                    navigate(collapseTo ?? to);
-                } else {
-                    setOpened(true);
-                    navigate(to);
-                }
+                navigate(to);
             }}
             active={active}
             opened={children ? opened : undefined}
+            disableRightSectionRotation
+            rightSection={composedRightSection}
             {...rest}
         >
             {children}

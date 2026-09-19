@@ -242,7 +242,6 @@ const Layout = (props: { children: React.ReactNode }) => {
                     {meCtx.teams.map((team) => (
                         <RouterLink
                             to={`/teams/${team.ownerId}`}
-                            collapseTo="/"
                             activeWithin={team.projects.some((p) => pathMatchesShape(location.pathname, `/p/${p.id}/*`))}
                             label={team.login}
                             key={team.ownerId}
@@ -253,7 +252,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                 team.projects
                                     .filter((p) => p.capabilities.includes(Capability.VIEW))
                                     .map((project) => (
-                                        <RouterLink to={`/p/${project.id}`} collapseTo={`/teams/${team.ownerId}`} label={project.id} key={project.id} showActive rightSection={<ProjectStatusChip projectId={project.id} />}>
+                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive rightSection={<ProjectStatusChip projectId={project.id} />}>
                                             {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />}
