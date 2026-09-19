@@ -12,6 +12,7 @@ import { createAdminModel, deleteAdminModel } from '@/persistence/adminPersisten
 import { setZoneAssignmentModel } from '@/persistence/dnsZoneAssignmentPersistence';
 import { setDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
 import { upsertDomainRequestModel } from '@/persistence/domainRequestPersistence';
+import { deletePortReservationModel, deletePortReservationsForProjectModel, upsertPortReservationModel } from '@/persistence/portReservationPersistence';
 import { areaLog } from '@/utils/log';
 
 const clusterLog = areaLog('cluster');
@@ -55,6 +56,10 @@ const opDetails = (op: Op): Record<string, unknown> => {
             return { zoneId: op.zoneId, ownerCount: op.ownerIds.length };
         case OpType.UPSERT_DOMAIN_REQUEST:
             return { requestId: op.request.id, domainName: op.request.domainName, status: op.request.status };
+        case OpType.UPSERT_PORT_RESERVATION:
+            return { reservationId: op.reservation.id, nodeId: op.reservation.nodeId, projectId: op.reservation.projectId, port: op.reservation.port, protocol: op.reservation.protocol };
+        case OpType.DELETE_PORT_RESERVATION:
+            return { reservationId: op.reservationId };
         default:
             return {};
     }
@@ -90,6 +95,7 @@ export const applyOp = async (op: Op): Promise<void> => {
         case OpType.DELETE_PROJECT:
             await deleteProjectModel(op.projectId);
             await deleteDesiredDeploymentModel(op.projectId);
+            await deletePortReservationsForProjectModel(op.projectId);
             break;
         case OpType.SET_PROJECT_SECRETS:
             await deleteAllSecretsForProjectEnvModel(op.projectId);
@@ -142,6 +148,12 @@ export const applyOp = async (op: Op): Promise<void> => {
             break;
         case OpType.UPSERT_DOMAIN_REQUEST:
             await upsertDomainRequestModel(op.request);
+            break;
+        case OpType.UPSERT_PORT_RESERVATION:
+            await upsertPortReservationModel(op.reservation);
+            break;
+        case OpType.DELETE_PORT_RESERVATION:
+            await deletePortReservationModel(op.reservationId);
             break;
         default:
             clusterLog.warn({ action: 'op_unknown', opType: (op as any).type }, 'unknown cluster op ignored');

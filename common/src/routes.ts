@@ -1,5 +1,6 @@
 import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, Secret, Team, TeamDetail, User } from './types';
 import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
+import { CreatePortReservationBody, PortReservation } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -36,6 +37,9 @@ export enum API_ROUTES {
     GET_DNS_RECORDS = '/domains/:zoneId/records',
     GET_PROJECT_DOMAINS = '/project/:projectId/domains',
     GET_NODE_CONFIG = '/nodes/:nodeId/config',
+    GET_NODE_PORT_RESERVATIONS = '/nodes/:nodeId/port-reservations',
+    GET_PROJECT_PORT_RESERVATIONS = '/project/:projectId/port-reservations',
+    GET_PORT_RESERVATIONS = '/port-reservations',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -78,6 +82,8 @@ export enum API_ROUTES {
     POST_DNS_RECORD_DELETE = '/domains/:zoneId/records/:recordId/delete',
     POST_PUBLIC_IP_REFRESH = '/domains/public-ip/refresh',
     POST_NODE_CONFIG = '/nodes/:nodeId/config/apply',
+    POST_NODE_PORT_RESERVATION = '/nodes/:nodeId/port-reservations/create',
+    POST_DELETE_NODE_PORT_RESERVATION = '/nodes/:nodeId/port-reservations/:reservationId/delete',
 }
 export interface API_PARAMS {
     //GET
@@ -113,6 +119,9 @@ export interface API_PARAMS {
     [API_ROUTES.GET_DNS_RECORDS]: { zoneId: string };
     [API_ROUTES.GET_PROJECT_DOMAINS]: { projectId: string };
     [API_ROUTES.GET_NODE_CONFIG]: { nodeId: string };
+    [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: { nodeId: string };
+    [API_ROUTES.GET_PROJECT_PORT_RESERVATIONS]: { projectId: string };
+    [API_ROUTES.GET_PORT_RESERVATIONS]: {};
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -155,7 +164,10 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DNS_RECORD_DELETE]: { zoneId: string; recordId: string };
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
     [API_ROUTES.POST_NODE_CONFIG]: { nodeId: string };
+    [API_ROUTES.POST_NODE_PORT_RESERVATION]: { nodeId: string };
+    [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: { nodeId: string; reservationId: string };
 }
+
 export interface API_BODY {
     // Only POST
     // GET
@@ -191,6 +203,9 @@ export interface API_BODY {
     [API_ROUTES.GET_DNS_RECORDS]: undefined;
     [API_ROUTES.GET_PROJECT_DOMAINS]: undefined;
     [API_ROUTES.GET_NODE_CONFIG]: undefined;
+    [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: undefined;
+    [API_ROUTES.GET_PROJECT_PORT_RESERVATIONS]: undefined;
+    [API_ROUTES.GET_PORT_RESERVATIONS]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -233,6 +248,8 @@ export interface API_BODY {
     [API_ROUTES.POST_DNS_RECORD_DELETE]: {};
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
     [API_ROUTES.POST_NODE_CONFIG]: NodeConfigUpdate;
+    [API_ROUTES.POST_NODE_PORT_RESERVATION]: CreatePortReservationBody;
+    [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: {};
 }
 export interface API_RETURN {
     //GET
@@ -268,6 +285,9 @@ export interface API_RETURN {
     [API_ROUTES.GET_DNS_RECORDS]: DnsRecord[];
     [API_ROUTES.GET_PROJECT_DOMAINS]: string[];
     [API_ROUTES.GET_NODE_CONFIG]: NodeConfigValues | undefined;
+    [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: PortReservation[];
+    [API_ROUTES.GET_PROJECT_PORT_RESERVATIONS]: PortReservation[];
+    [API_ROUTES.GET_PORT_RESERVATIONS]: PortReservation[];
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -310,6 +330,8 @@ export interface API_RETURN {
     [API_ROUTES.POST_DNS_RECORD_DELETE]: undefined;
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: { ip: string | null; changed: boolean };
     [API_ROUTES.POST_NODE_CONFIG]: { ok: boolean };
+    [API_ROUTES.POST_NODE_PORT_RESERVATION]: PortReservation;
+    [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: undefined;
 }
 
 export interface API_AUTH {
@@ -347,6 +369,9 @@ export interface API_AUTH {
     [API_ROUTES.GET_DNS_RECORDS]: string;
     [API_ROUTES.GET_PROJECT_DOMAINS]: string;
     [API_ROUTES.GET_NODE_CONFIG]: string;
+    [API_ROUTES.GET_NODE_PORT_RESERVATIONS]: string;
+    [API_ROUTES.GET_PROJECT_PORT_RESERVATIONS]: string;
+    [API_ROUTES.GET_PORT_RESERVATIONS]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;
@@ -389,4 +414,6 @@ export interface API_AUTH {
     [API_ROUTES.POST_DNS_RECORD_DELETE]: string;
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: string;
     [API_ROUTES.POST_NODE_CONFIG]: string;
+    [API_ROUTES.POST_NODE_PORT_RESERVATION]: string;
+    [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: string;
 }

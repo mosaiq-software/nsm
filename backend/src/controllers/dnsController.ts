@@ -1,12 +1,16 @@
 import { DnsRecord, DnsZone, DNS_STRUCTURED_TYPES } from '@mosaiq/nsm-common/types';
 import { getAllDnsZonesModel, getDnsZoneModel, DnsZoneCache } from '@/persistence/dnsZonePersistence';
-import { getRecordsForZoneModel } from '@/persistence/dnsRecordPersistence';
+import { getRecordsByPortReservationModel, getRecordsForZoneModel } from '@/persistence/dnsRecordPersistence';
 import { getAllZoneAssignmentsModel, getZoneAssignmentModel } from '@/persistence/dnsZoneAssignmentPersistence';
 import { getAllocationsForZoneModel, getAllDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
-import { CfDnsRecordInput, addDynamicTag, createDnsRecord, deleteDnsRecord, removeDynamicTag, updateDnsRecord } from '@/utils/cloudflare';
+import { getPortReservationByIdModel } from '@/persistence/portReservationPersistence';
+import { CfDnsRecordInput, addDynamicTag, createDnsRecord, deleteDnsRecord, removeDynamicTag, removePortTag, setPortTag, updateDnsRecord } from '@/utils/cloudflare';
 import { syncZoneRecords } from '@/reconcile/cloudflareSync';
 import { checkPublicIp, getKnownPublicIp } from '@/reconcile/publicIpWatcher';
 import { areaLog } from '@/utils/log';
+
+// Record types that carry a port NSM can drive from a reservation. SRV's port lives in `data.port`.
+const PORT_BINDABLE_TYPES = new Set(['SRV']);
 
 const dnsLog = areaLog('cloudflare');
 
@@ -83,17 +87,36 @@ const buildCfInput = async (input: Partial<DnsRecord>, existing?: DnsRecord): Pr
     const priority = input.priority ?? existing?.priority;
     if (priority !== undefined) body.priority = priority;
 
+    // Port reservation binding: when explicitly provided use it, otherwise keep the existing binding.
+    // An empty value clears the binding.
+    const rawPortRes = input.portReservationId !== undefined ? input.portReservationId : existing?.portReservationId;
+    const portReservationId = rawPortRes && rawPortRes.trim() ? rawPortRes.trim() : undefined;
+
     // Dynamic-IP: tag the comment and pin A/AAAA content to the detected public IP.
-    const baseComment = input.comment ?? existing?.comment ?? '';
+    let comment = input.comment ?? existing?.comment ?? '';
     if (dynamic) {
-        body.comment = addDynamicTag(baseComment);
+        comment = addDynamicTag(comment);
         if (type === 'A' || type === 'AAAA') {
             const ip = await getKnownPublicIp();
             if (ip && type === 'A') body.content = ip;
         }
     } else {
-        body.comment = removeDynamicTag(baseComment) || undefined;
+        comment = removeDynamicTag(comment);
     }
+
+    // Port variable: tag the comment and write the reservation's port into the record (SRV data.port).
+    if (portReservationId) {
+        if (!PORT_BINDABLE_TYPES.has(type)) throw new Error(`Port binding is not supported for ${type} records`);
+        const reservation = await getPortReservationByIdModel(portReservationId);
+        if (!reservation) throw new Error('Port reservation not found');
+        const data = { ...((body.data as Record<string, unknown>) || {}), port: reservation.port };
+        body.data = data;
+        comment = setPortTag(comment, portReservationId);
+    } else {
+        comment = removePortTag(comment);
+    }
+
+    body.comment = comment || undefined;
     return body;
 };
 
@@ -123,6 +146,32 @@ export const deleteRecord = async (zoneId: string, recordId: string): Promise<vo
     await deleteDnsRecord(zoneId, recordId);
     await syncZoneRecords(zoneId);
     dnsLog.info({ action: 'record_deleted', zoneId, recordId }, `deleted record ${recordId}`);
+};
+
+// Repush every DNS record bound to a port reservation so its port (SRV data.port) reflects the
+// reservation's current value. Called after a reservation is created/updated/deleted. When the
+// reservation no longer exists the binding is stripped from the record, keeping the last port value.
+export const syncPortBoundRecords = async (reservationId: string): Promise<void> => {
+    const records = await getRecordsByPortReservationModel(reservationId);
+    if (!records.length) return;
+    const reservation = await getPortReservationByIdModel(reservationId);
+    const touchedZones = new Set<string>();
+    for (const rec of records) {
+        try {
+            if (reservation) {
+                const data = { ...(rec.data || {}), port: reservation.port };
+                await updateDnsRecord(rec.zoneId, rec.id, { data, comment: setPortTag(rec.comment, reservationId) });
+                dnsLog.info({ action: 'port_record_updated', recordId: rec.id, name: rec.name, type: rec.type, port: reservation.port }, `updated port-bound ${rec.type} ${rec.name} -> port ${reservation.port}`);
+            } else {
+                await updateDnsRecord(rec.zoneId, rec.id, { comment: removePortTag(rec.comment) || undefined });
+                dnsLog.warn({ action: 'port_record_unbound', recordId: rec.id, name: rec.name, reservationId }, `reservation ${reservationId} gone; stripped port binding from ${rec.name}`);
+            }
+            touchedZones.add(rec.zoneId);
+        } catch (e: any) {
+            dnsLog.error({ action: 'port_record_update_failed', recordId: rec.id, err: e?.message }, `failed to update port-bound record ${rec.name}`);
+        }
+    }
+    for (const zoneId of touchedZones) await syncZoneRecords(zoneId);
 };
 
 export const getPublicIp = async (): Promise<{ ip: string | null }> => ({ ip: await getKnownPublicIp() });

@@ -1,6 +1,6 @@
 import { ActionIcon, Alert, Badge, Button, Divider, Fieldset, Group, Modal, MultiSelect, NumberInput, Select, Stack, Switch, Table, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, Project, Team } from '@mosaiq/nsm-common/types';
+import { DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, PortReservation, Project, Team } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useEffect, useState } from 'react';
 import { useAPI } from '@/utils/api';
@@ -20,6 +20,8 @@ interface DomainDetailModalProps {
 const PROXYABLE = new Set<DnsRecordType>(['A', 'AAAA', 'CNAME']);
 const DYNAMIC_CAPABLE = new Set<DnsRecordType>(['A', 'AAAA']);
 const PRIORITY_TYPES = new Set<DnsRecordType>(['MX', 'SRV', 'URI']);
+// Record types whose port NSM can drive from a reservation (SRV's port lives in data.port).
+const PORT_BINDABLE = new Set<DnsRecordType>(['SRV']);
 
 type Draft = Partial<DnsRecord>;
 
@@ -29,6 +31,7 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
     const api = useAPI();
     const { zone } = props;
     const [records, setRecords] = useState<DnsRecord[] | null>(null);
+    const [reservations, setReservations] = useState<PortReservation[]>([]);
     const [editing, setEditing] = useState<null | 'new' | string>(null);
     const [draft, setDraft] = useState<Draft>(emptyDraft());
     const [dataJson, setDataJson] = useState('');
@@ -48,6 +51,12 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
         void loadRecords();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [zone.id]);
+
+    useEffect(() => {
+        if (!props.isAdmin) return;
+        void api.get(API_ROUTES.GET_PORT_RESERVATIONS, {}).then((res) => setReservations(res ?? []));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [props.isAdmin]);
 
     const startNew = () => {
         setDraft(emptyDraft());
@@ -212,6 +221,7 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
                                 dataJson={dataJson}
                                 setDataJson={setDataJson}
                                 zoneName={zone.name}
+                                reservations={reservations}
                                 busy={busy}
                                 onCancel={() => setEditing(null)}
                                 onSave={saveRecord}
@@ -242,6 +252,7 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
                                             <Group gap={4}>
                                                 {r.proxied && <Badge size="xs" color="orange">proxied</Badge>}
                                                 {r.dynamic && <Badge size="xs" color="blue">dynamic</Badge>}
+                                                {r.portReservationId && <Badge size="xs" color="teal">port</Badge>}
                                             </Group>
                                         </Table.Td>
                                         <Table.Td>
@@ -301,6 +312,7 @@ interface RecordFormProps {
     dataJson: string;
     setDataJson: (s: string) => void;
     zoneName: string;
+    reservations: PortReservation[];
     busy: boolean;
     onCancel: () => void;
     onSave: () => void;
@@ -310,6 +322,8 @@ const RecordForm = (props: RecordFormProps) => {
     const { draft } = props;
     const type = (draft.type || 'A') as DnsRecordType;
     const structured = DNS_STRUCTURED_TYPES.includes(type);
+    const portBindable = PORT_BINDABLE.has(type);
+    const boundReservation = draft.portReservationId ? props.reservations.find((r) => r.id === draft.portReservationId) : undefined;
     return (
         <Fieldset legend={draft.id ? 'Edit record' : 'New record'}>
             <Stack gap="xs">
@@ -324,6 +338,19 @@ const RecordForm = (props: RecordFormProps) => {
                     <TextInput label="Content" placeholder={type === 'A' ? '203.0.113.10' : type === 'CNAME' ? 'target.example.com' : ''} value={draft.content ?? ''} onChange={(e) => props.setDraft({ ...draft, content: e.currentTarget.value })} disabled={!!draft.dynamic && type === 'A'} />
                 )}
                 {PRIORITY_TYPES.has(type) && <NumberInput label="Priority" min={0} value={draft.priority ?? 0} onChange={(v) => props.setDraft({ ...draft, priority: typeof v === 'number' ? v : 0 })} w={160} />}
+                {portBindable && (
+                    <Select
+                        label="Bind port to reservation"
+                        description={boundReservation ? `NSM will set data.port = ${boundReservation.port} and repush this record whenever the reservation changes.` : 'Optional: drive this record\u2019s port from a reserved/forwarded port. Overrides data.port.'}
+                        placeholder="Not bound"
+                        clearable
+                        searchable
+                        data={props.reservations.map((r) => ({ value: r.id, label: `${r.projectId} \u00b7 ${r.port}/${r.protocol} (${r.nodeId})${r.label ? ` \u2014 ${r.label}` : ''}` }))}
+                        value={draft.portReservationId ?? null}
+                        onChange={(v) => props.setDraft({ ...draft, portReservationId: v ?? '' })}
+                        nothingFoundMessage="No port reservations"
+                    />
+                )}
                 <Group>
                     {PROXYABLE.has(type) && <Switch label="Cloudflare proxy" checked={!!draft.proxied} onChange={(e) => props.setDraft({ ...draft, proxied: e.currentTarget.checked })} />}
                     {DYNAMIC_CAPABLE.has(type) && <Switch label="Bind to dynamic IP" description="NSM repushes this record when the public IP changes" checked={!!draft.dynamic} onChange={(e) => props.setDraft({ ...draft, dynamic: e.currentTarget.checked })} />}

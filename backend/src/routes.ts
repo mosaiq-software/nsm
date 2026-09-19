@@ -21,6 +21,7 @@ import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requi
 import { createRecord, deleteRecord, getPublicIp, listDomains, listRecords, refreshPublicIp, updateRecord } from '@/controllers/dnsController';
 import { assignZone, billingSummary, checkDomains, createRequest, decideRequest, deleteDomain, listProjectDomains, listRequests, searchDomains, setAllocations } from '@/controllers/domainsController';
 import { applyLocalConfig, applyNodeConfig, readLocalConfig, readNodeConfig } from '@/controllers/nodeConfigController';
+import { createReservation, deleteReservation, listAllReservations, listNodeReservations, listProjectReservations } from '@/controllers/portReservationController';
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
 import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
 import { removeManagedCd, setupManagedCd } from '@/controllers/cicdController';
@@ -906,6 +907,56 @@ privateRouter.post(API_ROUTES.POST_NODE_CONFIG, async (req, res) => {
     }
 });
 
+// Admin: list the port reservations declared on a node.
+privateRouter.get(API_ROUTES.GET_NODE_PORT_RESERVATIONS, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_NODE_PORT_RESERVATIONS];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    res.status(200).json(await listNodeReservations(params.nodeId));
+});
+
+// Admin: every port reservation in the cluster (drives pickers, e.g. the DNS port-binding select).
+privateRouter.get(API_ROUTES.GET_PORT_RESERVATIONS, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    res.status(200).json(await listAllReservations());
+});
+
+// Port reservations for a project (drives the project node picker star + injected-var info). Anyone
+// who can VIEW the project.
+privateRouter.get(API_ROUTES.GET_PROJECT_PORT_RESERVATIONS, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_PORT_RESERVATIONS];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.VIEW))) return;
+    res.status(200).json(await listProjectReservations(params.projectId));
+});
+
+// Admin: reserve a fixed host port on a node for a project.
+privateRouter.post(API_ROUTES.POST_NODE_PORT_RESERVATION, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_NODE_PORT_RESERVATION];
+    const body = req.body as API_BODY[API_ROUTES.POST_NODE_PORT_RESERVATION];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    try {
+        res.status(200).json(await createReservation(params.nodeId, body));
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to create port reservation');
+    }
+});
+
+// Admin: delete a port reservation.
+privateRouter.post(API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    try {
+        await deleteReservation(params.reservationId);
+        res.status(200).json(undefined);
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Failed to delete port reservation');
+    }
+});
+
 // Admin: DNS records for a domain (from the Cloudflare-authoritative cache).
 privateRouter.get(API_ROUTES.GET_DNS_RECORDS, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.GET_DNS_RECORDS];
@@ -1159,8 +1210,8 @@ internalRouter.post('/cluster/status-report', requireClusterSecret, async (req, 
 
 // Leader asks a node to allocate ports + ensure directories for a deployment.
 internalRouter.post('/node/plan', requireClusterSecret, async (req, res) => {
-    const { proxyCount, dirs } = req.body || {};
-    res.status(200).json(await planLocally(proxyCount || 0, dirs || {}));
+    const { proxyCount, dirs, excludePorts } = req.body || {};
+    res.status(200).json(await planLocally(proxyCount || 0, dirs || {}, excludePorts || []));
 });
 
 // Leader asks a node to purge a deleted project: tear down containers + deploy dir, then archive

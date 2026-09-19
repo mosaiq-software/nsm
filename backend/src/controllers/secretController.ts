@@ -1,6 +1,6 @@
 import { getAllSecretsForProjectModel } from '@/persistence/secretPersistence';
 import { assembleDotenv, parseDotenv, parseDynamicVariablePath, extractSecretsFromDockerCompose, buildRawVarsIntoSecrets } from '@mosaiq/nsm-common/secretUtil';
-import { DockerStatus, DynamicEnvVariableFields, FullDirectoryMap, NginxConfigLocationType, Project, ProjectService, RedirectConfigLocation, Secret } from '@mosaiq/nsm-common/types';
+import { DockerStatus, DynamicEnvVariableFields, FullDirectoryMap, NginxConfigLocationType, PortReservation, Project, ProjectService, RedirectConfigLocation, Secret } from '@mosaiq/nsm-common/types';
 import { OpType, PortPlanEntry } from '@mosaiq/nsm-common/clusterOps';
 import { getServicesForProject, RepoData } from '@/utils/repositoryUtils';
 import { getProject, updateProject, updateProjectNoDirty } from './projectController';
@@ -9,9 +9,19 @@ import { areaLog } from '@/utils/log';
 
 const secretLog = areaLog('secret');
 
-export const getDotenvForProject = async (project: Project, requestedPorts: PortPlanEntry[], dirMap: FullDirectoryMap): Promise<string> => {
-    const secrets = (project.secrets || []).map((sec) => fillSecret(sec, project, requestedPorts, dirMap));
-    return assembleDotenv(secrets);
+export const getDotenvForProject = async (project: Project, requestedPorts: PortPlanEntry[], dirMap: FullDirectoryMap, reservations: PortReservation[] = []): Promise<string> => {
+    const reservedNames = new Set(reservations.map((r) => r.envVarName));
+    // A reservation's env var overrides any same-named project secret (e.g. a repo-scraped ${VAR}
+    // placeholder), so the reserved/forwarded port value always wins.
+    const secrets = (project.secrets || []).filter((sec) => !reservedNames.has(sec.secretName)).map((sec) => fillSecret(sec, project, requestedPorts, dirMap));
+    const reservationSecrets: Secret[] = reservations.map((r) => ({
+        projectId: project.id,
+        secretName: r.envVarName,
+        secretValue: r.port.toString(),
+        secretPlaceholder: `${r.port}/${r.protocol} (reserved on ${r.nodeId})`,
+        variable: false,
+    }));
+    return assembleDotenv([...secrets, ...reservationSecrets]);
 };
 
 export const getAllSecretsForProject = async (projectId: string): Promise<Secret[]> => {

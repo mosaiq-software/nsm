@@ -21,3 +21,4 @@ import '@/persistence/dnsZoneAssignmentPersistence';
 import '@/persistence/domainTeamAllocationPersistence';
 import '@/persistence/domainRequestPersistence';
 import '@/persistence/quotaBreachPersistence';
+import '@/persistence/portReservationPersistence';

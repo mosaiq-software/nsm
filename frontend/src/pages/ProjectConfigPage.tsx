@@ -1,6 +1,6 @@
 import { ActionIcon, ActionIconGroup, Alert, Badge, Button, Card, Center, Code, Combobox, Divider, Fieldset, Grid, Group, HoverCard, List, Loader, Menu, Modal, NumberInput, ScrollArea, Select, SegmentedControl, Space, Stack, Switch, Text, Textarea, TextInput, Title, Tooltip, useCombobox } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { DockerStatus, DynamicEnvVariable, NginxConfigLocationType, Project, ProjectService, Secret, UpperDynamicEnvVariableType } from '@mosaiq/nsm-common/types';
+import { DockerStatus, DynamicEnvVariable, NginxConfigLocationType, PortReservation, Project, ProjectService, Secret, UpperDynamicEnvVariableType } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
@@ -30,6 +30,7 @@ const ProjectConfigPage = () => {
     const [syncing, setSyncing] = useState(false);
     const [modal, setModal] = useState<'delete-project' | 'import-dotenv' | null>(null);
     const [importingDotenv, setImportingDotenv] = useState('');
+    const [portReservations, setPortReservations] = useState<PortReservation[]>([]);
 
     useWindowEvent('keydown', (event) => {
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
@@ -50,6 +51,12 @@ const ProjectConfigPage = () => {
             setSecrets(foundProject.secrets ?? []);
         }
     }, [projectId, projectCtx.projects]);
+
+    useEffect(() => {
+        if (!projectId || !api.token) return;
+        void api.get(API_ROUTES.GET_PROJECT_PORT_RESERVATIONS, { projectId }).then((res) => setPortReservations(res ?? []));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [projectId, api.token]);
 
     const updateProject = (updatedFields: Partial<Project>) => {
         if (project) {
@@ -296,13 +303,43 @@ const ProjectConfigPage = () => {
                     <Select
                         required
                         label="Node"
-                        description="Which node hosts this project's deployments?"
-                        data={clusterCtx.nodes.map((node) => ({ value: node.nodeId, label: `${node.nodeId} (@${node.address})${node.isLeader ? ' • leader' : ''}` }))}
+                        description="Which node hosts this project's deployments? A star marks nodes with ports reserved for this project."
+                        data={clusterCtx.nodes.map((node) => {
+                            const starred = portReservations.some((r) => r.nodeId === node.nodeId);
+                            return { value: node.nodeId, label: `${starred ? '\u2605 ' : ''}${node.nodeId} (@${node.address})${node.isLeader ? ' • leader' : ''}` };
+                        })}
                         onChange={(value) => handleAssignNode(value || undefined)}
                         value={project.workerNodeId ?? null}
                         placeholder="Select a node"
                         nothingFoundMessage="No nodes registered"
                     />
+                    {(() => {
+                        const assignedReservations = portReservations.filter((r) => r.nodeId === project.workerNodeId);
+                        const elsewhere = portReservations.filter((r) => r.nodeId !== project.workerNodeId);
+                        if (assignedReservations.length > 0) {
+                            return (
+                                <Alert color="blue" variant="light" icon={<MdOutlineLan />} title="Reserved ports injected as env vars">
+                                    <Text size="sm">When deployed on {project.workerNodeId}, these forwarded ports are available as environment variables. Publish them in your compose (e.g. <Code>{'${ENV}:25565/udp'}</Code>).</Text>
+                                    <List size="sm" mt={4}>
+                                        {assignedReservations.map((r) => (
+                                            <List.Item key={r.id}>
+                                                <Code>{r.envVarName}</Code> = {r.port} ({r.protocol.toUpperCase()}){r.label ? ` — ${r.label}` : ''}
+                                            </List.Item>
+                                        ))}
+                                    </List>
+                                </Alert>
+                            );
+                        }
+                        if (elsewhere.length > 0) {
+                            const nodes = Array.from(new Set(elsewhere.map((r) => r.nodeId))).join(', ');
+                            return (
+                                <Alert color="yellow" variant="light" icon={<MdOutlineLan />} title="Reserved ports on other nodes">
+                                    <Text size="sm">This project has reserved ports on: {nodes} (starred above). Assign it to one of those nodes to use those forwarded ports as environment variables.</Text>
+                                </Alert>
+                            );
+                        }
+                        return null;
+                    })()}
                     <NumberInput
                         value={project.timeout}
                         label="Deployment Timeout (ms)"

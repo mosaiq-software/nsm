@@ -166,6 +166,36 @@ export enum NodeRole {
     FOLLOWER = 'follower',
 }
 
+// Transport protocol for a directly-forwarded (non-proxied) port reservation.
+export enum PortProtocol {
+    TCP = 'tcp',
+    UDP = 'udp',
+}
+
+// A fixed host port on a specific node, reserved for exactly one project. Declared by an admin on a
+// node's page to assert "this port+protocol is forwarded to this node for this project." NSM keeps
+// the reserved port out of the dynamic proxy-port pool, injects `envVarName=port` into the project's
+// deploy .env when it runs on this node, and can bind the port into DNS records (e.g. SRV data.port).
+export interface PortReservation {
+    id: string;
+    nodeId: string;
+    port: number;
+    protocol: PortProtocol;
+    projectId: string;
+    envVarName: string;
+    label?: string;
+    created: number;
+}
+
+// Body for creating a port reservation on a node (node comes from the route path).
+export interface CreatePortReservationBody {
+    port: number;
+    protocol: PortProtocol;
+    projectId: string;
+    envVarName: string;
+    label?: string;
+}
+
 export interface NodeHealth {
     nodeId: string;
     reachable: boolean;
@@ -526,6 +556,9 @@ export interface DnsRecord {
     // True when NSM manages this record's content as the dynamic public IP (tagged via the CF
     // record comment, so the flag lives in Cloudflare and survives re-sync).
     dynamic?: boolean;
+    // When set, NSM drives this record's port (e.g. SRV data.port) from the given port reservation.
+    // Like `dynamic`, the binding is tagged in the CF record comment so Cloudflare stays authoritative.
+    portReservationId?: string;
 }
 
 // The registrar/billing side of a domain, present when the zone is a Cloudflare Registrar domain.

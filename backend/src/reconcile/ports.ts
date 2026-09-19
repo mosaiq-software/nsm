@@ -56,12 +56,17 @@ export const releasePorts = (ports: number[]): void => {
 
 export const getLedgerPorts = (): number[] => Array.from(reservedLedger);
 
-export const getNextFreePorts = async (count: number): Promise<number[] | null> => {
+// `excludePorts` are additional host ports the caller wants kept out of the pool - e.g. ports
+// explicitly reserved for directly-forwarded (non-proxied) services on this node, which must never
+// be handed to a dynamic proxy backend or a Docker publish collision would freeze into the deploy.
+export const getNextFreePorts = async (count: number, excludePorts: number[] = []): Promise<number[] | null> => {
     const reservedPorts = getReservedPorts();
+    const excluded = new Set(excludePorts);
     const occupiedPorts = await getOccupiedPorts();
     const freePorts: number[] = [];
     for (let port = MIN_PORT; port <= MAX_PORT; port++) {
         if (reservedPorts.has(port)) continue;
+        if (excluded.has(port)) continue; // reserved for a directly-forwarded service on this node
         if (reservedLedger.has(port)) continue; // allocated to an in-flight deploy, not yet bound
         if (!occupiedPorts.includes(port)) {
             const isFree = await doubleCheckPortFree(port);

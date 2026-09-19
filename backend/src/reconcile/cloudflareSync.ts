@@ -1,7 +1,7 @@
 import { DnsRecord, DnsRecordType, DomainBilling } from '@mosaiq/nsm-common/types';
 import { cluster } from '@/cluster/node';
 import { isCloudflareConfigured, isCloudflareRegistrarConfigured } from '@/config';
-import { CfDnsRecord, CfRegistrarDomain, hasDynamicTag, listDnsRecords, listRegistrarDomains, listZones } from '@/utils/cloudflare';
+import { CfDnsRecord, CfRegistrarDomain, getPortReservationIdFromComment, hasDynamicTag, listDnsRecords, listRegistrarDomains, listZones } from '@/utils/cloudflare';
 import { deleteDnsZonesNotInModel, getDnsZoneByNameModel, getDnsZoneModel, upsertDnsZoneModel } from '@/persistence/dnsZonePersistence';
 import { deleteRecordsForZoneModel, replaceZoneRecordsModel } from '@/persistence/dnsRecordPersistence';
 import { setZoneAssignmentModel } from '@/persistence/dnsZoneAssignmentPersistence';
@@ -22,6 +22,7 @@ const cfToRecord = (r: CfDnsRecord): DnsRecord => ({
     data: r.data,
     comment: r.comment,
     dynamic: hasDynamicTag(r.comment),
+    portReservationId: getPortReservationIdFromComment(r.comment),
 });
 
 // Cloudflare is authoritative for expiry/auto-renew/status; pricing is not returned for owned

@@ -9,6 +9,7 @@ import { useCluster } from '@/contexts/cluster-context';
 import { useMe } from '@/contexts/me-context';
 import { useAPI } from '@/utils/api';
 import { NodeConfigModal } from '@/components/NodeConfigModal';
+import { NodePortAllocationCard } from '@/components/NodePortAllocationCard';
 import { formatAxisTime, formatBytes, formatBytesPerSec, formatPercent01 } from '@/utils/format';
 
 const TIME_RANGES: { label: string; ms: number }[] = [
@@ -389,6 +390,8 @@ const NodeDetailPage = () => {
             )}
 
             {configOpen && <NodeConfigModal nodeId={nodeId} isLeader={!!node?.isLeader} isAdmin={meCtx.isAdmin} onClose={() => setConfigOpen(false)} />}
+
+            {meCtx.isAdmin && <NodePortAllocationCard nodeId={nodeId} />}
 
             <Group justify="space-between" align="center" mt="md">
                 <Title order={3}>Storage</Title>

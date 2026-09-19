@@ -19,6 +19,7 @@ DnsRecordModel.init(
         dataJson: DataTypes.TEXT,
         comment: DataTypes.TEXT,
         dynamic: DataTypes.BOOLEAN,
+        portReservationId: DataTypes.STRING,
         lastSyncedAt: DataTypes.NUMBER,
     },
     { sequelize, timestamps: false }
@@ -36,6 +37,7 @@ interface DnsRecordRow {
     dataJson?: string | null;
     comment?: string | null;
     dynamic?: boolean;
+    portReservationId?: string | null;
     lastSyncedAt?: number;
 }
 
@@ -51,6 +53,7 @@ const rowToRecord = (row: DnsRecordRow): DnsRecord => ({
     data: row.dataJson ? (JSON.parse(row.dataJson) as Record<string, unknown>) : undefined,
     comment: row.comment ?? undefined,
     dynamic: !!row.dynamic,
+    portReservationId: row.portReservationId ?? undefined,
 });
 
 const recordToRow = (r: DnsRecord): DnsRecordRow => ({
@@ -65,6 +68,7 @@ const recordToRow = (r: DnsRecord): DnsRecordRow => ({
     dataJson: r.data ? JSON.stringify(r.data) : null,
     comment: r.comment ?? null,
     dynamic: !!r.dynamic,
+    portReservationId: r.portReservationId ?? null,
     lastSyncedAt: Date.now(),
 });
 
@@ -80,6 +84,10 @@ export const getRecordsForZoneModel = async (zoneId: string): Promise<DnsRecord[
 
 export const getAllDynamicRecordsModel = async (): Promise<DnsRecord[]> => {
     return (await DnsRecordModel.findAll({ where: { dynamic: true } })).map((r) => rowToRecord(r.toJSON() as DnsRecordRow));
+};
+
+export const getRecordsByPortReservationModel = async (reservationId: string): Promise<DnsRecord[]> => {
+    return (await DnsRecordModel.findAll({ where: { portReservationId: reservationId } })).map((r) => rowToRecord(r.toJSON() as DnsRecordRow));
 };
 
 export const deleteRecordsForZoneModel = async (zoneId: string): Promise<void> => {

@@ -23,6 +23,7 @@ import { createServiceInstanceModel } from '@/persistence/serviceInstancePersist
 import { buildDockerComposeString, sanitizeComposeForCoexistence } from '@/utils/repositoryUtils';
 import { getDesiredDeploymentModel } from '@/persistence/desiredDeploymentPersistence';
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
+import { getPortReservationsByNodeAndProjectModel, getReservedPortNumbersForNodeModel } from '@/persistence/portReservationPersistence';
 import { cluster } from '@/cluster/node';
 import { postToNode } from '@/cluster/leaderClient';
 import { getNextFreePorts } from '@/reconcile/ports';
@@ -46,17 +47,19 @@ interface NodePlan {
 }
 
 // Executed by a node when the leader asks it to allocate ports + ensure directories locally.
-export const planLocally = async (proxyCount: number, dirs: RelativeDirectoryMap): Promise<NodePlan> => {
-    const ports = proxyCount > 0 ? await getNextFreePorts(proxyCount) : [];
+// `excludePorts` are host ports reserved for directly-forwarded services on this node that must be
+// kept out of the dynamic proxy pool.
+export const planLocally = async (proxyCount: number, dirs: RelativeDirectoryMap, excludePorts: number[] = []): Promise<NodePlan> => {
+    const ports = proxyCount > 0 ? await getNextFreePorts(proxyCount, excludePorts) : [];
     const fullDirs = await ensureDirectories(dirs);
     return { ports, dirs: fullDirs };
 };
 
-const planOnAssignedNode = async (nodeId: string, proxyCount: number, dirs: RelativeDirectoryMap): Promise<NodePlan> => {
-    if (nodeId === config.nodeId) return planLocally(proxyCount, dirs);
+const planOnAssignedNode = async (nodeId: string, proxyCount: number, dirs: RelativeDirectoryMap, excludePorts: number[]): Promise<NodePlan> => {
+    if (nodeId === config.nodeId) return planLocally(proxyCount, dirs, excludePorts);
     const node = await getNodeByIdModel(nodeId);
     if (!node) throw new Error(`Assigned node ${nodeId} not found in cluster`);
-    const res = await postToNode<NodePlan>(node.address, node.apiPort, '/node/plan', { proxyCount, dirs });
+    const res = await postToNode<NodePlan>(node.address, node.apiPort, '/node/plan', { proxyCount, dirs, excludePorts });
     if (!res) throw new Error(`Failed to reach node ${nodeId} for deployment planning`);
     return res;
 };
@@ -134,20 +137,25 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
         if (!project.hasDockerCompose) throw new Error('Project does not have a Docker Compose file in the repository root');
         if (!project.workerNodeId) throw new Error('No node assigned to project');
 
-        const zeroDowntime = effectiveZeroDowntime(project);
+        // Port reservations for this project on its assigned node: injected as env vars, and their
+        // ports (plus any other project's reserved ports on the node) are kept out of the proxy pool.
+        const reservations = await getPortReservationsByNodeAndProjectModel(project.workerNodeId, projectId);
+        const nodeReservedPorts = await getReservedPortNumbersForNodeModel(project.workerNodeId);
+
+        const zeroDowntime = effectiveZeroDowntime(project, reservations.length > 0);
 
         // Ask the assigned node to allocate ports + ensure directories.
         const proxyCount = countProxies(project);
         const dirRequest = buildDirectoryRequest(project);
-        const plan = await planOnAssignedNode(project.workerNodeId, proxyCount, dirRequest);
+        const plan = await planOnAssignedNode(project.workerNodeId, proxyCount, dirRequest, nodeReservedPorts);
         const requestedPorts = mapPorts(project, plan.ports);
         await updateProjectInstanceModel(instanceId, { directories: plan.dirs });
         deployLog.info(
-            { action: 'plan_allocated', projectId, instanceId, nodeId: project.workerNodeId, ports: requestedPorts.map((p) => p.port), dirCount: Object.keys(plan.dirs).length },
+            { action: 'plan_allocated', projectId, instanceId, nodeId: project.workerNodeId, ports: requestedPorts.map((p) => p.port), dirCount: Object.keys(plan.dirs).length, reservationCount: reservations.length },
             `allocated ${requestedPorts.length} port(s) and ${Object.keys(plan.dirs).length} dir(s) on ${project.workerNodeId}`
         );
 
-        const dotenv = await getDotenvForProject(project, requestedPorts, plan.dirs);
+        const dotenv = await getDotenvForProject(project, requestedPorts, plan.dirs, reservations);
         const { conf: nginxConf, domains } = getNginxConf(project, requestedPorts, plan.dirs, project.workerNodeId);
 
         // Service instances (observability) + inject service-instance labels into compose.
@@ -274,8 +282,11 @@ export const updateDeploymentLog = async (instanceId: string, status: Deployment
 };
 
 // Effective zero-downtime for a project: on by default (node-wide config), unless this node has it
-// turned off globally or the project explicitly opted out.
-const effectiveZeroDowntime = (project: Project): boolean => config.zeroDowntime && project.zeroDowntime !== false;
+// turned off globally or the project explicitly opted out. Forced off when the project has directly-
+// forwarded port reservations on its assigned node: a fixed published host port cannot be bound by
+// two generations at once, so blue-green coexistence is impossible.
+const effectiveZeroDowntime = (project: Project, hasForwardedPorts: boolean): boolean =>
+    config.zeroDowntime && project.zeroDowntime !== false && !hasForwardedPorts;
 
 // Leader-only: a node has reported its new (blue) generation ready. Promote it so nginx renders the
 // new ports on the next reconcile, and deactivate the superseded ProjectInstances. Idempotent and

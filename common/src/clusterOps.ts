@@ -1,4 +1,4 @@
-import { Admin, AllowedGithubEntity, DomainRequest, Project, ProjectServiceInstance, Secret, TeamConfig, TeamMemberOverride, User } from './types';
+import { Admin, AllowedGithubEntity, DomainRequest, PortReservation, Project, ProjectServiceInstance, Secret, TeamConfig, TeamMemberOverride, User } from './types';
 
 // Static description of a peer in the cluster. Identity is nodeId; address is the current IP.
 export interface NodeInfo {
@@ -80,6 +80,8 @@ export enum OpType {
     SET_ZONE_ASSIGNMENT = 'SET_ZONE_ASSIGNMENT',
     SET_DOMAIN_ALLOCATIONS = 'SET_DOMAIN_ALLOCATIONS',
     UPSERT_DOMAIN_REQUEST = 'UPSERT_DOMAIN_REQUEST',
+    UPSERT_PORT_RESERVATION = 'UPSERT_PORT_RESERVATION',
+    DELETE_PORT_RESERVATION = 'DELETE_PORT_RESERVATION',
 }
 
 export type Op =
@@ -100,4 +102,6 @@ export type Op =
     | { type: OpType.REMOVE_ADMIN; id: string }
     | { type: OpType.SET_ZONE_ASSIGNMENT; zoneId: string; projectId: string | null }
     | { type: OpType.SET_DOMAIN_ALLOCATIONS; zoneId: string; ownerIds: string[] }
-    | { type: OpType.UPSERT_DOMAIN_REQUEST; request: DomainRequest };
+    | { type: OpType.UPSERT_DOMAIN_REQUEST; request: DomainRequest }
+    | { type: OpType.UPSERT_PORT_RESERVATION; reservation: PortReservation }
+    | { type: OpType.DELETE_PORT_RESERVATION; reservationId: string };
