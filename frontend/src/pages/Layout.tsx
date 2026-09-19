@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
-import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, FileInput, Group, Loader, Menu, Modal, Space, Stack, Switch, Text, TextInput, Title } from '@mantine/core';
+import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, Group, Loader, Menu, Modal, Space, Stack, Text, TextInput, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import RouterLink, { pathMatchesShape } from '@/components/RouterLink';
 import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { useProjects } from '@/contexts/project-context';
 import { useMe } from '@/contexts/me-context';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Capability, GithubOwner, Project } from '@mosaiq/nsm-common/types';
+import { Capability, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useUser } from '@/contexts/user-context';
 import { MdOutlineWarningAmber } from 'react-icons/md';
@@ -32,69 +32,19 @@ const Layout = (props: { children: React.ReactNode }) => {
     const [modal, setModal] = useState<'create' | null>(null);
     const [creatingProject, setCreatingProject] = useState(false);
     const [pushBusy, setPushBusy] = useState(false);
-    const [legacyFile, setLegacyFile] = useState<File | null>(null);
     const [newProject, setNewProject] = useState<Project>(emptyProject);
 
     const closeCreateModal = () => {
         setModal(null);
         setNewProject(emptyProject);
-        setLegacyFile(null);
-    };
-
-    const handleLegacyFile = async (file: File | null) => {
-        setLegacyFile(file);
-        if (!file) return;
-        try {
-            const parsed = JSON.parse(await file.text());
-            if (!parsed || parsed.__nsmLegacyConfig !== 1) {
-                throw new Error('Not a valid NSM legacy config file');
-            }
-            setNewProject((prev) => ({
-                ...prev,
-                id: parsed.id ?? prev.id,
-                repoOwner: parsed.repoOwner ?? prev.repoOwner,
-                repoName: parsed.repoName ?? prev.repoName,
-                repoBranch: parsed.repoBranch ?? prev.repoBranch,
-                allowCICD: parsed.allowCICD ?? prev.allowCICD,
-                timeout: parsed.timeout,
-                nginxConfig: parsed.nginxConfig,
-                services: parsed.services,
-                secrets: parsed.secrets,
-            }));
-            notifications.show({
-                title: 'Legacy config loaded',
-                message: `Loaded config from ${file.name}. Values will be applied after the repo sync.`,
-                color: 'green',
-            });
-        } catch (error) {
-            setLegacyFile(null);
-            notifications.show({
-                title: 'Invalid config file',
-                message: error instanceof Error ? error.message : 'Failed to parse the uploaded file',
-                color: 'red',
-            });
-        }
     };
 
     const { token } = useAPI();
-    const [owners, setOwners] = useState<GithubOwner[]>([]);
     const [repos, setRepos] = useState<string[]>([]);
     const [branches, setBranches] = useState<string[]>([]);
     // Debounce the free-text owner/repo so typing doesn't fire a GitHub lookup on every keystroke.
     const [debouncedOwner] = useDebouncedValue(newProject.repoOwner?.trim() || '', 400);
     const [debouncedRepo] = useDebouncedValue(newProject.repoName?.trim() || '', 400);
-
-    // Owners that installed the GitHub App: loaded once when the modal opens.
-    useEffect(() => {
-        if (modal !== 'create') return;
-        let cancelled = false;
-        void rawApiGetNoHook(API_ROUTES.GET_GITHUB_OWNERS, {}, token).then((res) => {
-            if (!cancelled && res) setOwners(res);
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [modal, token]);
 
     // Repos the App can access for the chosen owner.
     useEffect(() => {
@@ -158,29 +108,12 @@ const Layout = (props: { children: React.ReactNode }) => {
                 ) : (
                     <Stack>
                         <Title order={3}>Create Project</Title>
-                        <FileInput
-                            label="Upload legacy config (optional)"
-                            description="Import a config downloaded from the legacy server-manager. Fills in the fields below and restores env vars, domains, services, and expected states after the repo sync."
-                            placeholder="Select .nsm-config.json"
-                            accept="application/json,.json"
-                            clearable
-                            value={legacyFile}
-                            onChange={handleLegacyFile}
-                        />
                         <TextInput
                             label="Project ID"
                             placeholder="terrazzo"
                             description="The unique identifier for the project. Cannot be changed later."
                             value={newProject?.id || ''}
                             onChange={(e) => setNewProject({ ...newProject, id: e.target.value })}
-                        />
-                        <Autocomplete
-                            label="Repo Owner"
-                            placeholder="mosaiq-software"
-                            description="Accounts/orgs that installed the NSM GitHub App. You can also type any owner."
-                            data={owners.map((o) => o.login)}
-                            value={newProject?.repoOwner || ''}
-                            onChange={(value) => setNewProject({ ...newProject, repoOwner: value })}
                         />
                         <Autocomplete
                             label="Repo Name"
@@ -201,7 +134,6 @@ const Layout = (props: { children: React.ReactNode }) => {
                         {newProject.repoOwner && newProject.repoName && (
                             <Link to={`https://github.com/${newProject.repoOwner}/${newProject.repoName}`} target="_blank">{`https://github.com/${newProject.repoOwner}/${newProject.repoName}`}</Link>
                         )}
-                        <Switch label="Allow CI/CD" checked={newProject?.allowCICD || false} onChange={(e) => setNewProject({ ...newProject, allowCICD: e.currentTarget.checked })} />
                         <Group justify="space-between">
                             <Button
                                 variant="outline"
