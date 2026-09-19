@@ -9,6 +9,9 @@ import { createAllowedEntityModel, deleteAllowedEntitiesModel, getAllAllowedEnti
 import { upsertTeamConfigModel } from '@/persistence/teamConfigPersistence';
 import { deleteTeamOverrideModel, upsertTeamOverrideModel } from '@/persistence/teamOverridePersistence';
 import { createAdminModel, deleteAdminModel } from '@/persistence/adminPersistence';
+import { setZoneAssignmentModel } from '@/persistence/dnsZoneAssignmentPersistence';
+import { setDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
+import { upsertDomainRequestModel } from '@/persistence/domainRequestPersistence';
 import { areaLog } from '@/utils/log';
 
 const clusterLog = areaLog('cluster');
@@ -46,6 +49,12 @@ const opDetails = (op: Op): Record<string, unknown> => {
             return { id: op.admin.id, login: op.admin.login };
         case OpType.REMOVE_ADMIN:
             return { id: op.id };
+        case OpType.SET_ZONE_ASSIGNMENT:
+            return { zoneId: op.zoneId, projectId: op.projectId };
+        case OpType.SET_DOMAIN_ALLOCATIONS:
+            return { zoneId: op.zoneId, ownerCount: op.ownerIds.length };
+        case OpType.UPSERT_DOMAIN_REQUEST:
+            return { requestId: op.request.id, domainName: op.request.domainName, status: op.request.status };
         default:
             return {};
     }
@@ -124,6 +133,15 @@ export const applyOp = async (op: Op): Promise<void> => {
             break;
         case OpType.REMOVE_ADMIN:
             await deleteAdminModel(op.id);
+            break;
+        case OpType.SET_ZONE_ASSIGNMENT:
+            await setZoneAssignmentModel(op.zoneId, op.projectId);
+            break;
+        case OpType.SET_DOMAIN_ALLOCATIONS:
+            await setDomainAllocationsModel(op.zoneId, op.ownerIds);
+            break;
+        case OpType.UPSERT_DOMAIN_REQUEST:
+            await upsertDomainRequestModel(op.request);
             break;
         default:
             clusterLog.warn({ action: 'op_unknown', opType: (op as any).type }, 'unknown cluster op ignored');

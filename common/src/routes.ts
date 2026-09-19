@@ -1,4 +1,4 @@
-import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, ResourceAllocation, Secret, Team, TeamDetail, User } from './types';
+import { Admin, Capability, CdSetupRequest, ClusterNode, ClusterStatus, DeploymentLogUpdate, DnsRecord, DnsZone, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, LogMessage, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, PushSubscriptionJSON, ResourceAllocation, Secret, Team, TeamDetail, User } from './types';
 
 // ===== ROUTES =====
 export enum API_ROUTES {
@@ -29,6 +29,12 @@ export enum API_ROUTES {
     GET_PROJECT_NOTIFICATION = '/push/preference/:projectId',
     GET_RESOURCE_ALLOCATIONS = '/allocations',
     GET_PROJECT_RESOURCE_USAGE = '/project/:projectId/resource-usage',
+    GET_DOMAINS = '/domains',
+    GET_DOMAIN_REQUESTS = '/domains/requests',
+    GET_DOMAIN_BILLING = '/domains/billing',
+    GET_PUBLIC_IP = '/domains/public-ip',
+    GET_DNS_RECORDS = '/domains/:zoneId/records',
+    GET_PROJECT_DOMAINS = '/project/:projectId/domains',
 
     //POST
     POST_CREATE_PROJECT = '/project/create',
@@ -59,6 +65,17 @@ export enum API_ROUTES {
     POST_LOG_FACETS = '/observability/facets',
     POST_NODE_STORAGE_SNAPSHOT = '/observability/node-storage/snapshot',
     POST_SET_PROJECT_QUOTA = '/project/:projectId/quota',
+    POST_DOMAIN_SEARCH = '/domains/search',
+    POST_DOMAIN_CHECK = '/domains/check',
+    POST_DOMAIN_REQUEST = '/domains/request',
+    POST_DOMAIN_REQUEST_DECIDE = '/domains/requests/:requestId/decide',
+    POST_DOMAIN_DELETE = '/domains/:zoneId/delete',
+    POST_DOMAIN_ALLOCATIONS = '/domains/:zoneId/allocations',
+    POST_DOMAIN_ASSIGN = '/domains/:zoneId/assign',
+    POST_DNS_RECORD_CREATE = '/domains/:zoneId/records/create',
+    POST_DNS_RECORD_UPDATE = '/domains/:zoneId/records/:recordId/update',
+    POST_DNS_RECORD_DELETE = '/domains/:zoneId/records/:recordId/delete',
+    POST_PUBLIC_IP_REFRESH = '/domains/public-ip/refresh',
 }
 export interface API_PARAMS {
     //GET
@@ -88,6 +105,12 @@ export interface API_PARAMS {
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { projectId: string };
     [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: {};
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: { projectId: string };
+    [API_ROUTES.GET_DOMAINS]: {};
+    [API_ROUTES.GET_DOMAIN_REQUESTS]: {};
+    [API_ROUTES.GET_DOMAIN_BILLING]: {};
+    [API_ROUTES.GET_PUBLIC_IP]: {};
+    [API_ROUTES.GET_DNS_RECORDS]: { zoneId: string };
+    [API_ROUTES.GET_PROJECT_DOMAINS]: { projectId: string };
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: {};
@@ -118,6 +141,17 @@ export interface API_PARAMS {
     [API_ROUTES.POST_LOG_FACETS]: {};
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: {};
     [API_ROUTES.POST_SET_PROJECT_QUOTA]: { projectId: string };
+    [API_ROUTES.POST_DOMAIN_SEARCH]: {};
+    [API_ROUTES.POST_DOMAIN_CHECK]: {};
+    [API_ROUTES.POST_DOMAIN_REQUEST]: {};
+    [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: { requestId: string };
+    [API_ROUTES.POST_DOMAIN_DELETE]: { zoneId: string };
+    [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: { zoneId: string };
+    [API_ROUTES.POST_DOMAIN_ASSIGN]: { zoneId: string };
+    [API_ROUTES.POST_DNS_RECORD_CREATE]: { zoneId: string };
+    [API_ROUTES.POST_DNS_RECORD_UPDATE]: { zoneId: string; recordId: string };
+    [API_ROUTES.POST_DNS_RECORD_DELETE]: { zoneId: string; recordId: string };
+    [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
 }
 export interface API_BODY {
     // Only POST
@@ -148,6 +182,12 @@ export interface API_BODY {
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: undefined;
     [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: undefined;
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: undefined;
+    [API_ROUTES.GET_DOMAINS]: undefined;
+    [API_ROUTES.GET_DOMAIN_REQUESTS]: undefined;
+    [API_ROUTES.GET_DOMAIN_BILLING]: undefined;
+    [API_ROUTES.GET_PUBLIC_IP]: undefined;
+    [API_ROUTES.GET_DNS_RECORDS]: undefined;
+    [API_ROUTES.GET_PROJECT_DOMAINS]: undefined;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -178,6 +218,17 @@ export interface API_BODY {
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsRequest;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: { nodeId: string };
     [API_ROUTES.POST_SET_PROJECT_QUOTA]: ProjectResourceQuota;
+    [API_ROUTES.POST_DOMAIN_SEARCH]: { query: string };
+    [API_ROUTES.POST_DOMAIN_CHECK]: { domains: string[] };
+    [API_ROUTES.POST_DOMAIN_REQUEST]: { domainName: string; ownerId: string; priceCurrency?: string; priceRegistration?: string; priceRenewal?: string };
+    [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: { approve: boolean; reason?: string };
+    [API_ROUTES.POST_DOMAIN_DELETE]: { confirmName: string };
+    [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: { ownerIds: string[] };
+    [API_ROUTES.POST_DOMAIN_ASSIGN]: { projectId: string | null };
+    [API_ROUTES.POST_DNS_RECORD_CREATE]: Partial<DnsRecord>;
+    [API_ROUTES.POST_DNS_RECORD_UPDATE]: Partial<DnsRecord>;
+    [API_ROUTES.POST_DNS_RECORD_DELETE]: {};
+    [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
 }
 export interface API_RETURN {
     //GET
@@ -207,6 +258,12 @@ export interface API_RETURN {
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: { enabled: boolean };
     [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: ResourceAllocation[];
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: ProjectResourceUsage | undefined;
+    [API_ROUTES.GET_DOMAINS]: DnsZone[];
+    [API_ROUTES.GET_DOMAIN_REQUESTS]: DomainRequest[];
+    [API_ROUTES.GET_DOMAIN_BILLING]: DomainBillingSummary | undefined;
+    [API_ROUTES.GET_PUBLIC_IP]: { ip: string | null };
+    [API_ROUTES.GET_DNS_RECORDS]: DnsRecord[];
+    [API_ROUTES.GET_PROJECT_DOMAINS]: string[];
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: Project;
@@ -237,6 +294,17 @@ export interface API_RETURN {
     [API_ROUTES.POST_LOG_FACETS]: LogFacetsResult | undefined;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: NodeStorageSpec | undefined;
     [API_ROUTES.POST_SET_PROJECT_QUOTA]: undefined;
+    [API_ROUTES.POST_DOMAIN_SEARCH]: DomainSearchResult[];
+    [API_ROUTES.POST_DOMAIN_CHECK]: DomainCheckResult[];
+    [API_ROUTES.POST_DOMAIN_REQUEST]: DomainRequest | undefined;
+    [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: DomainRequest | undefined;
+    [API_ROUTES.POST_DOMAIN_DELETE]: undefined;
+    [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: DomainAllocationResult;
+    [API_ROUTES.POST_DOMAIN_ASSIGN]: undefined;
+    [API_ROUTES.POST_DNS_RECORD_CREATE]: DnsRecord | undefined;
+    [API_ROUTES.POST_DNS_RECORD_UPDATE]: DnsRecord | undefined;
+    [API_ROUTES.POST_DNS_RECORD_DELETE]: undefined;
+    [API_ROUTES.POST_PUBLIC_IP_REFRESH]: { ip: string | null; changed: boolean };
 }
 
 export interface API_AUTH {
@@ -268,6 +336,12 @@ export interface API_AUTH {
     [API_ROUTES.GET_PROJECT_NOTIFICATION]: string;
     [API_ROUTES.GET_RESOURCE_ALLOCATIONS]: string;
     [API_ROUTES.GET_PROJECT_RESOURCE_USAGE]: string;
+    [API_ROUTES.GET_DOMAINS]: string;
+    [API_ROUTES.GET_DOMAIN_REQUESTS]: string;
+    [API_ROUTES.GET_DOMAIN_BILLING]: string;
+    [API_ROUTES.GET_PUBLIC_IP]: string;
+    [API_ROUTES.GET_DNS_RECORDS]: string;
+    [API_ROUTES.GET_PROJECT_DOMAINS]: string;
 
     //POST
     [API_ROUTES.POST_CREATE_PROJECT]: string;
@@ -298,4 +372,15 @@ export interface API_AUTH {
     [API_ROUTES.POST_LOG_FACETS]: string;
     [API_ROUTES.POST_NODE_STORAGE_SNAPSHOT]: string;
     [API_ROUTES.POST_SET_PROJECT_QUOTA]: string;
+    [API_ROUTES.POST_DOMAIN_SEARCH]: string;
+    [API_ROUTES.POST_DOMAIN_CHECK]: string;
+    [API_ROUTES.POST_DOMAIN_REQUEST]: string;
+    [API_ROUTES.POST_DOMAIN_REQUEST_DECIDE]: string;
+    [API_ROUTES.POST_DOMAIN_DELETE]: string;
+    [API_ROUTES.POST_DOMAIN_ALLOCATIONS]: string;
+    [API_ROUTES.POST_DOMAIN_ASSIGN]: string;
+    [API_ROUTES.POST_DNS_RECORD_CREATE]: string;
+    [API_ROUTES.POST_DNS_RECORD_UPDATE]: string;
+    [API_ROUTES.POST_DNS_RECORD_DELETE]: string;
+    [API_ROUTES.POST_PUBLIC_IP_REFRESH]: string;
 }

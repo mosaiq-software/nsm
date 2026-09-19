@@ -8,6 +8,9 @@ import { leaderEnsureCerts } from '@/reconcile/certs';
 import { runSelfUpdateRolloutIfLeader } from '@/cluster/selfUpdate';
 import { collectDiskUsage } from '@/reconcile/diskUsage';
 import { checkAllQuotas } from '@/controllers/quotaController';
+import { syncCloudflare } from '@/reconcile/cloudflareSync';
+import { checkPublicIp } from '@/reconcile/publicIpWatcher';
+import { isCloudflareConfigured } from '@/config';
 import { areaLog } from '@/utils/log';
 
 const initLog = areaLog('startup');
@@ -82,5 +85,14 @@ export const registerCronJobs = () => {
         initLog.debug({ action: 'cron_fired', job: 'quota_check', isLeader: cluster.isLeader() }, 'quota check cron fired');
         if (cluster.isLeader()) void checkAllQuotas().catch((e) => initLog.error({ action: 'quota_check_failed', err: e?.message }, 'quota check failed'));
     });
-    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30', 'quota_check:*/5'] }, 'cron jobs registered');
+    // Leader-only: mirror Cloudflare zones/records into the cache (Cloudflare authoritative).
+    cron.schedule('*/5 * * * *', () => {
+        if (cluster.isLeader() && isCloudflareConfigured()) void syncCloudflare();
+    });
+    // Leader-only: watch for a public (WAN) IP change and repush dynamic DNS records.
+    const ipCron = `*/${Math.max(1, config.publicIpPollMinutes)} * * * *`;
+    cron.schedule(ipCron, () => {
+        if (cluster.isLeader() && isCloudflareConfigured()) void checkPublicIp();
+    });
+    initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30', 'quota_check:*/5', 'cloudflare_sync:*/5', `public_ip:${ipCron}`] }, 'cron jobs registered');
 };

@@ -488,6 +488,150 @@ export interface MeResponse {
     teams: MeTeam[];
 }
 
+// === Cloudflare DNS + Domains ===
+
+// The DNS record types NSM offers rich editing for. The backend passes `type` straight through to
+// Cloudflare, so any type Cloudflare accepts still works even if it is not in this list.
+export type DnsRecordType =
+    | 'A'
+    | 'AAAA'
+    | 'CNAME'
+    | 'MX'
+    | 'TXT'
+    | 'SRV'
+    | 'NS'
+    | 'CAA'
+    | 'PTR'
+    | 'CERT'
+    | 'DNSKEY'
+    | 'DS'
+    | 'HTTPS'
+    | 'LOC'
+    | 'NAPTR'
+    | 'SMIMEA'
+    | 'SSHFP'
+    | 'SVCB'
+    | 'TLSA'
+    | 'URI';
+
+export const DNS_RECORD_TYPES: DnsRecordType[] = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'NS', 'CAA', 'PTR', 'CERT', 'DNSKEY', 'DS', 'HTTPS', 'LOC', 'NAPTR', 'SMIMEA', 'SSHFP', 'SVCB', 'TLSA', 'URI'];
+
+// Record types whose value Cloudflare represents as a structured `data` object rather than flat
+// `content` (SRV/CAA/etc.). Simple types (A/AAAA/CNAME/TXT/NS/MX...) use `content`.
+export const DNS_STRUCTURED_TYPES: DnsRecordType[] = ['SRV', 'CAA', 'LOC', 'NAPTR', 'SSHFP', 'TLSA', 'SMIMEA', 'DS', 'CERT', 'HTTPS', 'SVCB'];
+
+// A DNS record mirrored from Cloudflare (Cloudflare is authoritative). `data` carries structured
+// fields for record types that use them; `content` is the flat value for simple types.
+export interface DnsRecord {
+    id: string;
+    zoneId: string;
+    type: DnsRecordType;
+    name: string; // full record name (FQDN)
+    content: string;
+    proxied?: boolean;
+    ttl: number; // 1 = automatic
+    priority?: number;
+    data?: Record<string, unknown>;
+    comment?: string;
+    // True when NSM manages this record's content as the dynamic public IP (tagged via the CF
+    // record comment, so the flag lives in Cloudflare and survives re-sync).
+    dynamic?: boolean;
+}
+
+// The registrar/billing side of a domain, present when the zone is a Cloudflare Registrar domain.
+export interface DomainBilling {
+    expiresAt?: string;
+    autoRenew?: boolean;
+    registrationCost?: string;
+    renewalCost?: string;
+    currency?: string;
+    registrationStatus?: string; // active | registration_pending | expired | ...
+}
+
+// A DNS zone (domain) on the Cloudflare account, mirrored into NSM plus its NSM-side associations.
+export interface DnsZone {
+    id: string;
+    name: string;
+    status: string; // active | pending | moved | ...
+    paused: boolean;
+    billing?: DomainBilling;
+    // NSM-side associations (durable, replicated via ops).
+    assignedProjectId?: string;
+    allocatedTeamIds?: string[]; // team ownerIds
+    recordCount?: number;
+    lastSyncedAt?: number;
+}
+
+// A domain-search suggestion (non-authoritative, from Cloudflare's registrar search endpoint).
+export interface DomainSearchResult {
+    name: string;
+    registrable: boolean;
+    tier?: 'standard' | 'premium';
+    currency?: string;
+    registrationCost?: string;
+    renewalCost?: string;
+    reason?: string;
+}
+
+// An authoritative availability/price check for a single domain (from registrar domain-check).
+export type DomainCheckResult = DomainSearchResult;
+
+export enum DomainRequestStatus {
+    PENDING = 'pending',
+    DENIED = 'denied',
+    PURCHASING = 'purchasing',
+    PURCHASED = 'purchased',
+    FAILED = 'failed',
+}
+
+// A request by a non-super-admin to purchase a domain. Only the super admin may approve (buy) or
+// deny it. Price is snapshotted at request time so the approver sees what was quoted.
+export interface DomainRequest {
+    id: string;
+    domainName: string;
+    requesterId: string; // github id
+    requesterLogin: string;
+    ownerId?: string; // target team to allocate the domain to on purchase
+    ownerLogin?: string;
+    priceCurrency?: string;
+    priceRegistration?: string;
+    priceRenewal?: string;
+    status: DomainRequestStatus;
+    decidedById?: string;
+    decidedByLogin?: string;
+    reason?: string; // denial reason or failure detail
+    createdAt: number;
+    updatedAt: number;
+}
+
+// Per-domain team allocation (which teams may use a domain in their project config).
+export interface DomainTeamAllocation {
+    zoneId: string;
+    ownerId: string;
+}
+
+// Billing rollup for the domains page. Totals are grouped by currency since domains may bill in
+// different currencies.
+export interface DomainBillingEntry {
+    zoneId: string;
+    name: string;
+    renewalCost?: string;
+    currency?: string;
+    expiresAt?: string;
+    autoRenew?: boolean;
+}
+export interface DomainBillingSummary {
+    entries: DomainBillingEntry[];
+    totalsByCurrency: { currency: string; monthly: number; yearly: number }[];
+}
+
+// Result of a team-allocation change: when `ok` is false, `blockedBy` lists the projects still using
+// the domain that prevented removing a team's access.
+export interface DomainAllocationResult {
+    ok: boolean;
+    blockedBy?: { projectId: string; ownerLogin: string }[];
+}
+
 export enum LogLevel {
     ERROR = 'error',
     WARN = 'warn',

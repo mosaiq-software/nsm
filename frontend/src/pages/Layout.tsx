@@ -296,6 +296,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                     }}
                 >
                     <RouterLink to="/" label="Dashboard" showActive />
+                    <RouterLink to="/domains" label="Domains" showActive />
                     {meCtx.isAdmin && (
                         <>
                             <RouterLink to="/nodes" label="Nodes" showActive />

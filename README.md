@@ -114,6 +114,22 @@ sequenceDiagram
 
 ---
 
+## Cloudflare DNS and domains
+
+An optional, cluster-wide Cloudflare integration lets NSM manage DNS records and (optionally) buy and manage domains, all from the leader. It is enabled by setting `CLOUDFLARE_API_TOKEN` (and `CLOUDFLARE_ACCOUNT_ID` for domain purchasing); when unset, the feature is inert.
+
+- **Cloudflare is authoritative.** The leader keeps a local cache (`DnsZoneModel` / `DnsRecordModel`, like the cert cache) refreshed every 5 minutes by `cloudflareSync.ts`. External changes in Cloudflare (a domain canceled, paused, or edited) cascade into NSM on the next sync; NSM writes to Cloudflare **only** on explicit in-NSM edits (record CRUD, an approved purchase, a delete) and dynamic-IP repushes.
+- **DNS records are managed at the domain level** by NSM admins, from the domain detail modal on the `/domains` page — not per project. Project config only *references* an allocated domain through the config picker.
+- **Domain allocations.** Each domain can be allocated to zero or more teams; only allocated domains appear in a team's project config picker. A team cannot be de-allocated while one of its projects still references the domain (the API returns the blocking projects).
+- **Purchasing is super-admin-only.** Anyone with `CREATE_PROJECT` on a team can search Cloudflare and submit a purchase *request*, which notifies the super admin (web push). The super admin approves (which re-checks the price, registers the domain — spending money — adopts the zone, and allocates it to the requester's team) or denies (which notifies the requester). The super admin can also buy directly. Registrations are non-refundable.
+- **Deleting a domain is super-admin-only** and requires typing the domain name to confirm. It removes the zone from Cloudflare and **best-effort disables registrar auto-renew** to stop billing. The Registrar API (beta) may not support toggling auto-renew; if the call fails, NSM logs a warning and you must disable auto-renew in the Cloudflare dashboard to actually stop billing.
+- **Dynamic public IP.** For home networks without a static IP, mark an `A`/`AAAA` record "dynamic". NSM tags it via the Cloudflare record `comment` (so the flag lives in Cloudflare and survives re-sync), polls the public IP every `PUBLIC_IP_POLL_MINUTES` (default 10) via ipify (Cloudflare `cdn-cgi/trace` fallback), and PATCHes every dynamic record when the WAN IP changes.
+- **Billing estimate.** The domains page shows per-currency monthly/yearly renewal estimates from known renewal prices. Domains added outside NSM may not report a price (Cloudflare does not return pricing for owned domains), so those rows show `—`.
+
+**Proxy vs Let's Encrypt (important interaction):** enabling Cloudflare's proxy (orange cloud) on a project's domain breaks certbot's HTTP-01 `--nginx` challenge, because Cloudflare intercepts `:80`. If you proxy a domain NSM issues certs for, switch cert issuance to **DNS-01** by setting `CERTBOT_DNS_ARGS` (e.g. the Cloudflare plugin), or leave the record grey-clouded (DNS-only) for issuance. NSM does not auto-toggle the cloud color.
+
+---
+
 ## Observability
 
 A self-hosted stack (leader) plus per-node agents give logs + metrics filterable per deployment.

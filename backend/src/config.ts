@@ -75,6 +75,11 @@ export interface NsmConfig {
     readinessTimeoutMs: number;
     // Poll interval used while waiting for the readiness gate to pass.
     readinessIntervalMs: number;
+    // Cloudflare integration (leader-only): DNS record + domain management. Empty token disables the
+    // whole feature. accountId is required for registrar (domain search/buy) operations.
+    cloudflare: { apiToken: string; accountId: string };
+    // How often the leader polls for a public (WAN) IP change to repush dynamic DNS records.
+    publicIpPollMinutes: number;
 }
 
 const bool = (v: string | undefined) => v === 'true';
@@ -141,7 +146,17 @@ export const config: NsmConfig = {
     deployDrainMs: num(process.env.DEPLOY_DRAIN_MS, 10_000),
     readinessTimeoutMs: num(process.env.READINESS_TIMEOUT_MS, 120_000),
     readinessIntervalMs: num(process.env.READINESS_INTERVAL_MS, 2_000),
+    cloudflare: {
+        apiToken: process.env.CLOUDFLARE_API_TOKEN || '',
+        accountId: process.env.CLOUDFLARE_ACCOUNT_ID || '',
+    },
+    publicIpPollMinutes: num(process.env.PUBLIC_IP_POLL_MINUTES, 10),
 };
+
+// True when a Cloudflare API token is configured (the DNS/domains feature is enabled at all).
+export const isCloudflareConfigured = (): boolean => Boolean(config.cloudflare.apiToken);
+// True when registrar (domain search/buy) operations are possible (token + account id).
+export const isCloudflareRegistrarConfigured = (): boolean => Boolean(config.cloudflare.apiToken && config.cloudflare.accountId);
 
 export const gitSshKeyPath = (): string => `${config.gitSshKeyDir}/${config.gitSshKeyFile}`;
 

@@ -1,7 +1,9 @@
-import { ActionIcon, Button, Group, Stack, Title, Text, Switch, Textarea, TextInput, Menu, Tooltip, Fieldset, Space, NumberInput, Badge } from '@mantine/core';
+import { ActionIcon, Autocomplete, Button, Group, Stack, Title, Text, Switch, Textarea, TextInput, Menu, Tooltip, Fieldset, Space, NumberInput, Badge } from '@mantine/core';
 import { ConfigLocation, NginxConfigLocationType, Project, ProjectNginxConfig } from '@mosaiq/nsm-common/types';
+import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import React, { useEffect, useState } from 'react';
-import { MdOutlineCode, MdOutlineDelete, MdOutlineDns, MdOutlineLink, MdOutlineWeb } from 'react-icons/md';
+import { MdOutlineCheckCircle, MdOutlineCode, MdOutlineDelete, MdOutlineDns, MdOutlineLink, MdOutlineWeb } from 'react-icons/md';
+import { useAPI } from '@/utils/api';
 
 interface NginxEditorProps {
     current: ProjectNginxConfig;
@@ -9,7 +11,23 @@ interface NginxEditorProps {
     project: Project;
 }
 export const NginxEditor = (props: NginxEditorProps) => {
+    const api = useAPI();
     const [config, setConfig] = useState<ProjectNginxConfig>(JSON.parse(JSON.stringify(props.current)));
+    // Domains allocated to this project's team, offered in the domain picker. Free text is still
+    // allowed; a typed value that matches an allocated domain auto-links.
+    const [knownDomains, setKnownDomains] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (!props.project?.id) return;
+        let cancelled = false;
+        void api.get(API_ROUTES.GET_PROJECT_DOMAINS, { projectId: props.project.id }).then((res) => {
+            if (!cancelled && res) setKnownDomains(res);
+        });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [props.project?.id, api.token]);
 
     useEffect(() => {
         const json = JSON.stringify(props.current);
@@ -113,18 +131,16 @@ export const NginxEditor = (props: NginxEditorProps) => {
                     <Fieldset key={server.serverId}>
                         <Title order={5}>{`Domain ${server.serverId.split('-')[0]}`}</Title>
                         <Group justify="space-between" align="flex-end" gap="xl">
-                            <Group>
-                                <TextInput
-                                    required
-                                    label="Domain"
-                                    placeholder="nsm.mosaiq.dev"
+                            <Group align="flex-end">
+                                <DomainPicker
                                     value={server.domain}
-                                    onChange={(event) => {
+                                    knownDomains={knownDomains}
+                                    error={duplicateDomain === server.domain ? 'Duplicate Domain' : undefined}
+                                    onChange={(fullDomain) => {
                                         const newServers = [...config.servers];
-                                        newServers[serverIndex].domain = event.currentTarget.value;
+                                        newServers[serverIndex].domain = fullDomain;
                                         setConfig({ ...config, servers: newServers });
                                     }}
-                                    error={duplicateDomain === server.domain ? 'Duplicate Domain' : undefined}
                                 />
                                 <Switch
                                     label="Wildcard"
@@ -207,6 +223,88 @@ export const NginxEditor = (props: NginxEditorProps) => {
                 Add a Domain
             </Button>
         </Stack>
+    );
+};
+
+// Split a full domain into a subdomain + base domain, preferring the longest allocated domain that
+// the value is (a subdomain of). Falls back to treating the whole value as the base domain.
+const splitDomain = (full: string, known: string[]): { sub: string; base: string } => {
+    const f = (full || '').toLowerCase();
+    const match = known
+        .filter((k) => f === k.toLowerCase() || f.endsWith(`.${k.toLowerCase()}`))
+        .sort((a, b) => b.length - a.length)[0];
+    if (match) {
+        if (f === match.toLowerCase()) return { sub: '', base: match };
+        return { sub: full.slice(0, full.length - match.length - 1), base: match };
+    }
+    return { sub: '', base: full };
+};
+
+const composeDomain = (sub: string, base: string): string => {
+    const s = sub.trim();
+    const b = base.trim();
+    return s ? `${s}.${b}` : b;
+};
+
+interface DomainPickerProps {
+    value: string;
+    knownDomains: string[];
+    error?: string;
+    onChange: (fullDomain: string) => void;
+}
+
+// Replaces the free-text domain box with a `[subdomain].[known-domain]` picker. The base domain is
+// an Autocomplete over the team's allocated domains (free text allowed); a value that matches an
+// allocated domain shows a "linked" check.
+const DomainPicker = (props: DomainPickerProps) => {
+    const initial = splitDomain(props.value, props.knownDomains);
+    const [sub, setSub] = useState(initial.sub);
+    const [base, setBase] = useState(initial.base);
+
+    // Resync from the external value when it changes to something we didn't just compose.
+    useEffect(() => {
+        if (composeDomain(sub, base) !== props.value) {
+            const s = splitDomain(props.value, props.knownDomains);
+            setSub(s.sub);
+            setBase(s.base);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [props.value]);
+
+    // Re-link once allocated domains load (a base previously treated as free text may now match).
+    useEffect(() => {
+        const s = splitDomain(composeDomain(sub, base), props.knownDomains);
+        setSub(s.sub);
+        setBase(s.base);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [props.knownDomains.length]);
+
+    const update = (nextSub: string, nextBase: string) => {
+        setSub(nextSub);
+        setBase(nextBase);
+        props.onChange(composeDomain(nextSub, nextBase));
+    };
+
+    const isLinked = props.knownDomains.some((k) => k.toLowerCase() === base.trim().toLowerCase());
+
+    return (
+        <Group gap={4} align="flex-end">
+            <TextInput label="Subdomain" placeholder="api" value={sub} onChange={(e) => update(e.currentTarget.value, base)} w={110} />
+            <Text pb={8} fw={700}>
+                .
+            </Text>
+            <Autocomplete
+                required
+                label="Domain"
+                placeholder="example.com"
+                data={props.knownDomains}
+                value={base}
+                onChange={(v) => update(sub, v)}
+                error={props.error}
+                rightSection={isLinked ? <MdOutlineCheckCircle color="var(--mantine-color-green-6)" /> : undefined}
+                w={240}
+            />
+        </Group>
     );
 };
 
