@@ -85,6 +85,7 @@ export enum API_ROUTES {
     POST_DNS_RECORD_UPDATE = '/domains/:zoneId/records/:recordId/update',
     POST_DNS_RECORD_DELETE = '/domains/:zoneId/records/:recordId/delete',
     POST_PUBLIC_IP_REFRESH = '/domains/public-ip/refresh',
+    POST_CLOUDFLARE_SYNC = '/domains/sync',
     POST_NODE_CONFIG = '/nodes/:nodeId/config/apply',
     POST_NODE_PORT_RESERVATION = '/nodes/:nodeId/port-reservations/create',
     POST_DELETE_NODE_PORT_RESERVATION = '/nodes/:nodeId/port-reservations/:reservationId/delete',
@@ -181,6 +182,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: { zoneId: string; recordId: string };
     [API_ROUTES.POST_DNS_RECORD_DELETE]: { zoneId: string; recordId: string };
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
+    [API_ROUTES.POST_CLOUDFLARE_SYNC]: {};
     [API_ROUTES.POST_NODE_CONFIG]: { nodeId: string };
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: { nodeId: string };
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: { nodeId: string; reservationId: string };
@@ -279,6 +281,7 @@ export interface API_BODY {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: Partial<DnsRecord>;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: {};
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: {};
+    [API_ROUTES.POST_CLOUDFLARE_SYNC]: {};
     [API_ROUTES.POST_NODE_CONFIG]: NodeConfigUpdate;
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: CreatePortReservationBody;
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: {};
@@ -375,6 +378,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: DnsRecord | undefined;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: undefined;
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: { ip: string | null; changed: boolean };
+    [API_ROUTES.POST_CLOUDFLARE_SYNC]: { ok: boolean; zoneCount?: number; error?: string };
     [API_ROUTES.POST_NODE_CONFIG]: { ok: boolean };
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: PortReservation;
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: undefined;
@@ -473,6 +477,7 @@ export interface API_AUTH {
     [API_ROUTES.POST_DNS_RECORD_UPDATE]: string;
     [API_ROUTES.POST_DNS_RECORD_DELETE]: string;
     [API_ROUTES.POST_PUBLIC_IP_REFRESH]: string;
+    [API_ROUTES.POST_CLOUDFLARE_SYNC]: string;
     [API_ROUTES.POST_NODE_CONFIG]: string;
     [API_ROUTES.POST_NODE_PORT_RESERVATION]: string;
     [API_ROUTES.POST_DELETE_NODE_PORT_RESERVATION]: string;

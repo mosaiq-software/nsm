@@ -24,6 +24,7 @@ import { signInUser, signOutUser, verifyAuthToken } from '@/controllers/userCont
 import { Capability } from '@mosaiq/nsm-common/types';
 import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requireCreateProjectForOwner, requireOwnerInstalledForProject, requireProjectCapability, requireSuperAdmin, requireTeamCapability, requireTeamManage } from '@/controllers/authz';
 import { createRecord, deleteRecord, getPublicIp, listDomains, listRecords, refreshPublicIp, updateRecord } from '@/controllers/dnsController';
+import { syncCloudflareNow } from '@/reconcile/cloudflareSync';
 import { assignZone, billingSummary, checkDomains, createRequest, decideRequest, deleteDomain, listProjectDomains, listRequests, searchDomains, setAllocations } from '@/controllers/domainsController';
 import { applyLocalConfig, applyNodeConfig, readLocalConfig, readNodeConfig } from '@/controllers/nodeConfigController';
 import { createReservation, deleteReservation, listAllReservations, listNodeReservations, listProjectReservations } from '@/controllers/portReservationController';
@@ -900,6 +901,18 @@ privateRouter.post(API_ROUTES.POST_PUBLIC_IP_REFRESH, async (req, res) => {
         res.status(200).json(await refreshPublicIp());
     } catch (e: any) {
         res.status(400).send(e?.message || 'Public IP refresh failed');
+    }
+});
+
+// Admin: re-run the full Cloudflare mirror now (zones, DNS records, registrar metadata). Returns a
+// structured result so a token/permission failure surfaces as an actionable message in the UI.
+privateRouter.post(API_ROUTES.POST_CLOUDFLARE_SYNC, async (req, res) => {
+    if (!requireLeader(req, res)) return;
+    if (!(await requireAdmin(req, res))) return;
+    try {
+        res.status(200).json(await syncCloudflareNow());
+    } catch (e: any) {
+        res.status(400).send(e?.message || 'Cloudflare sync failed');
     }
 });
 

@@ -6,7 +6,7 @@ import { Capability, DnsZone, DomainBillingSummary, DomainRequest, DomainRequest
 import { useAPI } from '@/utils/api';
 import { useMe } from '@/contexts/me-context';
 import { DomainDetailModal } from '@/components/DomainDetailModal';
-import { MdOutlineRefresh, MdOutlineSearch, MdOutlineSync } from 'react-icons/md';
+import { MdOutlineCloudSync, MdOutlineRefresh, MdOutlineSearch, MdOutlineSync } from 'react-icons/md';
 
 const requestStatusColor: Record<DomainRequestStatus, string> = {
     [DomainRequestStatus.PENDING]: 'yellow',
@@ -30,6 +30,7 @@ const DomainsPage = () => {
     const [publicIp, setPublicIp] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncingIp, setSyncingIp] = useState(false);
+    const [syncingCf, setSyncingCf] = useState(false);
     const [selected, setSelected] = useState<DnsZone | null>(null);
 
     // Search + request flow
@@ -118,6 +119,24 @@ const DomainsPage = () => {
         }
     };
 
+    const runCloudflareSync = async () => {
+        setSyncingCf(true);
+        try {
+            const res = await api.post(API_ROUTES.POST_CLOUDFLARE_SYNC, {}, {});
+            if (!res) throw new Error('Request failed');
+            if (res.ok) {
+                notifications.show({ color: 'green', title: 'Cloudflare synced', message: `Synced ${res.zoneCount ?? 0} zone(s) from Cloudflare.` });
+                await refresh();
+            } else {
+                notifications.show({ color: 'red', title: 'Cloudflare sync failed', message: res.error || 'Sync failed.', autoClose: false });
+            }
+        } catch (e) {
+            notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Cloudflare sync failed.' });
+        } finally {
+            setSyncingCf(false);
+        }
+    };
+
     const syncPublicIp = async () => {
         setSyncingIp(true);
         try {
@@ -167,6 +186,13 @@ const DomainsPage = () => {
             <Group justify="space-between" align="center">
                 <Title order={3}>Domains</Title>
                 <Group gap="xs" align="center">
+                    {isAdmin && (
+                        <Tooltip label="Re-sync zones, DNS records and domains from Cloudflare now">
+                            <Button variant="light" leftSection={<MdOutlineCloudSync />} onClick={runCloudflareSync} loading={syncingCf}>
+                                Sync Cloudflare
+                            </Button>
+                        </Tooltip>
+                    )}
                     {isAdmin && (
                         <Tooltip label="Check the public IP now and repush dynamic-IP DNS records if it changed">
                             <Button variant="light" leftSection={<MdOutlineSync />} onClick={syncPublicIp} loading={syncingIp}>

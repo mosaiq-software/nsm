@@ -39,50 +39,70 @@ const mergeBilling = (existing: DomainBilling | undefined, reg: CfRegistrarDomai
     };
 };
 
-// Leader-only, Cloudflare-authoritative mirror of zones + records + registrar metadata into the
-// leader-local cache. Cascades external changes: zones removed on Cloudflare are pruned from the
-// cache along with their records and NSM associations.
+// Cloudflare-authoritative mirror of zones + records + registrar metadata into the leader-local
+// cache. Cascades external changes: zones removed on Cloudflare are pruned from the cache along with
+// their records and NSM associations. Throws on a Cloudflare failure so on-demand callers can
+// surface the underlying error.
+const performCloudflareSync = async (): Promise<{ zoneCount: number }> => {
+    const zones = await listZones();
+
+    const registrarByName = new Map<string, CfRegistrarDomain>();
+    if (isCloudflareRegistrarConfigured()) {
+        try {
+            for (const r of await listRegistrarDomains()) if (r.name) registrarByName.set(r.name.toLowerCase(), r);
+        } catch (e: any) {
+            syncLog.warn({ action: 'registrar_list_failed', err: e?.message }, 'could not list registrar domains (registrar API may be unavailable)');
+        }
+    }
+
+    for (const z of zones) {
+        const existing = await getDnsZoneModel(z.id);
+        const reg = registrarByName.get(z.name.toLowerCase());
+        const records = await listDnsRecords(z.id);
+        await replaceZoneRecordsModel(z.id, records.map(cfToRecord));
+        await upsertDnsZoneModel({
+            id: z.id,
+            name: z.name,
+            status: z.status,
+            paused: z.paused,
+            billing: mergeBilling(existing?.billing, reg),
+            recordCount: records.length,
+            lastSyncedAt: Date.now(),
+        });
+    }
+
+    const gone = await deleteDnsZonesNotInModel(zones.map((z) => z.id));
+    for (const zoneId of gone) {
+        await deleteRecordsForZoneModel(zoneId);
+        await setZoneAssignmentModel(zoneId, null);
+        await setDomainAllocationsModel(zoneId, []);
+        syncLog.info({ action: 'zone_pruned', zoneId }, `pruned zone ${zoneId} no longer present on Cloudflare`);
+    }
+
+    syncLog.debug({ action: 'sync_complete', zoneCount: zones.length }, `synced ${zones.length} Cloudflare zone(s)`);
+    return { zoneCount: zones.length };
+};
+
+// Leader-only, cron-driven mirror. Failures are logged and swallowed so the scheduler keeps running.
 export const syncCloudflare = async (): Promise<void> => {
     if (!cluster.isLeader() || !isCloudflareConfigured()) return;
     try {
-        const zones = await listZones();
-
-        const registrarByName = new Map<string, CfRegistrarDomain>();
-        if (isCloudflareRegistrarConfigured()) {
-            try {
-                for (const r of await listRegistrarDomains()) if (r.name) registrarByName.set(r.name.toLowerCase(), r);
-            } catch (e: any) {
-                syncLog.warn({ action: 'registrar_list_failed', err: e?.message }, 'could not list registrar domains (registrar API may be unavailable)');
-            }
-        }
-
-        for (const z of zones) {
-            const existing = await getDnsZoneModel(z.id);
-            const reg = registrarByName.get(z.name.toLowerCase());
-            const records = await listDnsRecords(z.id);
-            await replaceZoneRecordsModel(z.id, records.map(cfToRecord));
-            await upsertDnsZoneModel({
-                id: z.id,
-                name: z.name,
-                status: z.status,
-                paused: z.paused,
-                billing: mergeBilling(existing?.billing, reg),
-                recordCount: records.length,
-                lastSyncedAt: Date.now(),
-            });
-        }
-
-        const gone = await deleteDnsZonesNotInModel(zones.map((z) => z.id));
-        for (const zoneId of gone) {
-            await deleteRecordsForZoneModel(zoneId);
-            await setZoneAssignmentModel(zoneId, null);
-            await setDomainAllocationsModel(zoneId, []);
-            syncLog.info({ action: 'zone_pruned', zoneId }, `pruned zone ${zoneId} no longer present on Cloudflare`);
-        }
-
-        syncLog.debug({ action: 'sync_complete', zoneCount: zones.length }, `synced ${zones.length} Cloudflare zone(s)`);
+        await performCloudflareSync();
     } catch (e: any) {
         syncLog.error({ action: 'sync_failed', err: e?.message }, 'Cloudflare sync failed');
+    }
+};
+
+// On-demand sync triggered from the UI. Returns a structured result instead of throwing so the
+// caller can surface the exact Cloudflare error (e.g. an API-token permission failure) to the admin.
+export const syncCloudflareNow = async (): Promise<{ ok: boolean; zoneCount?: number; error?: string }> => {
+    if (!isCloudflareConfigured()) return { ok: false, error: 'Cloudflare is not configured (CLOUDFLARE_API_TOKEN missing)' };
+    try {
+        const { zoneCount } = await performCloudflareSync();
+        return { ok: true, zoneCount };
+    } catch (e: any) {
+        syncLog.error({ action: 'sync_failed', err: e?.message }, 'Cloudflare sync failed');
+        return { ok: false, error: e?.message || 'Cloudflare sync failed' };
     }
 };
 
