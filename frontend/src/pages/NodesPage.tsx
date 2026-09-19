@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Alert, Anchor, Badge, Button, Card, Center, Code, CopyButton, Group, Loader, Paper, SimpleGrid, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
-import { Link } from 'react-router-dom';
+import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Collapse, CopyButton, Group, Loader, Paper, SimpleGrid, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import { useNavigate } from 'react-router-dom';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useCluster } from '@/contexts/cluster-context';
 import { useAPI } from '@/utils/api';
-import { MdOutlineStar } from 'react-icons/md';
+import { MdExpandLess, MdExpandMore, MdOutlineStar } from 'react-icons/md';
 
 const relativeTime = (ts: number) => {
     if (!ts) return 'never';
@@ -23,6 +24,7 @@ const AddNodePanel = () => {
     const api = useAPI();
     const [command, setCommand] = useState<string | null>(null);
     const [deployPublicKey, setDeployPublicKey] = useState<string | null>(null);
+    const [opened, { toggle }] = useDisclosure(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -43,25 +45,24 @@ const AddNodePanel = () => {
     return (
         <Paper withBorder p="md" radius="md">
             <Stack gap="xs">
-                <Title order={4}>Add a node</Title>
-                <Text c="dimmed" size="sm">Run this on a fresh Ubuntu machine to install NSM and join it to this cluster. The cluster secret and this leader&apos;s address are already baked in.</Text>
-                <Group align="stretch" wrap="nowrap">
-                    <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{command}</Code>
-                    <CopyButton value={command}>
-                        {({ copied, copy }) => (
-                            <Button variant="light" color={copied ? 'green' : 'blue'} onClick={copy}>
-                                {copied ? 'Copied' : 'Copy'}
-                            </Button>
-                        )}
-                    </CopyButton>
+                <Group
+                    justify="space-between"
+                    align="center"
+                    wrap="nowrap"
+                    onClick={toggle}
+                    style={{ cursor: 'pointer' }}
+                >
+                    <Title order={4}>Add a node</Title>
+                    <ActionIcon variant="subtle" aria-label={opened ? 'Collapse' : 'Expand'}>
+                        {opened ? <MdExpandLess size={20} /> : <MdExpandMore size={20} />}
+                    </ActionIcon>
                 </Group>
-                {deployPublicKey && (
-                    <Stack gap={4}>
-                        <Text size="sm" fw={600}>Deploy public key</Text>
-                        <Text c="dimmed" size="xs">Register this once on GitHub (as a repo/org deploy key or a machine user) so nodes can clone your app repositories.</Text>
+                <Collapse in={opened}>
+                    <Stack gap="xs">
+                        <Text c="dimmed" size="sm">Run this on a fresh Ubuntu machine to install NSM and join it to this cluster. The cluster secret and this leader&apos;s address are already baked in.</Text>
                         <Group align="stretch" wrap="nowrap">
-                            <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{deployPublicKey}</Code>
-                            <CopyButton value={deployPublicKey}>
+                            <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{command}</Code>
+                            <CopyButton value={command}>
                                 {({ copied, copy }) => (
                                     <Button variant="light" color={copied ? 'green' : 'blue'} onClick={copy}>
                                         {copied ? 'Copied' : 'Copy'}
@@ -69,8 +70,24 @@ const AddNodePanel = () => {
                                 )}
                             </CopyButton>
                         </Group>
+                        {deployPublicKey && (
+                            <Stack gap={4}>
+                                <Text size="sm" fw={600}>Deploy public key</Text>
+                                <Text c="dimmed" size="xs">Register this once on GitHub (as a repo/org deploy key or a machine user) so nodes can clone your app repositories.</Text>
+                                <Group align="stretch" wrap="nowrap">
+                                    <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{deployPublicKey}</Code>
+                                    <CopyButton value={deployPublicKey}>
+                                        {({ copied, copy }) => (
+                                            <Button variant="light" color={copied ? 'green' : 'blue'} onClick={copy}>
+                                                {copied ? 'Copied' : 'Copy'}
+                                            </Button>
+                                        )}
+                                    </CopyButton>
+                                </Group>
+                            </Stack>
+                        )}
                     </Stack>
-                )}
+                </Collapse>
             </Stack>
         </Paper>
     );
@@ -79,6 +96,7 @@ const AddNodePanel = () => {
 const NodesPage = () => {
     const clusterCtx = useCluster();
     const status = clusterCtx.status;
+    const navigate = useNavigate();
 
     const reachableCount = status?.health.filter((h) => h.reachable).length ?? 0;
     const totalCount = status?.nodes.length ?? clusterCtx.nodes.length;
@@ -126,7 +144,7 @@ const NodesPage = () => {
                     {clusterCtx.status === null ? <Loader /> : <Text c="dimmed">No nodes registered yet.</Text>}
                 </Center>
             ) : (
-                <Table>
+                <Table highlightOnHover>
                     <Table.Thead>
                         <Table.Tr>
                             <Table.Th>Node ID</Table.Th>
@@ -145,7 +163,7 @@ const NodesPage = () => {
                             const reachable = health?.reachable ?? false;
                             const matches = status?.desiredNsmVersion ? health?.nsmVersion === status.desiredNsmVersion : true;
                             return (
-                                <Table.Tr key={node.nodeId}>
+                                <Table.Tr key={node.nodeId} style={{ cursor: 'pointer' }} onClick={() => navigate(`/nodes/${node.nodeId}`)}>
                                     <Table.Td>
                                         <Group gap={6}>
                                             {node.isLeader && (
@@ -155,9 +173,7 @@ const NodesPage = () => {
                                                     </span>
                                                 </Tooltip>
                                             )}
-                                            <Anchor component={Link} to={`/nodes/${node.nodeId}`} fw={600}>
-                                                {node.nodeId}
-                                            </Anchor>
+                                            <Text fw={600}>{node.nodeId}</Text>
                                         </Group>
                                     </Table.Td>
                                     <Table.Td>{node.address}</Table.Td>

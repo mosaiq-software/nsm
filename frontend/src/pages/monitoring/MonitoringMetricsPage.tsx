@@ -5,13 +5,11 @@ import { LogSelector, ObservabilityMetricsResult, Project, ProjectInstance, Proj
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
-import { useCluster } from '@/contexts/cluster-context';
 import { useMe } from '@/contexts/me-context';
 import { useAPI } from '@/utils/api';
 import { ResourceUsageBars } from '@/components/ResourceAllocation';
 import { formatAxisTime, formatBytes, formatBytesPerSec, formatCores } from '@/utils/format';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { LogViewer } from '@/components/LogViewer/LogViewer';
 import { MdOutlineRefresh } from 'react-icons/md';
 
 type MetricKind = 'cpu' | 'mem' | 'net';
@@ -36,7 +34,6 @@ const metricLabel = (metric: MetricKind) => {
     }
 };
 
-// Series display name shown in the tooltip for the single aggregated line.
 const metricSeriesLabel = (metric: MetricKind) => {
     switch (metric) {
         case 'cpu':
@@ -59,11 +56,10 @@ const metricFormatter = (metric: MetricKind): ((value: number) => string) => {
     }
 };
 
-const ProjectLogsPage = () => {
+const MonitoringMetricsPage = () => {
     const params = useParams();
     const projectId = params.projectId;
     const projectCtx = useProjects();
-    const clusterCtx = useCluster();
     const meCtx = useMe();
     const api = useAPI();
 
@@ -81,7 +77,6 @@ const ProjectLogsPage = () => {
         setProject(foundProject);
     }, [projectId, projectCtx.projects]);
 
-    // A service-instance scope requires the full instance to resolve its service instance ids.
     useEffect(() => {
         const header = project?.instances?.find((i) => i.id === scope);
         if (!header) {
@@ -123,7 +118,6 @@ const ProjectLogsPage = () => {
         return () => clearInterval(interval);
     }, [project, scope, rangeMs, metric]);
 
-    // Current resource usage for the usage-vs-allocation card (project-wide, independent of scope).
     useEffect(() => {
         if (!projectId) return;
         let cancelled = false;
@@ -140,8 +134,6 @@ const ProjectLogsPage = () => {
         };
     }, [projectId]);
 
-    // The metric expressions are aggregated with sum() on the backend, so the result is a single
-    // unlabelled line; collapse any returned series into one { time, value } line per timestamp.
     const chartData = useMemo(() => {
         const series = metrics?.series ?? [];
         if (series.length === 0) return [] as Record<string, number | string>[];
@@ -182,12 +174,7 @@ const ProjectLogsPage = () => {
 
     return (
         <Stack>
-            <ProjectHeader project={project} section="Logs & Metrics" />
-            {!clusterCtx.hasLeader && (
-                <Alert color="yellow" variant="light" title="Observability unavailable">
-                    Logs and metrics are served by the leader. No leader is currently reachable.
-                </Alert>
-            )}
+            <ProjectHeader project={project} section="Metrics" />
             <Group align="flex-end" justify="space-between">
                 <Group align="flex-end">
                     <Select label="Scope" data={scopeOptions} value={scope} onChange={(v) => setScope(v || PROJECT_SCOPE)} w={320} />
@@ -243,18 +230,15 @@ const ProjectLogsPage = () => {
                 <Group justify="space-between" align="center" mb="sm">
                     <Title order={5}>Resource Allocation</Title>
                     {meCtx.isAdmin && (
-                        <Anchor component={Link} to={`/p/${project.id}/config`} fz="sm">
+                        <Anchor component={Link} to={`/p/${project.id}/config/resources`} fz="sm">
                             Edit allocation
                         </Anchor>
                     )}
                 </Group>
                 <ResourceUsageBars quota={project.resourceQuota} usage={resourceUsage ?? undefined} />
             </Card>
-
-            <Title order={5}>Logs</Title>
-            <LogViewer selector={selector} facetFields={['serviceName', 'nodeId']} defaultColumns={['ts', 'serviceName', 'msg']} />
         </Stack>
     );
 };
 
-export default ProjectLogsPage;
+export default MonitoringMetricsPage;

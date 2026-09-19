@@ -1,7 +1,7 @@
-import { ActionIcon, Card, Group, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Button, Card, Group, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
-import { MdOutlineBolt, MdOutlineRefresh } from 'react-icons/md';
-import { LogViewer } from '@/components/LogViewer/LogViewer';
+import { Link } from 'react-router-dom';
+import { MdOutlineBolt, MdOutlineRefresh, MdOutlineViewList } from 'react-icons/md';
 import { useLiveProjectInstance } from '@/hooks/useLiveProjectInstance';
 import { BuildLogConsole } from './BuildLogConsole';
 import { DeploymentStateBadge, isInProgressState } from './DeploymentStateBadge';
@@ -41,11 +41,22 @@ export const DeploymentInstanceDetail = ({ header }: { header: ProjectInstanceHe
                             </Group>
                         )}
                     </Group>
-                    <Tooltip label="Refresh">
-                        <ActionIcon variant="light" onClick={() => void refresh()} loading={loading}>
-                            <MdOutlineRefresh />
-                        </ActionIcon>
-                    </Tooltip>
+                    <Group gap="xs" wrap="nowrap">
+                        <Button
+                            component={Link}
+                            to={`/p/${header.projectId}/monitoring/logs?instance=${header.id}`}
+                            variant="light"
+                            size="compact-sm"
+                            leftSection={<MdOutlineViewList />}
+                        >
+                            View logs
+                        </Button>
+                        <Tooltip label="Refresh">
+                            <ActionIcon variant="light" onClick={() => void refresh()} loading={loading}>
+                                <MdOutlineRefresh />
+                            </ActionIcon>
+                        </Tooltip>
+                    </Group>
                 </Group>
                 <SimpleGrid cols={{ base: 2, sm: 4 }} mt="md">
                     <SummaryField label="Created">{new Date(created).toLocaleString()}</SummaryField>
@@ -70,11 +81,6 @@ export const DeploymentInstanceDetail = ({ header }: { header: ProjectInstanceHe
                         ))}
                     </SimpleGrid>
                 )}
-            </Stack>
-
-            <Stack gap="xs">
-                <Title order={6}>Container Logs</Title>
-                <LogViewer selector={{ projectInstanceId: header.id }} facetFields={['serviceName', 'nodeId']} defaultColumns={['ts', 'serviceName', 'msg']} />
             </Stack>
         </Stack>
     );

@@ -6,6 +6,7 @@ import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { useProjects } from '@/contexts/project-context';
 import { useMe } from '@/contexts/me-context';
 import { useDomains } from '@/contexts/domains-context';
+import { useCluster } from '@/contexts/cluster-context';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Capability, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
@@ -26,6 +27,7 @@ const Layout = (props: { children: React.ReactNode }) => {
     const projectCtx = useProjects();
     const meCtx = useMe();
     const domainsCtx = useDomains();
+    const clusterCtx = useCluster();
     const userCtx = useUser();
     const navigate = useNavigate();
     const location = useLocation();
@@ -212,7 +214,10 @@ const Layout = (props: { children: React.ReactNode }) => {
                     </RouterLink>
                     {meCtx.isAdmin && (
                         <>
-                            <RouterLink to="/nodes" label="Nodes" showActive />
+                            <RouterLink to="/nodes" label="Nodes" showActive>
+                                {clusterCtx.nodes.length > 0 &&
+                                    clusterCtx.nodes.map((node) => <RouterLink to={`/nodes/${node.nodeId}`} label={node.nodeId} key={node.nodeId} showActive />)}
+                            </RouterLink>
                             <RouterLink to="/logs" label="NSM Logs" showActive />
                             <RouterLink to="/users" label="User Management" showActive />
                         </>
@@ -233,10 +238,23 @@ const Layout = (props: { children: React.ReactNode }) => {
                                     .filter((p) => p.capabilities.includes(Capability.VIEW))
                                     .map((project) => (
                                         <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive rightSection={<ProjectStatusChip projectId={project.id} />}>
-                                            {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/config`} label="Config" showActive />}
+                                            {project.capabilities.includes(Capability.CONFIGURE) && (
+                                                <RouterLink to={`/p/${project.id}/config`} label="Config" showActive>
+                                                    <RouterLink to={`/p/${project.id}/config/project`} label="Project" showActive />
+                                                    <RouterLink to={`/p/${project.id}/config/routing`} label="Routing" showActive />
+                                                    <RouterLink to={`/p/${project.id}/config/system`} label="System" showActive />
+                                                    <RouterLink to={`/p/${project.id}/config/resources`} label="Resources" showActive />
+                                                    <RouterLink to={`/p/${project.id}/config/keys`} label="Keys" showActive />
+                                                    <RouterLink to={`/p/${project.id}/config/webhooks`} label="Webhooks" showActive />
+                                                </RouterLink>
+                                            )}
                                             {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}
-                                            {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/logs`} label="Logs" showActive />}
-                                            <RouterLink to={`/p/${project.id}/status`} label="Status" showActive />
+                                            <RouterLink to={`/p/${project.id}/monitoring`} label="Monitoring" showActive>
+                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/logs`} label="Logs" showActive />}
+                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/metrics`} label="Metrics" showActive />}
+                                                <RouterLink to={`/p/${project.id}/monitoring/status`} label="Status" showActive />
+                                                <RouterLink to={`/p/${project.id}/monitoring/incidents`} label="Incidents" showActive />
+                                            </RouterLink>
                                         </RouterLink>
                                     ))}
                             {team.installed && team.capabilities.includes(Capability.CREATE_PROJECT) && (

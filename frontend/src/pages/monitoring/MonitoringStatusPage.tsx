@@ -6,7 +6,6 @@ import { useParams } from 'react-router-dom';
 import { useProjects } from '@/contexts/project-context';
 import { useAPI } from '@/utils/api';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { IncidentSection } from '@/components/IncidentSection';
 
 const WINDOWS: { value: UptimeWindowKey; label: string }[] = [
     { value: '24h', label: '24h' },
@@ -15,7 +14,6 @@ const WINDOWS: { value: UptimeWindowKey; label: string }[] = [
     { value: '90d', label: '90d' },
 ];
 
-// Mantine color name for each health status, used for badges and heatmap cells.
 const statusColor = (status: HealthStatus): string => {
     switch (status) {
         case HealthStatus.UP:
@@ -42,14 +40,13 @@ const statusLabel = (status: HealthStatus): string => {
     }
 };
 
-// Render a ratio as an uptime percentage with enough precision to distinguish "nines".
 const formatUptime = (ratio: number): string => `${(ratio * 100).toFixed(3)}%`;
 
 const CheckRow = ({ check }: { check: ProjectHealthCheck }) => {
     const kind = check.checkType === HealthCheckType.URL ? 'URL' : 'Container';
     return (
-        <Group justify="space-between" wrap="nowrap" gap="sm">
-            <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+        <Group wrap="nowrap" gap="sm" align="center">
+            <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
                 <Badge size="xs" variant="light" color="gray">
                     {kind}
                 </Badge>
@@ -57,23 +54,21 @@ const CheckRow = ({ check }: { check: ProjectHealthCheck }) => {
                     {check.target}
                 </Text>
             </Group>
-            <Group gap="xs" wrap="nowrap">
-                {check.latencyMs !== undefined && (
-                    <Text size="xs" c="dimmed">
-                        {check.latencyMs} ms
-                    </Text>
-                )}
+            <Text size="xs" c="dimmed" ta="right" w={70} style={{ flexShrink: 0 }}>
+                {check.latencyMs !== undefined ? `${check.latencyMs} ms` : ''}
+            </Text>
+            <Box w={110} style={{ flexShrink: 0 }}>
                 <Tooltip label={check.detail ?? statusLabel(check.status)} disabled={!check.detail}>
-                    <Badge color={statusColor(check.status)} variant="light">
+                    <Badge color={statusColor(check.status)} variant="light" fullWidth>
                         {statusLabel(check.status)}
                     </Badge>
                 </Tooltip>
-            </Group>
+            </Box>
         </Group>
     );
 };
 
-const HeatmapCell = ({ bucket }: { bucket: UptimeBucket }) => {
+const HeatmapBar = ({ bucket }: { bucket: UptimeBucket }) => {
     const label =
         bucket.sampleCount === 0
             ? `${new Date(bucket.start).toLocaleString()} — no data`
@@ -82,9 +77,10 @@ const HeatmapCell = ({ bucket }: { bucket: UptimeBucket }) => {
         <Tooltip label={label} withArrow>
             <Box
                 style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 3,
+                    flex: 1,
+                    minWidth: 0,
+                    height: 40,
+                    borderRadius: 2,
                     backgroundColor: `var(--mantine-color-${statusColor(bucket.status)}-6)`,
                     opacity: bucket.sampleCount === 0 ? 0.35 : 1,
                 }}
@@ -93,7 +89,7 @@ const HeatmapCell = ({ bucket }: { bucket: UptimeBucket }) => {
     );
 };
 
-const ProjectStatusPage = () => {
+const MonitoringStatusPage = () => {
     const params = useParams();
     const projectId = params.projectId;
     const projectCtx = useProjects();
@@ -147,7 +143,7 @@ const ProjectStatusPage = () => {
         <Stack>
             <ProjectHeader project={project} section="Status" />
 
-            <Card withBorder>
+            <Card withBorder maw={640}>
                 <Group justify="space-between" align="center">
                     <Title order={4}>Current status</Title>
                     <Badge size="lg" color={statusColor(overall)} variant="filled">
@@ -193,11 +189,11 @@ const ProjectStatusPage = () => {
                         No history yet.
                     </Text>
                 ) : (
-                    <Group gap={3} wrap="wrap">
+                    <Box style={{ display: 'flex', width: '100%', gap: 2, alignItems: 'stretch' }}>
                         {summary.buckets.map((b) => (
-                            <HeatmapCell key={b.start} bucket={b} />
+                            <HeatmapBar key={b.start} bucket={b} />
                         ))}
-                    </Group>
+                    </Box>
                 )}
                 <Group gap="lg" mt="md">
                     {[HealthStatus.UP, HealthStatus.DEGRADED, HealthStatus.DOWN, HealthStatus.UNKNOWN].map((s) => (
@@ -210,10 +206,8 @@ const ProjectStatusPage = () => {
                     ))}
                 </Group>
             </Card>
-
-            <IncidentSection projectId={project.id} />
         </Stack>
     );
 };
 
-export default ProjectStatusPage;
+export default MonitoringStatusPage;

@@ -1,29 +1,18 @@
-import { Accordion, ActionIcon, Alert, Anchor, Badge, Button, Card, Center, Group, Loader, Progress, SegmentedControl, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { Accordion, ActionIcon, Badge, Button, Card, Center, Group, Loader, Progress, SegmentedControl, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { LineChart } from '@mantine/charts';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { NodeFilesystemUsage, NodeMetricKind, NodeStorageSpec, ObservabilityMetricsResult, ProjectDiskUsage } from '@mosaiq/nsm-common/types';
+import { NodeFilesystemUsage, NodeStorageSpec, ObservabilityMetricsResult, ProjectDiskUsage } from '@mosaiq/nsm-common/types';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { MdArrowBack, MdOutlineCameraAlt, MdOutlineRefresh, MdOutlineSettings, MdOutlineStar } from 'react-icons/md';
-import { useCluster } from '@/contexts/cluster-context';
-import { useMe } from '@/contexts/me-context';
+import { useParams } from 'react-router-dom';
+import { MdOutlineCameraAlt, MdOutlineRefresh } from 'react-icons/md';
 import { useAPI } from '@/utils/api';
-import { NodeConfigModal } from '@/components/NodeConfigModal';
-import { NodePortAllocationCard } from '@/components/NodePortAllocationCard';
-import { formatAxisTime, formatBytes, formatBytesPerSec, formatPercent01 } from '@/utils/format';
+import { formatAxisTime, formatBytes } from '@/utils/format';
 
 const TIME_RANGES: { label: string; ms: number }[] = [
     { label: '1h', ms: 60 * 60 * 1000 },
     { label: '6h', ms: 6 * 60 * 60 * 1000 },
     { label: '24h', ms: 24 * 60 * 60 * 1000 },
     { label: '7d', ms: 7 * 24 * 60 * 60 * 1000 },
-];
-
-const METRIC_DEFS: { kind: NodeMetricKind; title: string; yLabel: string; color: string; format: (v: number) => string }[] = [
-    { kind: 'cpu', title: 'CPU', yLabel: 'CPU utilization', color: 'blue.6', format: formatPercent01 },
-    { kind: 'mem', title: 'Memory', yLabel: 'Memory used', color: 'teal.6', format: formatBytes },
-    { kind: 'net', title: 'Network', yLabel: 'Throughput', color: 'grape.6', format: formatBytesPerSec },
-    { kind: 'disk', title: 'Disk', yLabel: 'Disk used', color: 'orange.6', format: formatBytes },
 ];
 
 const PROJECT_PALETTE = ['blue.6', 'teal.6', 'grape.6', 'cyan.6', 'lime.6', 'pink.6', 'indigo.6', 'yellow.7', 'red.6', 'green.6'];
@@ -45,52 +34,8 @@ function relativeTime(ts: number): string {
     return new Date(ts).toLocaleString();
 }
 
-// Collapse a (possibly multi-series) node metric result into one { time, value } line by summing
-// series per timestamp - node-level expressions return a single series, but this is robust either way.
-function singleSeries(result: ObservabilityMetricsResult | undefined, rangeMs: number): { time: string; value: number }[] {
-    const byTime = new Map<number, number>();
-    for (const s of result?.series ?? []) {
-        for (const p of s.values) byTime.set(p.t, (byTime.get(p.t) ?? 0) + p.v);
-    }
-    return Array.from(byTime.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([t, v]) => ({ time: formatAxisTime(t, rangeMs), value: v }));
-}
-
 const fsKey = (device: string, mountpoint: string) => `${device}|${mountpoint}`;
 const projectLabel = (p: string) => (p === '__total__' ? 'All projects' : p);
-
-const MetricChart = ({ def, result, rangeMs }: { def: (typeof METRIC_DEFS)[number]; result?: ObservabilityMetricsResult; rangeMs: number }) => {
-    const data = useMemo(() => singleSeries(result, rangeMs), [result, rangeMs]);
-    return (
-        <Card withBorder>
-            <Title order={5} mb="sm">
-                {def.title}
-            </Title>
-            {data.length === 0 ? (
-                <Center py="xl">
-                    <Text c="dimmed">No data.</Text>
-                </Center>
-            ) : (
-                <LineChart
-                    h={200}
-                    data={data}
-                    dataKey="time"
-                    series={[{ name: 'value', label: def.title, color: def.color }]}
-                    curveType="monotone"
-                    withDots={false}
-                    strokeWidth={2}
-                    tickLine="y"
-                    gridAxis="y"
-                    yAxisLabel={def.yLabel}
-                    yAxisProps={{ width: 72 }}
-                    xAxisProps={{ minTickGap: 40 }}
-                    valueFormatter={def.format}
-                />
-            )}
-        </Card>
-    );
-};
 
 const ProjectBreakdown = ({ project, driveSize }: { project: ProjectDiskUsage; driveSize: number }) => {
     const total = project.totalBytes || project.volumeBytes + project.codeBytes;
@@ -205,23 +150,16 @@ const FilesystemCard = ({ fs, projects }: { fs: NodeFilesystemUsage; projects: P
     );
 };
 
-const NodeDetailPage = () => {
+const NodeStoragePage = () => {
     const params = useParams();
     const nodeId = params.nodeId as string;
-    const clusterCtx = useCluster();
-    const meCtx = useMe();
     const api = useAPI();
 
-    const [configOpen, setConfigOpen] = useState(false);
     const [rangeMs, setRangeMs] = useState<number>(TIME_RANGES[1].ms);
-    const [metrics, setMetrics] = useState<Partial<Record<NodeMetricKind, ObservabilityMetricsResult>>>({});
     const [storage, setStorage] = useState<NodeStorageSpec | null>(null);
     const [series, setSeries] = useState<ObservabilityMetricsResult | null>(null);
     const [loading, setLoading] = useState(false);
     const [snapshotting, setSnapshotting] = useState(false);
-
-    const node = clusterCtx.nodes.find((n) => n.nodeId === nodeId);
-    const health = clusterCtx.healthById[nodeId];
 
     const refresh = useCallback(async () => {
         if (!api.token) return;
@@ -231,15 +169,10 @@ const NodeDetailPage = () => {
         const end = `${Math.floor(now / 1000)}`;
         const step = rangeMs > 24 * 60 * 60 * 1000 ? '1h' : rangeMs > 6 * 60 * 60 * 1000 ? '10m' : '1m';
         try {
-            const [cpu, mem, net, disk, storageRes, seriesRes] = await Promise.all([
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'cpu', start, end, step }),
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'mem', start, end, step }),
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'net', start, end, step }),
-                api.get(API_ROUTES.GET_NODE_METRICS, {}, { nodeId, metric: 'disk', start, end, step }),
+            const [storageRes, seriesRes] = await Promise.all([
                 api.get(API_ROUTES.GET_NODE_STORAGE, {}, { nodeId }),
                 api.get(API_ROUTES.GET_NODE_STORAGE_SERIES, {}, { nodeId, start, end, step }),
             ]);
-            setMetrics({ cpu, mem, net, disk });
             if (storageRes) setStorage(storageRes);
             setSeries(seriesRes ?? { metric: 'disk', series: [] });
         } finally {
@@ -253,14 +186,6 @@ const NodeDetailPage = () => {
         const interval = setInterval(refresh, REFRESH_MS);
         return () => clearInterval(interval);
     }, [refresh]);
-
-    // Re-verify admin against a fresh /me before opening the editor (the modal, backend route, and
-    // node RPC all re-check too; this is the first of the layered checks).
-    const openConfig = async () => {
-        await meCtx.refresh();
-        if (!meCtx.isAdmin) return;
-        setConfigOpen(true);
-    };
 
     const takeSnapshot = async () => {
         setSnapshotting(true);
@@ -322,78 +247,7 @@ const NodeDetailPage = () => {
 
     return (
         <Stack>
-            <Group gap="xs">
-                <Anchor component={Link} to="/nodes" c="dimmed">
-                    <Group gap={4}>
-                        <MdArrowBack />
-                        <Text>Nodes</Text>
-                    </Group>
-                </Anchor>
-            </Group>
             <Group justify="space-between" align="center">
-                <Group gap="sm">
-                    {node?.isLeader && (
-                        <Tooltip label="Leader">
-                            <span style={{ display: 'inline-flex', color: 'var(--mantine-color-yellow-6)' }}>
-                                <MdOutlineStar />
-                            </span>
-                        </Tooltip>
-                    )}
-                    <Title order={2}>{nodeId}</Title>
-                    {node && (
-                        <Badge variant="light" color={node.isLeader ? 'yellow' : 'gray'}>
-                            {node.isLeader ? 'Leader' : 'Follower'}
-                        </Badge>
-                    )}
-                    {health && (
-                        <Badge variant="light" color={health.reachable ? 'green' : 'red'}>
-                            {health.reachable ? 'Reachable' : 'Unreachable'}
-                        </Badge>
-                    )}
-                </Group>
-                <Group>
-                    <SegmentedControl value={String(rangeMs)} onChange={(v) => setRangeMs(Number(v))} data={TIME_RANGES.map((r) => ({ value: String(r.ms), label: r.label }))} />
-                    <Tooltip label="Refresh">
-                        <ActionIcon variant="light" size="lg" onClick={refresh} loading={loading}>
-                            <MdOutlineRefresh />
-                        </ActionIcon>
-                    </Tooltip>
-                </Group>
-            </Group>
-
-            {!clusterCtx.hasLeader && (
-                <Alert color="yellow" variant="light" title="Metrics unavailable">
-                    Node metrics are served by the leader. No leader is currently reachable.
-                </Alert>
-            )}
-
-            <SimpleGrid cols={{ base: 1, md: 2 }}>
-                {METRIC_DEFS.map((def) => (
-                    <MetricChart key={def.kind} def={def} result={metrics[def.kind]} rangeMs={rangeMs} />
-                ))}
-            </SimpleGrid>
-
-            {meCtx.isAdmin && (
-                <Card withBorder mt="md">
-                    <Group justify="space-between" align="center" wrap="nowrap">
-                        <Stack gap={2}>
-                            <Title order={4}>Configuration</Title>
-                            <Text size="sm" c="dimmed">
-                                Edit this node's environment variables. Saving rewrites the node's nsm.env and restarts the daemon to apply the changes.
-                            </Text>
-                        </Stack>
-                        <Button leftSection={<MdOutlineSettings />} variant="light" onClick={openConfig}>
-                            Edit configuration
-                        </Button>
-                    </Group>
-                </Card>
-            )}
-
-            {configOpen && <NodeConfigModal nodeId={nodeId} isLeader={!!node?.isLeader} isAdmin={meCtx.isAdmin} onClose={() => setConfigOpen(false)} />}
-
-            {meCtx.isAdmin && <NodePortAllocationCard nodeId={nodeId} />}
-
-            <Group justify="space-between" align="center" mt="md">
                 <Title order={3}>Storage</Title>
                 <Group gap="sm">
                     {storage && (
@@ -401,6 +255,12 @@ const NodeDetailPage = () => {
                             Snapshot {relativeTime(storage.capturedAt)}
                         </Text>
                     )}
+                    <SegmentedControl value={String(rangeMs)} onChange={(v) => setRangeMs(Number(v))} data={TIME_RANGES.map((r) => ({ value: String(r.ms), label: r.label }))} />
+                    <Tooltip label="Refresh">
+                        <ActionIcon variant="light" size="lg" onClick={refresh} loading={loading}>
+                            <MdOutlineRefresh />
+                        </ActionIcon>
+                    </Tooltip>
                     <Button leftSection={<MdOutlineCameraAlt />} variant="light" onClick={takeSnapshot} loading={snapshotting}>
                         Take snapshot
                     </Button>
@@ -474,4 +334,4 @@ const NodeDetailPage = () => {
     );
 };
 
-export default NodeDetailPage;
+export default NodeStoragePage;

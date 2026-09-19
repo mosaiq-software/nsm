@@ -2,13 +2,12 @@ import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useUser } from '@/contexts/user-context';
 import { useMe } from '@/contexts/me-context';
-import { Alert, Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Badge, Button, Card, Group, Loader, Stack, Table, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { Capability, DeploymentState, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { deriveProjectState } from '@/utils/projectStatus';
 import { summarizeDeployQueue, formatDeployEta } from '@/utils/deployQueue';
 import { useAPI } from '@/utils/api';
@@ -40,10 +39,10 @@ const attentionItemsFor = (project: Project, state: DeploymentState | undefined)
         items.push({ project, kind: 'failed', message: 'Last deploy failed', action: 'View deploy', to: `/p/${project.id}/deploy`, color: 'red' });
     }
     if (!project.hasDockerCompose) {
-        items.push({ project, kind: 'nocompose', message: "No docker-compose detected \u2014 can't deploy", action: 'Configure', to: `/p/${project.id}/config`, color: 'orange' });
+        items.push({ project, kind: 'nocompose', message: "No docker-compose detected \u2014 can't deploy", action: 'Configure', to: `/p/${project.id}/config/system`, color: 'orange' });
     }
     if (!project.workerNodeId) {
-        items.push({ project, kind: 'unassigned', message: "No node assigned \u2014 can't deploy", action: 'Assign node', to: `/p/${project.id}/config`, color: 'orange' });
+        items.push({ project, kind: 'unassigned', message: "No node assigned \u2014 can't deploy", action: 'Assign node', to: `/p/${project.id}/config/project`, color: 'orange' });
     }
     if (project.dirtyConfig) {
         items.push({ project, kind: 'drift', message: 'Config changed since last deploy', action: 'Deploy', to: `/p/${project.id}/deploy`, color: 'yellow' });
@@ -113,54 +112,6 @@ const DashboardPage = () => {
                     </Stack>
                 </Card>
             )}
-
-            <Stack gap="sm">
-                <Title order={4}>My Projects</Title>
-                {projects.length === 0 ? (
-                    <Text c="dimmed">No projects yet. Create one from the sidebar.</Text>
-                ) : (
-                    <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-                        {projects.map((project) => (
-                            <Card key={project.id} withBorder>
-                                <Stack gap="xs">
-                                    <Group justify="space-between" align="center" wrap="nowrap">
-                                        <Text fw={600} truncate>
-                                            {project.id}
-                                        </Text>
-                                        <ProjectStatusChip projectId={project.id} />
-                                    </Group>
-                                    <Text c="dimmed" size="sm">
-                                        {project.repoOwner}/{project.repoName}
-                                    </Text>
-                                    <Text c="dimmed" size="sm">
-                                        Node: {project.workerNodeId ?? 'Unassigned'}
-                                    </Text>
-                                    <Group gap="xs" mt="xs">
-                                        <Button component={Link} to={`/p/${project.id}`} size="compact-sm" variant="light">
-                                            Open
-                                        </Button>
-                                        {meCtx.canProject(project.id, Capability.DEPLOY) && (
-                                            <Button component={Link} to={`/p/${project.id}/deploy`} size="compact-sm" variant="subtle">
-                                                Deploy
-                                            </Button>
-                                        )}
-                                        {meCtx.canProject(project.id, Capability.DEPLOY) && (
-                                            <Button component={Link} to={`/p/${project.id}/logs`} size="compact-sm" variant="subtle">
-                                                Logs
-                                            </Button>
-                                        )}
-                                        {meCtx.canProject(project.id, Capability.CONFIGURE) && (
-                                            <Button component={Link} to={`/p/${project.id}/config`} size="compact-sm" variant="subtle">
-                                                Config
-                                            </Button>
-                                        )}
-                                    </Group>
-                                </Stack>
-                            </Card>
-                        ))}
-                    </SimpleGrid>
-                )}
-            </Stack>
 
             <Card withBorder>
                 <Stack gap="sm">

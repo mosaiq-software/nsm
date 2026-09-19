@@ -93,7 +93,7 @@ const ProjectPage = () => {
             </SimpleGrid>
             <Group>
                 {meCtx.canProject(project.id, Capability.CONFIGURE) && (
-                    <Button component={Link} to={`/p/${project.id}/config`} variant="light" leftSection={<MdOutlineSettings />}>
+                    <Button component={Link} to={`/p/${project.id}/config/project`} variant="light" leftSection={<MdOutlineSettings />}>
                         Configure
                     </Button>
                 )}
@@ -103,7 +103,7 @@ const ProjectPage = () => {
                     </Button>
                 )}
                 {meCtx.canProject(project.id, Capability.DEPLOY) && (
-                    <Button component={Link} to={`/p/${project.id}/logs`} variant="light" leftSection={<MdOutlineViewList />}>
+                    <Button component={Link} to={`/p/${project.id}/monitoring/logs`} variant="light" leftSection={<MdOutlineViewList />}>
                         Logs & Metrics
                     </Button>
                 )}

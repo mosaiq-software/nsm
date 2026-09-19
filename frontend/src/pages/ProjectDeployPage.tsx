@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Anchor, Box, Button, Card, Center, CopyButton, Divider, Group, Loader, Modal, PasswordInput, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { Alert, Button, Card, Center, Divider, Group, Loader, Modal, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { Capability, DeploymentState, FullDirectoryMap, Project, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
@@ -8,8 +8,8 @@ import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useMe } from '@/contexts/me-context';
 import { ProjectHeader } from '@/components/ProjectHeader';
-import { CdWizard } from '@/components/cicd/CdWizard';
-import { MdOutlineCancel, MdOutlineCheckBox, MdOutlineDelete, MdOutlineInsertLink, MdOutlineKey, MdOutlineRocketLaunch, MdOutlineSync } from 'react-icons/md';
+import { CdWizardLauncher } from '@/components/cicd/CdWizardLauncher';
+import { MdOutlineCancel, MdOutlineDelete, MdOutlineRocketLaunch } from 'react-icons/md';
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 import { DeploymentInstanceList } from '@/components/deploy/DeploymentInstanceList';
 import { DeploymentInstanceDetail } from '@/components/deploy/DeploymentInstanceDetail';
@@ -27,8 +27,7 @@ const ProjectDeployPage = () => {
     const clusterCtx = useCluster();
     const meCtx = useMe();
     const [project, setProject] = useState<Project | undefined | null>(undefined);
-    const [modal, setModal] = useState<'reset-key' | 'deploy' | 'teardown' | 'cancel' | 'cd-wizard' | 'cd-remove' | null>(null);
-    const [removingCd, setRemovingCd] = useState(false);
+    const [modal, setModal] = useState<'deploy' | 'teardown' | 'cancel' | null>(null);
     const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
     const [pendingHeader, setPendingHeader] = useState<ProjectInstanceHeader | null>(null);
 
@@ -120,18 +119,6 @@ const ProjectDeployPage = () => {
         void projectCtx.refresh();
     };
 
-    const handleResetDeployKey = async () => {
-        if (!project) return;
-        notifications.show({ message: 'Resetting deployment key...', color: 'blue' });
-        const newKey = await api.post(API_ROUTES.POST_RESET_DEPLOYMENT_KEY, { projectId: project.id }, {});
-        if (!newKey) {
-            notifications.show({ message: 'Failed to reset deployment key!', color: 'red' });
-            return;
-        }
-        notifications.show({ message: 'Deployment key reset successful!', color: 'green' });
-        projectCtx.update(project.id, { deploymentKey: newKey }, true);
-    };
-
     const handleTeardown = async () => {
         if (!project) return;
         notifications.show({ message: 'Tearing down project...', color: 'blue' });
@@ -151,62 +138,19 @@ const ProjectDeployPage = () => {
         }
     };
 
-    const handleRemoveCd = async () => {
-        if (!project) return;
-        setRemovingCd(true);
-        notifications.show({ message: 'Removing CI/CD...', color: 'orange' });
-        try {
-            const updated = await api.post(API_ROUTES.POST_CICD_REMOVE, { projectId: project.id }, {});
-            if (!updated) {
-                notifications.show({ message: 'Failed to remove CI/CD', color: 'red' });
-                return;
-            }
-            projectCtx.update(project.id, { cicd: undefined }, true);
-            notifications.show({ message: 'CI/CD removed', color: 'green' });
-        } catch {
-            notifications.show({ message: 'Failed to remove CI/CD', color: 'red' });
-        } finally {
-            setRemovingCd(false);
-        }
-    };
-
     // The team the project belongs to (used to hide the CD card when the App isn't installed).
     const projectTeam = meCtx.teams.find((t) => t.projects.some((p) => p.id === project.id));
     const canConfigure = meCtx.canProject(project.id, Capability.CONFIGURE);
     const cdCardVisible = canConfigure && !!projectTeam?.installed;
-    const cd = project.cicd;
 
     const queueStatus = deployQueueStatusFor(clusterCtx.status, project.id);
     const inQueue = queueStatus.state !== null;
     const canDeploy = project.hasDockerCompose && clusterCtx.hasLeader && !inQueue && project.state !== DeploymentState.DEPLOYING && project.state !== DeploymentState.DESTROYING;
 
-    const deployUrl = `${window.location.origin}/deploy/${project.id}/${project.deploymentKey}`;
-
     const selectedHeader = headers.find((h) => h.id === selectedInstanceId) ?? null;
 
     return (
         <Stack>
-            <Modal opened={modal === 'reset-key'} onClose={() => setModal(null)} withCloseButton={false}>
-                <Stack>
-                    <Title order={3}>Reset Deployment Key</Title>
-                    <Text>Resetting the deployment key will regenerate it. All CI/CD pipelines using the old key will fail.</Text>
-                    <Group justify="space-between">
-                        <Button variant="filled" onClick={() => setModal(null)}>
-                            No. Keep The Key.
-                        </Button>
-                        <Button
-                            variant="light"
-                            color="red"
-                            onClick={() => {
-                                handleResetDeployKey();
-                                setModal(null);
-                            }}
-                        >
-                            Yes. Reset The Key.
-                        </Button>
-                    </Group>
-                </Stack>
-            </Modal>
             <Modal opened={modal === 'deploy'} onClose={() => setModal(null)} withCloseButton={false}>
                 <Stack>
                     <Title order={3}>Deploy Project</Title>
@@ -282,39 +226,6 @@ const ProjectDeployPage = () => {
                     </Group>
                 </Stack>
             </Modal>
-            <Modal opened={modal === 'cd-wizard'} onClose={() => setModal(null)} title="Set up Continuous Deployment" size="lg">
-                <CdWizard
-                    project={project}
-                    onCancel={() => setModal(null)}
-                    onComplete={(updated) => {
-                        projectCtx.update(project.id, { cicd: updated.cicd, allowCICD: updated.allowCICD }, true);
-                        setModal(null);
-                    }}
-                />
-            </Modal>
-            <Modal opened={modal === 'cd-remove'} onClose={() => setModal(null)} withCloseButton={false}>
-                <Stack>
-                    <Title order={3}>Remove Continuous Deployment</Title>
-                    <Text>
-                        This deletes the managed workflow file{cd?.viaPr ? ' and its pull-request branch' : ''} and the deploy-key repository secret. To change the configuration, remove it and run the wizard again.
-                    </Text>
-                    <Group justify="space-between">
-                        <Button variant="filled" onClick={() => setModal(null)}>
-                            No. Keep CI/CD.
-                        </Button>
-                        <Button
-                            variant="light"
-                            color="red"
-                            onClick={() => {
-                                handleRemoveCd();
-                                setModal(null);
-                            }}
-                        >
-                            Yes. Remove CI/CD.
-                        </Button>
-                    </Group>
-                </Stack>
-            </Modal>
             <ProjectHeader project={project} section="Deployment" />
 
             <Card withBorder>
@@ -343,82 +254,10 @@ const ProjectDeployPage = () => {
                             Teardown
                         </Button>
                     </Group>
-                    <Group align="flex-end" wrap="nowrap">
-                        <PasswordInput label="Deployment Key" value={project.deploymentKey} readOnly w={'32ch'} />
-                        <CopyButton value={project.deploymentKey ?? ''}>
-                            {({ copied, copy }) => (
-                                <Tooltip label={'Copy key'} withArrow>
-                                    <ActionIcon variant={copied ? 'filled' : 'light'} onClick={copy} size="input-sm">
-                                        {copied ? <MdOutlineCheckBox /> : <MdOutlineKey />}
-                                    </ActionIcon>
-                                </Tooltip>
-                            )}
-                        </CopyButton>
-                        <CopyButton value={deployUrl}>
-                            {({ copied, copy }) => (
-                                <Tooltip label={'Copy Deploy URL'} withArrow>
-                                    <ActionIcon variant={copied ? 'filled' : 'light'} onClick={copy} size="input-sm">
-                                        {copied ? <MdOutlineCheckBox /> : <MdOutlineInsertLink />}
-                                    </ActionIcon>
-                                </Tooltip>
-                            )}
-                        </CopyButton>
-                        <Box flex={1} h="md">
-                            <Divider />
-                        </Box>
-                        <Button color="red" variant="light" onClick={() => setModal('reset-key')}>
-                            Reset Key
-                        </Button>
-                    </Group>
                 </Stack>
             </Card>
 
-            {cdCardVisible && (
-                <Card withBorder>
-                    <Stack>
-                        <Group justify="space-between">
-                            <Group gap="xs">
-                                <MdOutlineSync />
-                                <Title order={5}>Continuous Deployment</Title>
-                            </Group>
-                            {cd?.managed ? (
-                                <Button variant="light" color="red" leftSection={<MdOutlineDelete />} loading={removingCd} onClick={() => setModal('cd-remove')}>
-                                    Remove CD
-                                </Button>
-                            ) : (
-                                <Button variant="light" leftSection={<MdOutlineRocketLaunch />} onClick={() => setModal('cd-wizard')}>
-                                    Set up CI/CD
-                                </Button>
-                            )}
-                        </Group>
-                        {cd?.managed ? (
-                            <Stack gap={4}>
-                                <Text size="sm">
-                                    Triggers: <b>{cd.triggers.join(', ')}</b>
-                                </Text>
-                                <Text size="sm">
-                                    Deploy branch: <b>{cd.branch}</b>
-                                </Text>
-                                <Text size="sm">
-                                    Workflow file: <b>{cd.workflowPath}</b>
-                                </Text>
-                                {cd.prUrl && (
-                                    <Text size="sm">
-                                        Pull request:{' '}
-                                        <Anchor href={cd.prUrl} target="_blank" rel="noreferrer">
-                                            {cd.prUrl}
-                                        </Anchor>
-                                    </Text>
-                                )}
-                            </Stack>
-                        ) : (
-                            <Text size="sm" c="dimmed">
-                                Let NSM provision a managed GitHub Actions workflow that deploys this project automatically. The deploy key is stored as an encrypted repository secret.
-                            </Text>
-                        )}
-                    </Stack>
-                </Card>
-            )}
+            {cdCardVisible && <CdWizardLauncher project={project} />}
 
             {!project.hasDockerCompose && (
                 <Alert color="red" variant="filled" title="Undeployable Project">
@@ -437,7 +276,7 @@ const ProjectDeployPage = () => {
             {!project.workerNodeId && (
                 <Alert color="yellow" variant="light" title="No Node Assigned">
                     This project is not assigned to a node.{' '}
-                    <Link to={`/p/${project.id}/config`} style={{ textDecoration: 'underline' }}>
+                    <Link to={`/p/${project.id}/config/project`} style={{ textDecoration: 'underline' }}>
                         Assign a node
                     </Link>{' '}
                     before deploying.
