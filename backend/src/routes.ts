@@ -240,8 +240,9 @@ privateRouter.get(API_ROUTES.GET_JOIN_INFO, async (_req, res) => {
     res.status(200).json(payload);
 });
 
-privateRouter.get(API_ROUTES.GET_CONTROL_PLANE_STATUS, async (_req, res) => {
-    res.status(200).json(await getControlPlaneStatus());
+privateRouter.get(API_ROUTES.GET_CONTROL_PLANE_STATUS, async (req, res) => {
+    const user = await getRequestUser(req);
+    res.status(200).json(await getControlPlaneStatus(user));
 });
 
 // The permission-aware view driving the UI: the signed-in user's teams, projects and capabilities.

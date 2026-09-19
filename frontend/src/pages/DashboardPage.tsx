@@ -1,34 +1,17 @@
 import { useProjects } from '@/contexts/project-context';
 import { useCluster } from '@/contexts/cluster-context';
 import { useUser } from '@/contexts/user-context';
-import { Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { useMe } from '@/contexts/me-context';
+import { Alert, Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { DeploymentState } from '@mosaiq/nsm-common/types';
+import { Capability, DeploymentState, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { DeployQueueBadge } from '@/components/DeployQueueBadge';
+import { ProjectStatusChip } from '@/components/ProjectStatusChip';
+import { deriveProjectState } from '@/utils/projectStatus';
+import { summarizeDeployQueue } from '@/utils/deployQueue';
 import { useAPI } from '@/utils/api';
-
-const stateColor = (state?: DeploymentState) => {
-    switch (state) {
-        case DeploymentState.HEALTHY:
-        case DeploymentState.DEPLOYED:
-            return 'green';
-        case DeploymentState.DEPLOYING:
-            return 'blue';
-        case DeploymentState.QUEUED:
-            return 'grape';
-        case DeploymentState.FAILED:
-            return 'red';
-        case DeploymentState.CANCELLED:
-            return 'gray';
-        case DeploymentState.DESTROYING:
-            return 'orange';
-        default:
-            return 'gray';
-    }
-};
 
 const relativeTime = (ts: number): string => {
     const secs = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -37,10 +20,42 @@ const relativeTime = (ts: number): string => {
     return `${mins}m ago`;
 };
 
+type AttentionKind = 'failed' | 'drift' | 'unassigned' | 'nocompose';
+
+interface AttentionItem {
+    project: Project;
+    kind: AttentionKind;
+    message: string;
+    action: string;
+    to: string;
+    color: string;
+}
+
+// Surface the things a project owner actually needs to act on, in priority order per project. These
+// are the "debug" entry points: a failed deploy, config that drifted from what's live, or a project
+// that structurally can't deploy yet (no node / no compose file).
+const attentionItemsFor = (project: Project, state: DeploymentState | undefined): AttentionItem[] => {
+    const items: AttentionItem[] = [];
+    if (state === DeploymentState.FAILED) {
+        items.push({ project, kind: 'failed', message: 'Last deploy failed', action: 'View deploy', to: `/p/${project.id}/deploy`, color: 'red' });
+    }
+    if (!project.hasDockerCompose) {
+        items.push({ project, kind: 'nocompose', message: "No docker-compose detected \u2014 can't deploy", action: 'Configure', to: `/p/${project.id}/config`, color: 'orange' });
+    }
+    if (!project.workerNodeId) {
+        items.push({ project, kind: 'unassigned', message: "No node assigned \u2014 can't deploy", action: 'Assign node', to: `/p/${project.id}/config`, color: 'orange' });
+    }
+    if (project.dirtyConfig) {
+        items.push({ project, kind: 'drift', message: 'Config changed since last deploy', action: 'Deploy', to: `/p/${project.id}/deploy`, color: 'yellow' });
+    }
+    return items;
+};
+
 const DashboardPage = () => {
     const [queryParams, setQueryParams] = useSearchParams();
     const token = queryParams.get('token');
     const userCtx = useUser();
+    const meCtx = useMe();
     const projectCtx = useProjects();
     const clusterCtx = useCluster();
     const navigate = useNavigate();
@@ -63,176 +78,190 @@ const DashboardPage = () => {
         }
     };
 
-    const reachable = clusterCtx.status?.health.filter((h) => h.reachable).length ?? 0;
-    const deployQueue = clusterCtx.status?.deployQueue;
-    const deploying = deployQueue?.deploying ?? [];
-    // Include the leader planning slot only if it isn't already reflected in `deploying`.
-    const active = deployQueue?.active && !deploying.some((d) => d.projectId === deployQueue.active!.projectId) ? deployQueue.active : null;
-    const deployingRows = [...(active ? [active] : []), ...deploying];
-    const queued = deployQueue?.queued ?? [];
-    const queueCount = deployingRows.length + queued.length;
+    const projects = projectCtx.projects;
+    const stateOf = (project: Project): DeploymentState => projectCtx.statusById[project.id] ?? deriveProjectState(project);
+
+    const attention = projects.flatMap((project) => attentionItemsFor(project, stateOf(project)));
+
+    const queue = summarizeDeployQueue(clusterCtx.status);
+    const canCancel = (projectId: string) => meCtx.canProject(projectId, Capability.DEPLOY);
+    const queueHasActivity = queue.deploying.length + queue.queued.length + queue.hiddenDeploying + queue.hiddenQueued > 0;
 
     return (
         <Stack>
-            <Group>
-                <Title order={2}>NSM Dashboard</Title>
-            </Group>
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+            <Title order={2}>Dashboard</Title>
+
+            {attention.length > 0 && (
                 <Card withBorder>
-                    <Stack gap={4}>
-                        <Text c="dimmed" size="sm">
-                            Projects
-                        </Text>
-                        <Title order={3}>{projectCtx.projects.length}</Title>
+                    <Stack gap="sm">
+                        <Title order={4}>Needs attention</Title>
+                        <Stack gap="xs">
+                            {attention.map((item) => (
+                                <Alert key={`${item.project.id}-${item.kind}`} color={item.color} variant="light" p="xs">
+                                    <Group justify="space-between" align="center" wrap="nowrap">
+                                        <Group gap="xs" wrap="nowrap">
+                                            <Text fw={600}>{item.project.id}</Text>
+                                            <Text size="sm">{item.message}</Text>
+                                        </Group>
+                                        <Button component={Link} to={item.to} size="compact-sm" variant="light" color={item.color}>
+                                            {item.action}
+                                        </Button>
+                                    </Group>
+                                </Alert>
+                            ))}
+                        </Stack>
                     </Stack>
                 </Card>
-                <Card withBorder>
-                    <Stack gap={4}>
-                        <Text c="dimmed" size="sm">
-                            Nodes
-                        </Text>
-                        <Title order={3}>{clusterCtx.nodes.length}</Title>
-                    </Stack>
-                </Card>
-                <Card withBorder>
-                    <Stack gap={4}>
-                        <Text c="dimmed" size="sm">
-                            Reachable Nodes
-                        </Text>
-                        <Title order={3}>{reachable}</Title>
-                    </Stack>
-                </Card>
-                <Card withBorder>
-                    <Stack gap={4}>
-                        <Text c="dimmed" size="sm">
-                            Leader
-                        </Text>
-                        <Title order={3}>{clusterCtx.leader?.nodeId ?? 'None'}</Title>
-                    </Stack>
-                </Card>
-            </SimpleGrid>
+            )}
+
+            <Stack gap="sm">
+                <Title order={4}>My Projects</Title>
+                {projects.length === 0 ? (
+                    <Text c="dimmed">No projects yet. Create one from the sidebar.</Text>
+                ) : (
+                    <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
+                        {projects.map((project) => (
+                            <Card key={project.id} withBorder>
+                                <Stack gap="xs">
+                                    <Group justify="space-between" align="center" wrap="nowrap">
+                                        <Text fw={600} truncate>
+                                            {project.id}
+                                        </Text>
+                                        <ProjectStatusChip projectId={project.id} />
+                                    </Group>
+                                    <Text c="dimmed" size="sm">
+                                        {project.repoOwner}/{project.repoName}
+                                    </Text>
+                                    <Text c="dimmed" size="sm">
+                                        Node: {project.workerNodeId ?? 'Unassigned'}
+                                    </Text>
+                                    <Group gap="xs" mt="xs">
+                                        <Button component={Link} to={`/p/${project.id}`} size="compact-sm" variant="light">
+                                            Open
+                                        </Button>
+                                        {meCtx.canProject(project.id, Capability.DEPLOY) && (
+                                            <Button component={Link} to={`/p/${project.id}/deploy`} size="compact-sm" variant="subtle">
+                                                Deploy
+                                            </Button>
+                                        )}
+                                        {meCtx.canProject(project.id, Capability.DEPLOY) && (
+                                            <Button component={Link} to={`/p/${project.id}/logs`} size="compact-sm" variant="subtle">
+                                                Logs
+                                            </Button>
+                                        )}
+                                        {meCtx.canProject(project.id, Capability.CONFIGURE) && (
+                                            <Button component={Link} to={`/p/${project.id}/config`} size="compact-sm" variant="subtle">
+                                                Config
+                                            </Button>
+                                        )}
+                                    </Group>
+                                </Stack>
+                            </Card>
+                        ))}
+                    </SimpleGrid>
+                )}
+            </Stack>
+
             <Card withBorder>
                 <Stack gap="sm">
-                    <Group justify="space-between" align="center">
-                        <Title order={4}>Deploy Queue</Title>
-                        <Badge color={queueCount > 0 ? 'grape' : 'gray'} variant="light">
-                            {queueCount} {queueCount === 1 ? 'deploy' : 'deploys'}
-                        </Badge>
-                    </Group>
-                    {queueCount === 0 ? (
+                    <Title order={4}>Deploy activity</Title>
+                    {!queueHasActivity ? (
                         <Text c="dimmed" size="sm">
                             No deploys in progress. Deploys run one at a time.
                         </Text>
                     ) : (
-                        <Table>
-                            <Table.Thead>
-                                <Table.Tr>
-                                    <Table.Th w={110}>Position</Table.Th>
-                                    <Table.Th>Project</Table.Th>
-                                    <Table.Th>Since</Table.Th>
-                                    <Table.Th w={110} />
-                                </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                                {deployingRows.map((entry) => (
-                                    <Table.Tr key={entry.instanceId} onClick={() => navigate(`/p/${entry.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
-                                        <Table.Td>
-                                            <Group gap={6} wrap="nowrap">
-                                                <Loader size="xs" />
-                                                <Badge color="blue" variant="light">
-                                                    Deploying
-                                                </Badge>
-                                            </Group>
-                                        </Table.Td>
-                                        <Table.Td>
-                                            <Text fw={600}>{entry.projectId}</Text>
-                                        </Table.Td>
-                                        <Table.Td>{relativeTime(entry.startedAt)}</Table.Td>
-                                        <Table.Td>
-                                            <Button
-                                                size="compact-xs"
-                                                color="red"
-                                                variant="light"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleCancelDeploy(entry.projectId);
-                                                }}
-                                            >
-                                                Cancel
-                                            </Button>
-                                        </Table.Td>
-                                    </Table.Tr>
-                                ))}
-                                {queued.map((entry, idx) => (
-                                    <Table.Tr key={entry.instanceId} onClick={() => navigate(`/p/${entry.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
-                                        <Table.Td>
-                                            <Badge color="grape" variant="light">
-                                                #{idx + 1}
-                                            </Badge>
-                                        </Table.Td>
-                                        <Table.Td>
-                                            <Text fw={600}>{entry.projectId}</Text>
-                                        </Table.Td>
-                                        <Table.Td>queued {relativeTime(entry.enqueuedAt)}</Table.Td>
-                                        <Table.Td>
-                                            <Button
-                                                size="compact-xs"
-                                                color="red"
-                                                variant="light"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleCancelDeploy(entry.projectId);
-                                                }}
-                                            >
-                                                Cancel
-                                            </Button>
-                                        </Table.Td>
-                                    </Table.Tr>
-                                ))}
-                            </Table.Tbody>
-                        </Table>
+                        <Stack gap="sm">
+                            {queue.deploying.length + queue.queued.length > 0 && (
+                                <Table>
+                                    <Table.Thead>
+                                        <Table.Tr>
+                                            <Table.Th w={110}>Position</Table.Th>
+                                            <Table.Th>Project</Table.Th>
+                                            <Table.Th>Since</Table.Th>
+                                            <Table.Th w={110} />
+                                        </Table.Tr>
+                                    </Table.Thead>
+                                    <Table.Tbody>
+                                        {queue.deploying.map((entry) => (
+                                            <Table.Tr key={entry.instanceId} onClick={() => navigate(`/p/${entry.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
+                                                <Table.Td>
+                                                    <Group gap={6} wrap="nowrap">
+                                                        <Loader size="xs" />
+                                                        <Badge color="blue" variant="light">
+                                                            Deploying
+                                                        </Badge>
+                                                    </Group>
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    <Text fw={600}>{entry.projectId}</Text>
+                                                </Table.Td>
+                                                <Table.Td>{relativeTime(entry.startedAt)}</Table.Td>
+                                                <Table.Td>
+                                                    {canCancel(entry.projectId) && (
+                                                        <Button
+                                                            size="compact-xs"
+                                                            color="red"
+                                                            variant="light"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleCancelDeploy(entry.projectId);
+                                                            }}
+                                                        >
+                                                            Cancel
+                                                        </Button>
+                                                    )}
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        ))}
+                                        {queue.queued.map(({ entry, position }) => (
+                                            <Table.Tr key={entry.instanceId} onClick={() => navigate(`/p/${entry.projectId}/deploy`)} style={{ cursor: 'pointer' }}>
+                                                <Table.Td>
+                                                    <Badge color="grape" variant="light">
+                                                        #{position}
+                                                    </Badge>
+                                                </Table.Td>
+                                                <Table.Td>
+                                                    <Text fw={600}>{entry.projectId}</Text>
+                                                </Table.Td>
+                                                <Table.Td>queued {relativeTime(entry.enqueuedAt)}</Table.Td>
+                                                <Table.Td>
+                                                    {canCancel(entry.projectId) && (
+                                                        <Button
+                                                            size="compact-xs"
+                                                            color="red"
+                                                            variant="light"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleCancelDeploy(entry.projectId);
+                                                            }}
+                                                        >
+                                                            Cancel
+                                                        </Button>
+                                                    )}
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        ))}
+                                    </Table.Tbody>
+                                </Table>
+                            )}
+                            {(queue.hiddenDeploying > 0 || queue.hiddenQueued > 0) && (
+                                <Stack gap={2}>
+                                    {queue.hiddenDeploying > 0 && (
+                                        <Text c="dimmed" size="sm">
+                                            {queue.hiddenDeploying} other {queue.hiddenDeploying === 1 ? 'deploy' : 'deploys'} in progress on projects you can't access.
+                                        </Text>
+                                    )}
+                                    {queue.hiddenQueued > 0 && (
+                                        <Text c="dimmed" size="sm">
+                                            {queue.hiddenQueued} other {queue.hiddenQueued === 1 ? 'deploy' : 'deploys'} queued on projects you can't access.
+                                        </Text>
+                                    )}
+                                </Stack>
+                            )}
+                        </Stack>
                     )}
                 </Stack>
             </Card>
-            <Group justify="space-between" align="center">
-                <Title order={4}>Projects</Title>
-                <Button component={Link} to="/nodes" variant="subtle" size="compact-sm">
-                    View Nodes
-                </Button>
-            </Group>
-            {projectCtx.projects.length === 0 ? (
-                <Text c="dimmed">No projects yet. Create one from the sidebar.</Text>
-            ) : (
-                <Table highlightOnHover>
-                    <Table.Thead>
-                        <Table.Tr>
-                            <Table.Th>Project</Table.Th>
-                            <Table.Th>Repository</Table.Th>
-                            <Table.Th>Node</Table.Th>
-                            <Table.Th>State</Table.Th>
-                        </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                        {projectCtx.projects.map((project) => (
-                            <Table.Tr key={project.id} onClick={() => navigate(`/p/${project.id}`)} style={{ cursor: 'pointer' }}>
-                                <Table.Td>
-                                    <Text fw={600}>{project.id}</Text>
-                                </Table.Td>
-                                <Table.Td>
-                                    {project.repoOwner}/{project.repoName}
-                                </Table.Td>
-                                <Table.Td>{project.workerNodeId ?? 'Unassigned'}</Table.Td>
-                                <Table.Td>
-                                    <Group gap="xs">
-                                        <Badge color={stateColor(project.state)}>{project.state ?? 'unknown'}</Badge>
-                                        <DeployQueueBadge projectId={project.id} />
-                                    </Group>
-                                </Table.Td>
-                            </Table.Tr>
-                        ))}
-                    </Table.Tbody>
-                </Table>
-            )}
         </Stack>
     );
 };

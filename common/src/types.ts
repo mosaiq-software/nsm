@@ -207,10 +207,15 @@ export interface NodeHealth {
 // A single project waiting in (or actively being processed by) the leader's deploy queue. Only the
 // leader deploys, so the queue is leader-local; `instanceId` is the ProjectInstance/log id created
 // at enqueue time so the UI can watch a deploy from the moment it is queued.
+//
+// When served to a user who lacks access to the entry's project, the entry is redacted to a
+// placeholder that keeps only its position: `hidden` is true and `projectId`/`instanceId`/timestamps
+// are cleared. This lets the UI show honest queue counts without leaking other teams' project ids.
 export interface DeployQueueEntry {
     projectId: string;
     instanceId: string;
     enqueuedAt: number;
+    hidden?: boolean;
 }
 
 // Snapshot of the leader's deploy queue: at most one entry occupies the leader's planning slot
