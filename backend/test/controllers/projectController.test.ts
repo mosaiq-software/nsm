@@ -20,11 +20,12 @@ import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { DeploymentState, Project } from '@mosaiq/nsm-common/types';
 import { getProjectByIdModel } from '@/persistence/projectPersistence';
 import { createProjectInstanceModel } from '@/persistence/projectInstancePersistence';
+import { sha256Hex } from '@/utils/hash';
 
 const propose = cluster.propose as unknown as Mock;
 let idx = 0;
 
-const seedProject = (over: Partial<Project> = {}) => applyOp({ type: OpType.UPSERT_PROJECT, project: { id: 'p1', repoOwner: 'o', repoName: 'r', state: DeploymentState.READY, deploymentKey: 'origkey', allowCICD: false, ...over } }, ++idx);
+const seedProject = (over: Partial<Project> = {}) => applyOp({ type: OpType.UPSERT_PROJECT, project: { id: 'p1', repoOwner: 'o', repoName: 'r', state: DeploymentState.READY, deploymentKeyHash: sha256Hex('origkey'), allowCICD: false, ...over } }, ++idx);
 
 const proposedOps = () => propose.mock.calls.map((c) => c[0]);
 
@@ -41,9 +42,12 @@ describe('projectController writes', () => {
     it('createProject proposes an upsert with a generated 32-char key', async () => {
         const result = await createProject({ id: 'p1', repoOwner: 'o', repoName: 'r' } as Project);
         const op = proposedOps().find((o) => o.type === OpType.UPSERT_PROJECT);
-        expect(op.project.deploymentKey).toHaveLength(32);
+        // Only the hash is persisted; the raw 32-char key is returned once on the result.
+        expect(op.project.deploymentKeyHash).toHaveLength(64);
+        expect(op.project.deploymentKey).toBeUndefined();
         expect(op.project.state).toBe(DeploymentState.READY);
         expect(result?.id).toBe('p1');
+        expect(result?.deploymentKey).toHaveLength(32);
         expect(await getProjectByIdModel('p1')).toBeTruthy();
     });
 
@@ -61,7 +65,7 @@ describe('projectController writes', () => {
         await seedProject();
         const key = await resetDeploymentKey('p1');
         expect(key).toHaveLength(32);
-        expect((await getProjectByIdModel('p1'))?.deploymentKey).toBe(key);
+        expect((await getProjectByIdModel('p1'))?.deploymentKeyHash).toBe(sha256Hex(key!));
         expect((await getProjectByIdModel('p1'))?.dirtyConfig).toBeFalsy();
     });
 
@@ -99,11 +103,11 @@ describe('projectController writes', () => {
 
 describe('verifyDeploymentKey', () => {
     it('gates CICD deploys on allowCICD but always allows web deploys with the right key', async () => {
-        await seedProject({ deploymentKey: 'k', allowCICD: false });
+        await seedProject({ deploymentKeyHash: sha256Hex('k'), allowCICD: false });
         expect(await verifyDeploymentKey('p1', 'k', true)).toBe(true);
         expect(await verifyDeploymentKey('p1', 'k', false)).toBe(false); // CICD disabled
         expect(await verifyDeploymentKey('p1', 'wrong', true)).toBe(false);
-        await seedProject({ deploymentKey: 'k', allowCICD: true });
+        await seedProject({ deploymentKeyHash: sha256Hex('k'), allowCICD: true });
         expect(await verifyDeploymentKey('p1', 'k', false)).toBe(true);
     });
 });

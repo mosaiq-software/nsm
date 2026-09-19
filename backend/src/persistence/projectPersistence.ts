@@ -7,7 +7,10 @@ export interface ProjectModelType {
     repoOwner: string;
     repoName: string;
     repoBranch?: string;
-    deploymentKey: string;
+    // SHA-256 hex of the deploy key. The raw key is only ever shown once (create/rotate).
+    deploymentKeyHash: string;
+    // JSON of the shared GitHub webhook ref ({ hookId, tokenHash }) or '' when unprovisioned.
+    githubWebhookJson: string;
     allowCICD: boolean;
     timeout?: number;
     dirtyConfig?: boolean;
@@ -34,7 +37,8 @@ ProjectModel.init(
         repoOwner: DataTypes.STRING,
         repoName: DataTypes.STRING,
         repoBranch: DataTypes.STRING,
-        deploymentKey: DataTypes.STRING,
+        deploymentKeyHash: DataTypes.STRING,
+        githubWebhookJson: DataTypes.TEXT,
         allowCICD: DataTypes.BOOLEAN,
         timeout: DataTypes.NUMBER,
         dirtyConfig: DataTypes.BOOLEAN,

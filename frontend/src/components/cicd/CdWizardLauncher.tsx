@@ -1,4 +1,4 @@
-import { Button, Card, Code, Group, Modal, Stack, Text, Title } from '@mantine/core';
+import { Button, Card, Group, Modal, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { Project } from '@mosaiq/nsm-common/types';
@@ -52,7 +52,7 @@ export const CdWizardLauncher = ({ project }: { project: Project }) => {
                 <Stack>
                     <Title order={3}>Remove Continuous Deployment</Title>
                     <Text>
-                        This deletes the GitHub webhook NSM registered for this project. To change the configuration, remove it and run the wizard again.
+                        This stops automatic deployments for this project. NSM&apos;s shared GitHub webhook is removed too, unless GitHub notifications still use it. To change the configuration, remove it and run the wizard again.
                     </Text>
                     <Group justify="space-between">
                         <Button variant="filled" onClick={() => setModal(null)}>
@@ -97,8 +97,8 @@ export const CdWizardLauncher = ({ project }: { project: Project }) => {
                             <Text size="sm">
                                 Deploy branch: <b>{cd.branch}</b>
                             </Text>
-                            <Text size="sm">
-                                Delivering to: <Code>{cd.deliveryUrl}</Code>
+                            <Text size="sm" c="dimmed">
+                                Deploys automatically via NSM&apos;s shared GitHub webhook when matching events arrive.
                             </Text>
                         </Stack>
                     ) : (

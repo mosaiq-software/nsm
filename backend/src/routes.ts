@@ -174,17 +174,16 @@ publicRouter.get(API_ROUTES.GET_DEPLOY, async (req, res) => {
     }
 });
 
-// GitHub repository webhook receiver (managed CD). Verifies the HMAC signature, evaluates the
-// project's CD conditions, and enqueues a deploy on a match. Write -> must run on leader.
+// Shared GitHub repository webhook receiver (ingest for CD + notifications). Authenticates the path
+// token, dispatches Discord notifications, evaluates the project's CD conditions, and enqueues a
+// deploy on a match. Write -> must run on leader.
 publicRouter.post(API_ROUTES.POST_GITHUB_WEBHOOK, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.POST_GITHUB_WEBHOOK];
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
         if (!requireLeader(req, res)) return;
-        const rawBody: Buffer = (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
         const eventType = req.header('x-github-event');
-        const signature = req.header('x-hub-signature-256');
-        const outcome = await handleGithubWebhook(params.projectId, eventType, signature, rawBody, req.body);
+        const outcome = await handleGithubWebhook(params.projectId, params.token, eventType, req.body);
         if (outcome.deploy) {
             if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
             await enqueueDeploy(params.projectId);
@@ -530,11 +529,11 @@ privateRouter.get(API_ROUTES.GET_GITHUB_BRANCHES, async (req, res) => {
     }
 });
 
+// In-dashboard deploy: capability-gated (session auth), so it does not need the raw deploy key.
 privateRouter.get(API_ROUTES.GET_DEPLOY_WEB, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.GET_DEPLOY_WEB];
     try {
         if (!params.projectId) return void res.status(400).send('No projectId');
-        if (!(await verifyDeploymentKey(params.projectId, params.key, true))) return void res.status(403).send('Forbidden');
         if (!requireLeader(req, res)) return;
         if (!(await requireProjectCapability(req, res, params.projectId, Capability.DEPLOY))) return;
         if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;

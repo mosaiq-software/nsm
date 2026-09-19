@@ -6,7 +6,12 @@ export interface Project {
     repoName: string;
     repoBranch?: string;
     state?: DeploymentState;
+    // The raw deploy key. Only ever populated in the one-time create/rotate response; general reads
+    // never include it (only the hash is stored at rest).
     deploymentKey?: string;
+    // SHA-256 hex of the deploy key. Server-only: present on the in-memory project so update
+    // round-trips preserve it, but stripped from every client response by redactProjectSecrets.
+    deploymentKeyHash?: string;
     createdAt?: string;
     updatedAt?: string;
     allowCICD?: boolean;
@@ -23,12 +28,25 @@ export interface Project {
     // Per-project opt-out for zero-downtime (blue-green) deploys. Undefined inherits the global
     // default (ZERO_DOWNTIME_DEPLOYS, on by default); set to false to force in-place recreation.
     zeroDowntime?: boolean;
-    // Snapshot of the managed CI/CD (GitHub Actions) workflow NSM provisioned for this project.
-    // Absent when no managed workflow exists.
+    // Snapshot of the managed CD configuration NSM provisioned for this project. Absent when no
+    // managed CD exists.
     cicd?: CdConfig;
+    // The shared GitHub repository webhook NSM registered for this project (ingest for CD and
+    // notifications). Absent when no consumer has provisioned it. Never exposes the raw token.
+    githubWebhook?: GithubWebhookRef;
     // Per-project resource allocation set by NSM admins. Advisory only (never enforced/blocked);
     // exceeding it notifies admins and team members. Absent means no allocation configured.
     resourceQuota?: ProjectResourceQuota;
+}
+
+// The single shared GitHub repository webhook NSM registers per project. It subscribes to every
+// event; NSM decides per delivery whether to deploy, notify, or ignore. Inbound deliveries are
+// authenticated by a URL path token whose SHA-256 hash is the only thing stored at rest.
+export interface GithubWebhookRef {
+    // Numeric id of the GitHub repository webhook (for update/removal).
+    hookId: number;
+    // SHA-256 hex of the delivery path token. The raw token is shown once at provisioning time.
+    tokenHash: string;
 }
 
 // Admin-set advisory resource allocation for a project. Any subset may be set; an unset field means
@@ -69,12 +87,6 @@ export interface CdConfig {
     tagPattern?: string;
     // Cron expression for SCHEDULE triggers.
     cron?: string;
-    // Numeric id of the GitHub repository webhook NSM registered (for update/removal).
-    webhookId: number;
-    // HMAC secret configured on the webhook, used to verify inbound deliveries. Redacted in responses.
-    webhookSecret: string;
-    // The NSM URL GitHub delivers events to for this project.
-    deliveryUrl: string;
     setupAt: number;
 }
 
@@ -590,6 +602,52 @@ export enum ProjectEventSeverity {
     ERROR = 'error',
 }
 
+// High-level GitHub notification scenarios a Discord webhook can subscribe to. Each maps one or more
+// raw GitHub webhook event types into a user-facing situation with its own sub-events and lifecycle.
+export enum GithubScenario {
+    PULL_REQUEST = 'pull_request',
+    ISSUE = 'issue',
+    RELEASE = 'release',
+    PUSH = 'push',
+    WORKFLOW_RUN = 'workflow_run',
+}
+
+export const ALL_GITHUB_SCENARIOS: GithubScenario[] = [GithubScenario.PULL_REQUEST, GithubScenario.ISSUE, GithubScenario.RELEASE, GithubScenario.PUSH, GithubScenario.WORKFLOW_RUN];
+
+// How repeated notifications about the same subject (a specific PR, issue, workflow run, ...) are
+// delivered to Discord:
+// - 'new': every sub-event posts a fresh message.
+// - 'update': the first sub-event posts a message; later ones edit that same message in place.
+// - 'update_then_delete': like 'update', but a terminal sub-event (e.g. PR merged/closed) deletes
+//   the message to clear it from the channel.
+export type GithubScenarioLifecycle = 'new' | 'update' | 'update_then_delete';
+
+// The selectable sub-events per scenario. Stable wire identifiers shared by the UI, validation, and
+// the notification dispatcher (which maps raw GitHub payloads onto these).
+export const GITHUB_SCENARIO_SUBEVENTS: Record<GithubScenario, string[]> = {
+    [GithubScenario.PULL_REQUEST]: ['opened', 'approved', 'changes_requested', 'merged', 'closed'],
+    [GithubScenario.ISSUE]: ['opened', 'closed'],
+    [GithubScenario.RELEASE]: ['published'],
+    [GithubScenario.PUSH]: ['pushed'],
+    [GithubScenario.WORKFLOW_RUN]: ['failed', 'succeeded'],
+};
+
+// Sub-events that terminate a subject's lifecycle. Under 'update_then_delete' these delete the
+// tracked message; under 'update' they still edit it (e.g. to its final merged/closed state).
+export const GITHUB_TERMINAL_SUBEVENTS: Partial<Record<GithubScenario, string[]>> = {
+    [GithubScenario.PULL_REQUEST]: ['merged', 'closed'],
+    [GithubScenario.ISSUE]: ['closed'],
+};
+
+// One scenario subscription on a Discord webhook: which sub-events to notify on, how the message
+// lifecycle behaves, and an optional branch filter (PR base branch / push branch).
+export interface GithubScenarioConfig {
+    scenario: GithubScenario;
+    on: string[];
+    lifecycle: GithubScenarioLifecycle;
+    branches?: string[];
+}
+
 // A configured outbound webhook on a project. `url` is a delivery secret (anyone holding it can post
 // to the channel), so it is redacted (masked) in API responses.
 export interface ProjectWebhook {
@@ -599,8 +657,26 @@ export interface ProjectWebhook {
     name: string;
     url: string;
     events: ProjectEventType[];
+    // GitHub-to-Discord scenario subscriptions (Discord webhooks only). Independent of `events`
+    // (NSM-native events); a webhook may subscribe to either or both.
+    githubScenarios?: GithubScenarioConfig[];
     enabled: boolean;
     createdBy: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+// Tracks a Discord message NSM created for a specific GitHub subject, so later sub-events can edit or
+// delete it. Keyed by (webhookId, scenario, externalKey). Replicated via cluster ops like webhooks.
+export interface DiscordMessageRef {
+    id: string;
+    projectId: string;
+    webhookId: string;
+    scenario: GithubScenario;
+    // Stable subject key within (webhook, scenario), e.g. 'pr:123', 'issue:45', 'run:deploy'.
+    externalKey: string;
+    // The Discord message id returned at creation (used to edit/delete via the webhook token URL).
+    channelMessageId: string;
     createdAt: number;
     updatedAt: number;
 }
@@ -624,6 +700,7 @@ export interface CreateProjectWebhookBody {
     name: string;
     url: string;
     events: ProjectEventType[];
+    githubScenarios?: GithubScenarioConfig[];
     enabled?: boolean;
 }
 
@@ -633,6 +710,7 @@ export interface UpdateProjectWebhookBody {
     name?: string;
     url?: string;
     events?: ProjectEventType[];
+    githubScenarios?: GithubScenarioConfig[];
     enabled?: boolean;
 }
 

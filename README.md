@@ -326,8 +326,8 @@ This installs dependencies (Node, Docker, nginx, certbot), lays down the code, c
 **2. Create a GitHub App** (in your browser) so the leader can clone your private app repos for deployment, unattended, without a machine-user account. You do this once.
 
    1. Go to **GitHub -> Settings -> Developer settings -> GitHub Apps -> New GitHub App** (personal account or an organization).
-   2. Give it any name. Set **Homepage URL** to anything (e.g. your leader's address). Under **Webhook**, **uncheck Active** (NSM registers per-repo webhooks via the API; it doesn't use the App's own global webhook).
-   3. Under **Repository permissions**, set **Contents** to **Read-only**. For managed CD, also set **Webhooks** to **Read and write** (NSM registers a per-repo webhook to trigger deploys). Leave everything else as **No access**.
+   2. Give it any name. Set **Homepage URL** to anything (e.g. your leader's address). Under **Webhook**, **uncheck Active** (NSM registers its own per-repo webhook via the API; it doesn't use the App's own global webhook).
+   3. Under **Repository permissions**, set **Contents** to **Read-only**. For managed CD and/or GitHub-to-Discord notifications, also set **Webhooks** to **Read and write** (NSM registers a single shared per-repo webhook, subscribed to all events, and decides per delivery whether to deploy, notify, or ignore). Leave everything else as **No access**.
    4. Create the App. On its page, note the **App ID** (a number).
    5. Scroll to **Private keys** and click **Generate a private key**. Your browser downloads a `.pem` file - keep it handy; you'll paste it in the next step.
    6. In the left sidebar click **Install App**, install it on your account/org, and choose **Only select repositories** -> pick the app repos you'll deploy (you can add more later).
@@ -405,6 +405,10 @@ NSM clones private app repos using a **GitHub App**. You install the App on the 
 
 If `GITHUB_APP_ID` is unset (or the key file is missing), NSM falls back to the legacy **shared SSH deploy key**: the leader generates it on first bootstrap (`/etc/nsm/.ssh/id_ed25519` by default) and serves the private half to joining followers over the secret-gated `GET /cluster/deploy-key`.
 
+### Secrets at rest
+
+User-issued credentials are stored **only as SHA-256 hashes**, so a database breach never exposes usable secrets. This covers **project API keys**, the per-project **deploy key**, and the shared **GitHub webhook path token**. Each is shown to the user exactly once at creation/rotation and cannot be retrieved afterward - NSM hashes what the caller presents and compares (constant-time) against the stored hash. The in-dashboard "Deploy" button therefore uses a capability-gated authenticated route (`GET /deployweb/:projectId`) rather than the raw deploy key.
+
 ### The `nsm` user and privileges
 
 `nsmd` does **not** run as root. Bootstrap creates a dedicated system user `nsm`, adds it to the `docker` group, and `chown`s the daemon's data directories (`/opt/nsm`, `/var/lib/nsm`, `/nsm`, `/etc/nsm`, `NSM_WWW_PATH`) to it. The few genuinely root-only commands are granted through a scoped `/etc/sudoers.d/nsm` policy (NOPASSWD for exactly `nginx -t`, `nginx -s reload`, `certbot *`, `openssl x509 *`, `systemctl restart nsmd`, and the `/usr/local/sbin/nsm-apply-hosts` helper that rewrites `/etc/hosts`). Docker operations go through group membership, not sudo. In dev/test (`PRODUCTION != true`) none of these are sudo-prefixed.
@@ -415,8 +419,8 @@ If `GITHUB_APP_ID` is unset (or the key file is missing), NSM falls back to the 
 
 Three routers (`backend/src/routes.ts`):
 
-- Public: `GET /healthz`, `GET /metrics`, `GET /install.sh` (leader-templated universal installer), `GET /auth/github`, `POST /login/github/:token`, CI deploy webhook `GET /deploy/:projectId/:key`. The leader also serves the built UI (`express.static(NSM_WWW_PATH)`) with an SPA history fallback for non-API GETs.
-- Private (user token): project/secret/user/allow-list CRUD, `GET /cluster/status`, `GET /cluster/nodes`, `GET /cluster/join-info` (copy-paste join command + deploy public key), dashboard deploy `GET /deployweb/:projectId/:key`, and observability `GET /observability/logs`, `GET /observability/metrics`. Writes on a follower forward to the leader.
+- Public: `GET /healthz`, `GET /metrics`, `GET /install.sh` (leader-templated universal installer), `GET /auth/github`, `POST /login/github/:token`, CI deploy webhook `GET /deploy/:projectId/:key`, and the shared GitHub ingest `POST /github/webhook/:projectId/:token` (authenticated by the hashed path token). The leader also serves the built UI (`express.static(NSM_WWW_PATH)`) with an SPA history fallback for non-API GETs.
+- Private (user token): project/secret/user/allow-list CRUD, `GET /cluster/status`, `GET /cluster/nodes`, `GET /cluster/join-info` (copy-paste join command + deploy public key), capability-gated dashboard deploy `GET /deployweb/:projectId`, and observability `GET /observability/logs`, `GET /observability/metrics`. Writes on a follower forward to the leader.
 - Internal (`x-nsm-cluster-secret`): `/cluster/register`, `/cluster/deregister`, `GET /install/bundle.tgz` (leader source bundle), `POST /cluster/git-token` (leader mints a repo-scoped GitHub App token), `GET /cluster/deploy-key` (legacy shared deploy key), `/node/desired`, `/cluster/log`, `/cluster/status-report`, `/node/plan`, `/cluster/self-update`, `/cluster/apply-update`.
 
 ---

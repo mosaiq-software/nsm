@@ -1,5 +1,5 @@
 import { sequelize } from '@/utils/dbHelper';
-import { ProjectEventType, ProjectWebhook, ProjectWebhookType } from '@mosaiq/nsm-common/types';
+import { GithubScenarioConfig, ProjectEventType, ProjectWebhook, ProjectWebhookType } from '@mosaiq/nsm-common/types';
 import { DataTypes, Model } from 'sequelize';
 
 // An outbound webhook configured on a project. Durable, user-authored config replicated via cluster
@@ -14,6 +14,7 @@ ProjectWebhookModel.init(
         name: DataTypes.TEXT,
         url: DataTypes.TEXT,
         eventsJson: DataTypes.TEXT,
+        githubScenariosJson: DataTypes.TEXT,
         enabled: DataTypes.BOOLEAN,
         createdBy: DataTypes.STRING,
         createdAt: DataTypes.NUMBER,
@@ -29,6 +30,7 @@ const toWebhook = (row: any): ProjectWebhook => ({
     name: row.name,
     url: row.url,
     events: JSON.parse(row.eventsJson || '[]') as ProjectEventType[],
+    githubScenarios: JSON.parse(row.githubScenariosJson || '[]') as GithubScenarioConfig[],
     enabled: !!row.enabled,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
@@ -42,6 +44,7 @@ const toRow = (webhook: ProjectWebhook) => ({
     name: webhook.name,
     url: webhook.url,
     eventsJson: JSON.stringify(webhook.events || []),
+    githubScenariosJson: JSON.stringify(webhook.githubScenarios || []),
     enabled: webhook.enabled,
     createdBy: webhook.createdBy,
     createdAt: webhook.createdAt,

@@ -6,7 +6,7 @@ import { CreatePortReservationBody, PortReservation } from './types';
 export enum API_ROUTES {
     // GET
     GET_DEPLOY = '/deploy/:projectId/:key',
-    GET_DEPLOY_WEB = '/deployweb/:projectId/:key',
+    GET_DEPLOY_WEB = '/deployweb/:projectId',
     GET_PROJECT = '/project/:projectId',
     GET_PROJECTS = '/projects',
     GET_PROJECT_INSTANCE = '/project-instance/:projectInstanceId',
@@ -61,7 +61,7 @@ export enum API_ROUTES {
     POST_DEPLOYMENT_LOG_UPDATE = '/deploy/update',
     POST_GITHUB_LOGIN = '/login/github/:token',
     POST_GITHUB_LOGOUT = '/logout/github/:token',
-    POST_GITHUB_WEBHOOK = '/github/webhook/:projectId',
+    POST_GITHUB_WEBHOOK = '/github/webhook/:projectId/:token',
     POST_SET_TEAM_DEFAULTS = '/team/:ownerId/defaults',
     POST_SET_TEAM_OVERRIDE = '/team/:ownerId/override',
     POST_DELETE_TEAM_OVERRIDE = '/team/:ownerId/override/delete',
@@ -104,7 +104,7 @@ export enum API_ROUTES {
 export interface API_PARAMS {
     //GET
     [API_ROUTES.GET_DEPLOY]: { projectId: string; key: string };
-    [API_ROUTES.GET_DEPLOY_WEB]: { projectId: string; key: string };
+    [API_ROUTES.GET_DEPLOY_WEB]: { projectId: string };
     [API_ROUTES.GET_PROJECT]: { projectId: string };
     [API_ROUTES.GET_PROJECTS]: {};
     [API_ROUTES.GET_PROJECT_INSTANCE]: { projectInstanceId: string };
@@ -159,7 +159,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: {};
     [API_ROUTES.POST_GITHUB_LOGIN]: { token: string };
     [API_ROUTES.POST_GITHUB_LOGOUT]: { token: string };
-    [API_ROUTES.POST_GITHUB_WEBHOOK]: { projectId: string };
+    [API_ROUTES.POST_GITHUB_WEBHOOK]: { projectId: string; token: string };
     [API_ROUTES.POST_SET_TEAM_DEFAULTS]: { ownerId: string };
     [API_ROUTES.POST_SET_TEAM_OVERRIDE]: { ownerId: string };
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: { ownerId: string };

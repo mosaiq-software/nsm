@@ -15,6 +15,7 @@ import { deletePortReservationModel, deletePortReservationsForProjectModel, upse
 import { addIncidentUpdateModel, deleteIncidentModel, upsertIncidentModel } from '@/persistence/incidentPersistence';
 import { revokeApiKeyModel, upsertApiKeyModel } from '@/persistence/apiKeyPersistence';
 import { deleteProjectWebhookModel, upsertProjectWebhookModel } from '@/persistence/projectWebhookPersistence';
+import { deleteDiscordMessageRefModel, upsertDiscordMessageRefModel } from '@/persistence/discordMessageRefPersistence';
 import { areaLog } from '@/utils/log';
 
 const clusterLog = areaLog('cluster');
@@ -74,6 +75,10 @@ const opDetails = (op: Op): Record<string, unknown> => {
             return { webhookId: op.webhook.id, projectId: op.webhook.projectId, type: op.webhook.type, eventCount: op.webhook.events.length, enabled: op.webhook.enabled };
         case OpType.DELETE_PROJECT_WEBHOOK:
             return { webhookId: op.webhookId };
+        case OpType.UPSERT_DISCORD_MESSAGE_REF:
+            return { refId: op.ref.id, projectId: op.ref.projectId, webhookId: op.ref.webhookId, scenario: op.ref.scenario, externalKey: op.ref.externalKey };
+        case OpType.DELETE_DISCORD_MESSAGE_REF:
+            return { refId: op.refId };
         default:
             return {};
     }
@@ -85,7 +90,8 @@ const projectToRow = (p: Project): ProjectModelType => ({
     repoOwner: p.repoOwner,
     repoName: p.repoName,
     repoBranch: p.repoBranch,
-    deploymentKey: p.deploymentKey || '',
+    deploymentKeyHash: p.deploymentKeyHash || '',
+    githubWebhookJson: p.githubWebhook ? JSON.stringify(p.githubWebhook) : '',
     allowCICD: !!p.allowCICD,
     timeout: p.timeout,
     dirtyConfig: p.dirtyConfig,
@@ -186,6 +192,12 @@ export const applyOp = async (op: Op): Promise<void> => {
             break;
         case OpType.DELETE_PROJECT_WEBHOOK:
             await deleteProjectWebhookModel(op.webhookId);
+            break;
+        case OpType.UPSERT_DISCORD_MESSAGE_REF:
+            await upsertDiscordMessageRefModel(op.ref);
+            break;
+        case OpType.DELETE_DISCORD_MESSAGE_REF:
+            await deleteDiscordMessageRefModel(op.refId);
             break;
         default:
             clusterLog.warn({ action: 'op_unknown', opType: (op as any).type }, 'unknown cluster op ignored');

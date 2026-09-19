@@ -98,7 +98,7 @@ const ProjectDeployPage = () => {
     const handleDeploy = async () => {
         if (!project) return;
         notifications.show({ message: 'Queued for deployment...', color: 'blue' });
-        const newLogId = await api.get(API_ROUTES.GET_DEPLOY_WEB, { projectId: project.id, key: project.deploymentKey ?? '' });
+        const newLogId = await api.get(API_ROUTES.GET_DEPLOY_WEB, { projectId: project.id });
         if (!newLogId) {
             notifications.show({ message: 'Failed to get deployment log ID. Reload to see log', color: 'yellow' });
         } else {

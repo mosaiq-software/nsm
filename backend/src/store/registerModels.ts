@@ -25,3 +25,4 @@ import '@/persistence/projectHealthPersistence';
 import '@/persistence/incidentPersistence';
 import '@/persistence/apiKeyPersistence';
 import '@/persistence/projectWebhookPersistence';
+import '@/persistence/discordMessageRefPersistence';

@@ -249,9 +249,10 @@ export const listRepoBranches = async (owner: string, repo: string): Promise<str
 // These helpers register/remove a repository webhook using a repo-scoped installation token. They
 // require the App to be granted the repository "Webhooks: write" permission (repository_hooks).
 
-// Create a repository webhook that delivers the given events (JSON payload) to `url`, signed with
-// `secret` (HMAC-SHA256). Returns the numeric hook id so it can be updated or removed later.
-export const createRepoWebhook = async (owner: string, repo: string, url: string, secret: string, events: string[]): Promise<number> => {
+// Create a repository webhook that delivers the given events (JSON payload) to `url`. The delivery
+// URL carries a secret path token that NSM verifies, so no GitHub HMAC secret is configured. Returns
+// the numeric hook id so it can be updated or removed later.
+export const createRepoWebhook = async (owner: string, repo: string, url: string, events: string[]): Promise<number> => {
     const token = (await mintInstallationToken(owner, repo)).token;
     const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/hooks`, {
         method: 'POST',
@@ -259,7 +260,7 @@ export const createRepoWebhook = async (owner: string, repo: string, url: string
             name: 'web',
             active: true,
             events,
-            config: { url, content_type: 'json', secret, insecure_ssl: '0' },
+            config: { url, content_type: 'json', insecure_ssl: '0' },
         }),
     });
     if (!res.ok) throw new Error(`Failed to create webhook for ${owner}/${repo}: ${res.status} ${await res.text()}`);

@@ -13,6 +13,7 @@ import { clearProjectIncidents } from './incidentController';
 import { clearProjectApiKeys } from './apiKeyController';
 import { clearProjectWebhooks } from './webhookController';
 import { cluster } from '@/cluster/node';
+import { sha256Hex, hashEquals } from '@/utils/hash';
 import { areaLog } from '@/utils/log';
 
 const projectLog = areaLog('project');
@@ -42,7 +43,8 @@ export const getProject = async (projectId: string): Promise<Project | undefined
         repoOwner: projectData.repoOwner,
         repoName: projectData.repoName,
         repoBranch: projectData.repoBranch,
-        deploymentKey: projectData.deploymentKey,
+        deploymentKeyHash: projectData.deploymentKeyHash,
+        githubWebhook: projectData.githubWebhookJson ? JSON.parse(projectData.githubWebhookJson) : undefined,
         state: projectData.state,
         createdAt: projectData.createdAt,
         updatedAt: projectData.updatedAt,
@@ -76,12 +78,13 @@ export const proposeProjectUpsert = async (project: Project): Promise<void> => {
 };
 
 export const createProject = async (input: Project): Promise<Project | undefined> => {
+    const rawKey = generate32CharKey();
     const newProject: Project = {
         id: input.id,
         repoOwner: input.repoOwner,
         repoName: input.repoName,
         repoBranch: input.repoBranch,
-        deploymentKey: generate32CharKey(),
+        deploymentKeyHash: sha256Hex(rawKey),
         state: DeploymentState.READY,
         allowCICD: !!input.allowCICD,
         dirtyConfig: false,
@@ -94,11 +97,11 @@ export const createProject = async (input: Project): Promise<Project | undefined
 
     // Legacy import: overlay config downloaded from the old server-manager on top of the repo sync.
     const hasLegacy = !!(input.secrets?.length || input.nginxConfig?.servers?.length || input.services?.length || input.timeout != null);
-    if (synced && hasLegacy) {
-        await applyLegacyOverlay(input.id, input);
-        return await getProject(input.id);
-    }
-    return synced;
+    if (synced && hasLegacy) await applyLegacyOverlay(input.id, input);
+
+    // Attach the raw deploy key once so the creator can copy it; it is never persisted or read again.
+    const result = await getProject(input.id);
+    return result ? { ...result, deploymentKey: rawKey } : result;
 };
 
 export const updateProject = async (id: string, updates: Partial<Project>): Promise<void> => {
@@ -137,14 +140,14 @@ export const verifyDeploymentKey = async (projectId: string, key: string, fromWe
     const project = await getProjectByIdModel(projectId);
     if (!project) return false;
     if (!fromWeb && !project.allowCICD) return false;
-    return project.deploymentKey === key;
+    return hashEquals(key, project.deploymentKeyHash);
 };
 
 export const resetDeploymentKey = async (projectId: string): Promise<string | null> => {
     const project = await getProject(projectId);
     if (!project) return null;
     const newKey = generate32CharKey();
-    await updateProjectNoDirty(projectId, { deploymentKey: newKey });
+    await updateProjectNoDirty(projectId, { deploymentKeyHash: sha256Hex(newKey) });
     projectLog.info({ action: 'deployment_key_reset', projectId }, `deployment key reset for ${projectId}`);
     return newKey;
 };

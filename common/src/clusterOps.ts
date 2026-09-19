@@ -1,4 +1,4 @@
-import { Admin, AllowedGithubEntity, ApiKey, DomainRequest, Incident, IncidentUpdate, PortReservation, Project, ProjectServiceInstance, ProjectWebhook, Secret, TeamConfig, TeamMemberOverride, User } from './types';
+import { Admin, AllowedGithubEntity, ApiKey, DiscordMessageRef, DomainRequest, Incident, IncidentUpdate, PortReservation, Project, ProjectServiceInstance, ProjectWebhook, Secret, TeamConfig, TeamMemberOverride, User } from './types';
 
 // Static description of a peer in the cluster. Identity is nodeId; address is the current IP.
 export interface NodeInfo {
@@ -88,6 +88,8 @@ export enum OpType {
     REVOKE_API_KEY = 'REVOKE_API_KEY',
     UPSERT_PROJECT_WEBHOOK = 'UPSERT_PROJECT_WEBHOOK',
     DELETE_PROJECT_WEBHOOK = 'DELETE_PROJECT_WEBHOOK',
+    UPSERT_DISCORD_MESSAGE_REF = 'UPSERT_DISCORD_MESSAGE_REF',
+    DELETE_DISCORD_MESSAGE_REF = 'DELETE_DISCORD_MESSAGE_REF',
 }
 
 export type Op =
@@ -116,4 +118,6 @@ export type Op =
     | { type: OpType.UPSERT_API_KEY; apiKey: ApiKey }
     | { type: OpType.REVOKE_API_KEY; apiKeyId: string; revokedAt: number }
     | { type: OpType.UPSERT_PROJECT_WEBHOOK; webhook: ProjectWebhook }
-    | { type: OpType.DELETE_PROJECT_WEBHOOK; webhookId: string };
+    | { type: OpType.DELETE_PROJECT_WEBHOOK; webhookId: string }
+    | { type: OpType.UPSERT_DISCORD_MESSAGE_REF; ref: DiscordMessageRef }
+    | { type: OpType.DELETE_DISCORD_MESSAGE_REF; refId: string };

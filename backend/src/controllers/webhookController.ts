@@ -1,9 +1,12 @@
 import crypto from 'crypto';
-import { ALL_PROJECT_EVENT_TYPES, CreateProjectWebhookBody, ProjectEvent, ProjectEventSeverity, ProjectEventType, ProjectWebhook, ProjectWebhookType, UpdateProjectWebhookBody } from '@mosaiq/nsm-common/types';
+import { ALL_GITHUB_SCENARIOS, ALL_PROJECT_EVENT_TYPES, CreateProjectWebhookBody, GITHUB_SCENARIO_SUBEVENTS, GithubScenario, GithubScenarioConfig, GithubScenarioLifecycle, ProjectEvent, ProjectEventSeverity, ProjectEventType, ProjectWebhook, ProjectWebhookType, UpdateProjectWebhookBody } from '@mosaiq/nsm-common/types';
 import { OpType } from '@mosaiq/nsm-common/clusterOps';
 import { deleteWebhooksForProjectModel, getProjectWebhookByIdModel, getWebhooksByProjectModel } from '@/persistence/projectWebhookPersistence';
-import { webhookTransports } from '@/controllers/webhooks/registry';
+import { deleteDiscordMessageRefsForProjectModel, deleteDiscordMessageRefsForWebhookModel } from '@/persistence/discordMessageRefPersistence';
+import { NotificationMessage, webhookTransports } from '@/controllers/webhooks/registry';
 import { projectEventUrl } from '@/controllers/webhooks/events';
+import { ensureGithubWebhook, removeGithubWebhookIfUnused } from '@/controllers/githubWebhookProvisioning';
+import { isGithubAppConfigured } from '@/config';
 import { cluster } from '@/cluster/node';
 import { areaLog } from '@/utils/log';
 
@@ -34,6 +37,26 @@ const normalizeEvents = (events: ProjectEventType[] | undefined): ProjectEventTy
     return [...unique];
 };
 
+const VALID_SCENARIOS = new Set<GithubScenario>(ALL_GITHUB_SCENARIOS);
+const VALID_LIFECYCLES = new Set<GithubScenarioLifecycle>(['new', 'update', 'update_then_delete']);
+
+// Sanitize user-supplied GitHub scenario config: drop unknown scenarios/sub-events, de-duplicate by
+// scenario, require at least one valid sub-event, and default an invalid lifecycle to 'new'.
+const normalizeGithubScenarios = (scenarios: GithubScenarioConfig[] | undefined): GithubScenarioConfig[] => {
+    if (!scenarios) return [];
+    const byScenario = new Map<GithubScenario, GithubScenarioConfig>();
+    for (const s of scenarios) {
+        if (!VALID_SCENARIOS.has(s.scenario)) continue;
+        const allowed = new Set(GITHUB_SCENARIO_SUBEVENTS[s.scenario]);
+        const on = [...new Set((s.on || []).filter((e) => allowed.has(e)))];
+        if (!on.length) continue;
+        const lifecycle = VALID_LIFECYCLES.has(s.lifecycle) ? s.lifecycle : 'new';
+        const branches = s.branches?.map((b) => b.trim()).filter(Boolean);
+        byScenario.set(s.scenario, { scenario: s.scenario, on, lifecycle, branches: branches && branches.length ? branches : undefined });
+    }
+    return [...byScenario.values()];
+};
+
 export const listWebhooks = async (projectId: string): Promise<ProjectWebhook[]> => {
     return (await getWebhooksByProjectModel(projectId)).map(toMaskedView);
 };
@@ -43,7 +66,8 @@ export const createWebhook = async (projectId: string, body: CreateProjectWebhoo
     if (!name) throw new Error('A name is required');
     if (!VALID_TYPES.has(body.type)) throw new Error('Unsupported webhook type');
     const events = normalizeEvents(body.events);
-    if (!events.length) throw new Error('Select at least one event');
+    const githubScenarios = normalizeGithubScenarios(body.githubScenarios);
+    if (!events.length && !githubScenarios.length) throw new Error('Select at least one event or GitHub scenario');
     // Validates + normalizes the target URL for the chosen type (throws on invalid/unsafe URLs).
     const url = webhookTransports[body.type].validateUrl(body.url || '');
 
@@ -55,13 +79,18 @@ export const createWebhook = async (projectId: string, body: CreateProjectWebhoo
         name,
         url,
         events,
+        githubScenarios,
         enabled: body.enabled ?? true,
         createdBy: actor,
         createdAt: now,
         updatedAt: now,
     };
     await cluster.propose({ type: OpType.UPSERT_PROJECT_WEBHOOK, webhook });
-    webhookLog.info({ action: 'webhook_created', projectId, webhookId: webhook.id, type: webhook.type, eventCount: events.length }, `webhook created for ${projectId}`);
+    // Any GitHub scenario subscription needs the shared GitHub webhook to be provisioned.
+    if (githubScenarios.length && isGithubAppConfigured()) {
+        await ensureGithubWebhook(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_ensure_github_failed', projectId, err: e?.message }, `failed to ensure GitHub webhook for ${projectId}`));
+    }
+    webhookLog.info({ action: 'webhook_created', projectId, webhookId: webhook.id, type: webhook.type, eventCount: events.length, scenarioCount: githubScenarios.length }, `webhook created for ${projectId}`);
     return toMaskedView(webhook);
 };
 
@@ -75,7 +104,8 @@ export const updateWebhook = async (projectId: string, webhookId: string, body: 
         url = webhookTransports[existing.type].validateUrl(body.url);
     }
     const events = body.events !== undefined ? normalizeEvents(body.events) : existing.events;
-    if (!events.length) throw new Error('Select at least one event');
+    const githubScenarios = body.githubScenarios !== undefined ? normalizeGithubScenarios(body.githubScenarios) : existing.githubScenarios || [];
+    if (!events.length && !githubScenarios.length) throw new Error('Select at least one event or GitHub scenario');
     const name = body.name !== undefined ? body.name.trim() : existing.name;
     if (!name) throw new Error('A name is required');
 
@@ -84,12 +114,19 @@ export const updateWebhook = async (projectId: string, webhookId: string, body: 
         name,
         url,
         events,
+        githubScenarios,
         enabled: body.enabled ?? existing.enabled,
         updatedAt: Date.now(),
     };
     await cluster.propose({ type: OpType.UPSERT_PROJECT_WEBHOOK, webhook: updated });
     void actor;
-    webhookLog.info({ action: 'webhook_updated', projectId, webhookId, eventCount: events.length, enabled: updated.enabled }, `webhook ${webhookId} updated`);
+    // Reconcile the shared GitHub webhook: provision it if scenarios are now configured, or remove it
+    // if this edit dropped the last consumer.
+    if (isGithubAppConfigured()) {
+        if (githubScenarios.length) await ensureGithubWebhook(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_ensure_github_failed', projectId, err: e?.message }, `failed to ensure GitHub webhook for ${projectId}`));
+        else await removeGithubWebhookIfUnused(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_remove_github_failed', projectId, err: e?.message }, `failed to remove GitHub webhook for ${projectId}`));
+    }
+    webhookLog.info({ action: 'webhook_updated', projectId, webhookId, eventCount: events.length, scenarioCount: githubScenarios.length, enabled: updated.enabled }, `webhook ${webhookId} updated`);
     return toMaskedView(updated);
 };
 
@@ -97,11 +134,15 @@ export const deleteWebhook = async (projectId: string, webhookId: string): Promi
     const existing = await getProjectWebhookByIdModel(webhookId);
     if (!existing || existing.projectId !== projectId) return;
     await cluster.propose({ type: OpType.DELETE_PROJECT_WEBHOOK, webhookId });
+    // Best-effort cleanup of tracked Discord message refs for this webhook (leader-local).
+    await deleteDiscordMessageRefsForWebhookModel(webhookId).catch(() => {});
+    if (isGithubAppConfigured()) await removeGithubWebhookIfUnused(projectId).catch((e: any) => webhookLog.warn({ action: 'webhook_remove_github_failed', projectId, err: e?.message }, `failed to remove GitHub webhook for ${projectId}`));
     webhookLog.info({ action: 'webhook_deleted', projectId, webhookId }, `webhook ${webhookId} deleted`);
 };
 
 export const clearProjectWebhooks = async (projectId: string): Promise<void> => {
     await deleteWebhooksForProjectModel(projectId);
+    await deleteDiscordMessageRefsForProjectModel(projectId);
 };
 
 // Deliver one rendered request, returning the HTTP status and any 429 backoff (ms). Never throws for
@@ -164,6 +205,84 @@ export const emitProjectEvent = async (event: ProjectEvent): Promise<void> => {
     } catch (e: any) {
         webhookLog.error({ action: 'webhook_dispatch_failed', projectId: event.projectId, event: event.type, err: e?.message || String(e) }, 'failed to dispatch project event');
     }
+};
+
+// Perform one notification delivery (create/edit/delete), parsing any JSON body and 429 backoff.
+// Never throws for HTTP errors; transport failures (timeout/DNS) reject and are handled by the caller.
+const deliverNotificationOnce = async (url: string, method: 'POST' | 'PATCH' | 'DELETE', bodyText?: string): Promise<{ status: number; json?: any; retryAfterMs?: number }> => {
+    const headers: Record<string, string> = bodyText ? { 'Content-Type': 'application/json' } : {};
+    const res = await fetch(url, { method, headers, body: bodyText, signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS) });
+    const text = await res.text().catch(() => '');
+    let json: any;
+    if (text) {
+        try {
+            json = JSON.parse(text);
+        } catch {
+            // Non-JSON body (e.g. empty 204); leave json undefined.
+        }
+    }
+    let retryAfterMs: number | undefined;
+    if (res.status === 429) {
+        const header = res.headers.get('retry-after');
+        if (header) retryAfterMs = parseFloat(header) * 1000;
+        if (typeof json?.retry_after === 'number') retryAfterMs = json.retry_after * 1000;
+    }
+    return { status: res.status, json, retryAfterMs };
+};
+
+// Run a notification delivery with a single retry on 429/5xx. Returns the successful response's
+// parsed body, or null when it ultimately failed.
+const deliverNotificationWithRetry = async (webhook: ProjectWebhook, url: string, method: 'POST' | 'PATCH' | 'DELETE', bodyText?: string): Promise<{ json?: any } | null> => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const { status, json, retryAfterMs } = await deliverNotificationOnce(url, method, bodyText);
+            if (status >= 200 && status < 300) return { json };
+            const retryable = status === 429 || status >= 500;
+            if (retryable && attempt === 0) {
+                await sleep(Math.min(retryAfterMs ?? 1000, MAX_RETRY_DELAY_MS));
+                continue;
+            }
+            webhookLog.warn({ action: 'notification_delivery_failed', webhookId: webhook.id, projectId: webhook.projectId, method, status }, `notification ${method} failed (HTTP ${status})`);
+            return null;
+        } catch (e: any) {
+            if (attempt === 0) {
+                await sleep(1000);
+                continue;
+            }
+            webhookLog.warn({ action: 'notification_delivery_error', webhookId: webhook.id, projectId: webhook.projectId, method, err: e?.message || String(e) }, `notification ${method} errored`);
+            return null;
+        }
+    }
+    return null;
+};
+
+// Send a scenario notification and capture the created message id (for later edit/delete). Returns
+// the message id, or null on failure.
+export const sendScenarioMessage = async (webhook: ProjectWebhook, message: NotificationMessage): Promise<string | null> => {
+    const transport = webhookTransports[webhook.type];
+    if (!transport?.supportsMessageEditing) return null;
+    const url = transport.sendWithIdUrl(webhook.url);
+    const body = transport.renderNotification(message);
+    const result = await deliverNotificationWithRetry(webhook, url, 'POST', body);
+    if (!result) return null;
+    return transport.parseMessageId(result.json) ?? null;
+};
+
+// Edit a previously-sent scenario message in place. Returns whether the edit succeeded.
+export const editScenarioMessage = async (webhook: ProjectWebhook, messageId: string, message: NotificationMessage): Promise<boolean> => {
+    const transport = webhookTransports[webhook.type];
+    if (!transport?.supportsMessageEditing) return false;
+    const url = transport.messageUrl(webhook.url, messageId);
+    const body = transport.renderNotification(message);
+    return (await deliverNotificationWithRetry(webhook, url, 'PATCH', body)) !== null;
+};
+
+// Delete a previously-sent scenario message. Returns whether the delete succeeded.
+export const deleteScenarioMessage = async (webhook: ProjectWebhook, messageId: string): Promise<boolean> => {
+    const transport = webhookTransports[webhook.type];
+    if (!transport?.supportsMessageEditing) return false;
+    const url = transport.messageUrl(webhook.url, messageId);
+    return (await deliverNotificationWithRetry(webhook, url, 'DELETE')) !== null;
 };
 
 // Deliver a synthetic event to one webhook so the user can verify their configuration. Unlike
