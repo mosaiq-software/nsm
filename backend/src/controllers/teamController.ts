@@ -93,8 +93,12 @@ export const buildMeResponse = async (user: User): Promise<MeResponse> => {
 
 // Env var values are only exposed to users who can CONFIGURE; VIEW/DEPLOY-only users get names +
 // placeholders with blanked values so secrets never reach the client for a project they can't edit.
-export const redactProjectSecrets = (project: Project, canConfigure: boolean): Project =>
-    canConfigure ? project : { ...project, secrets: project.secrets?.map((s) => ({ ...s, secretValue: s.variable ? s.secretValue : '' })) };
+export const redactProjectSecrets = (project: Project, canConfigure: boolean): Project => {
+    // The managed CD webhook secret is never needed by the client; strip it from every response.
+    const cicd = project.cicd ? { ...project.cicd, webhookSecret: '' } : project.cicd;
+    if (canConfigure) return { ...project, cicd };
+    return { ...project, cicd, secrets: project.secrets?.map((s) => ({ ...s, secretValue: s.variable ? s.secretValue : '' })) };
+};
 
 // Projects the user is allowed to view, for GET /projects (secrets redacted unless they can configure).
 export const getVisibleProjects = async (user: User): Promise<Project[]> => {

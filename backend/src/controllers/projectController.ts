@@ -14,7 +14,6 @@ import { clearProjectApiKeys } from './apiKeyController';
 import { clearProjectWebhooks } from './webhookController';
 import { cluster } from '@/cluster/node';
 import { areaLog } from '@/utils/log';
-import { putRepoSecret } from '@/utils/githubApp';
 
 const projectLog = areaLog('project');
 
@@ -146,14 +145,6 @@ export const resetDeploymentKey = async (projectId: string): Promise<string | nu
     if (!project) return null;
     const newKey = generate32CharKey();
     await updateProjectNoDirty(projectId, { deploymentKey: newKey });
-    // Keep a managed CI/CD pipeline working by re-writing the repo secret with the new key.
-    if (project.cicd?.managed) {
-        try {
-            await putRepoSecret(project.repoOwner, project.repoName, project.cicd.secretName, newKey);
-        } catch (e: any) {
-            projectLog.warn({ action: 'deployment_key_secret_update_failed', projectId, err: e?.message }, `failed to update CI/CD secret for ${projectId}`);
-        }
-    }
     projectLog.info({ action: 'deployment_key_reset', projectId }, `deployment key reset for ${projectId}`);
     return newKey;
 };

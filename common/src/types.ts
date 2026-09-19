@@ -45,21 +45,22 @@ export interface ProjectResourceUsage {
     memoryBytes: number;
     storageBytes: number;
 }
-// Trigger types a managed GitHub Actions workflow can react to.
+// Trigger types managed CD can react to. PUSH/PR_MERGE/RELEASE/TAG map to GitHub webhook events;
+// SCHEDULE is driven by an NSM-side cron job on the leader (no webhook equivalent).
 export enum CdTrigger {
     PUSH = 'push',
     PR_MERGE = 'pr_merge',
     RELEASE = 'release',
     TAG = 'tag',
-    MANUAL = 'manual',
     SCHEDULE = 'schedule',
 }
 
-// Snapshot of the managed CI/CD workflow that NSM committed to a project's repository. Stored on the
-// project so the UI can render current state and the backend can clean up on removal.
+// Snapshot of the managed CD that NSM provisioned for a project: a GitHub repository webhook (plus an
+// optional internal schedule). Stored on the project so the UI can render current state and the
+// backend can clean up on removal.
 export interface CdConfig {
     managed: boolean;
-    // Branch the workflow file is committed to (and, for PUSH, the branch that triggers deploys).
+    // Branch watched for PUSH triggers and, together with `branches`, the base branch for PR_MERGE.
     branch: string;
     triggers: CdTrigger[];
     // Branches watched for PUSH / PR_MERGE triggers. Defaults to [branch] when omitted.
@@ -68,16 +69,12 @@ export interface CdConfig {
     tagPattern?: string;
     // Cron expression for SCHEDULE triggers.
     cron?: string;
-    // When true, the workflow was committed via a pull request rather than pushed directly.
-    viaPr: boolean;
-    // Path of the committed workflow file within the repo.
-    workflowPath: string;
-    // Name of the repo secret holding the deploy key.
-    secretName: string;
-    // URL of the pull request opened when viaPr is true.
-    prUrl?: string;
-    // SHA of the commit that added the workflow file (direct-push mode).
-    commitSha?: string;
+    // Numeric id of the GitHub repository webhook NSM registered (for update/removal).
+    webhookId: number;
+    // HMAC secret configured on the webhook, used to verify inbound deliveries. Redacted in responses.
+    webhookSecret: string;
+    // The NSM URL GitHub delivers events to for this project.
+    deliveryUrl: string;
     setupAt: number;
 }
 
@@ -88,7 +85,6 @@ export interface CdSetupRequest {
     branches?: string[];
     tagPattern?: string;
     cron?: string;
-    viaPr: boolean;
 }
 
 export interface Secret {

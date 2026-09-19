@@ -326,8 +326,8 @@ This installs dependencies (Node, Docker, nginx, certbot), lays down the code, c
 **2. Create a GitHub App** (in your browser) so the leader can clone your private app repos for deployment, unattended, without a machine-user account. You do this once.
 
    1. Go to **GitHub -> Settings -> Developer settings -> GitHub Apps -> New GitHub App** (personal account or an organization).
-   2. Give it any name. Set **Homepage URL** to anything (e.g. your leader's address). Under **Webhook**, **uncheck Active** (NSM doesn't need webhooks).
-   3. Under **Repository permissions**, set **Contents** to **Read-only**. Leave everything else as **No access**.
+   2. Give it any name. Set **Homepage URL** to anything (e.g. your leader's address). Under **Webhook**, **uncheck Active** (NSM registers per-repo webhooks via the API; it doesn't use the App's own global webhook).
+   3. Under **Repository permissions**, set **Contents** to **Read-only**. For managed CD, also set **Webhooks** to **Read and write** (NSM registers a per-repo webhook to trigger deploys). Leave everything else as **No access**.
    4. Create the App. On its page, note the **App ID** (a number).
    5. Scroll to **Private keys** and click **Generate a private key**. Your browser downloads a `.pem` file - keep it handy; you'll paste it in the next step.
    6. In the left sidebar click **Install App**, install it on your account/org, and choose **Only select repositories** -> pick the app repos you'll deploy (you can add more later).

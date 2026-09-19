@@ -8,6 +8,7 @@ import { leaderEnsureCerts } from '@/reconcile/certs';
 import { runSelfUpdateRolloutIfLeader } from '@/cluster/selfUpdate';
 import { collectDiskUsage } from '@/reconcile/diskUsage';
 import { checkAllQuotas } from '@/controllers/quotaController';
+import { initCdSchedules } from '@/controllers/cdScheduler';
 import { syncCloudflare } from '@/reconcile/cloudflareSync';
 import { checkPublicIp } from '@/reconcile/publicIpWatcher';
 import { isCloudflareConfigured } from '@/config';
@@ -110,6 +111,10 @@ export const registerCronJobs = () => {
         if (cluster.isLeader()) void rollupHealthSamples().catch((e) => initLog.error({ action: 'health_rollup_failed', err: e?.message }, 'health rollup failed'));
     });
     initLog.info({ action: 'cron_registered', jobs: ['cert_renewal:*/30', 'self_update:*', 'disk_usage:*/30', 'quota_check:*/5', 'cloudflare_sync:*/5', `public_ip:${ipCron}`, 'health_prune:0 3', 'health_rollup:5 *'] }, 'cron jobs registered');
+
+    // Managed CD SCHEDULE triggers: rebuild per-project cron tasks from persisted config. Tasks only
+    // fire on the leader, so registering on every node is safe.
+    void initCdSchedules().catch((e) => initLog.error({ action: 'cd_schedules_init_failed', err: e?.message }, 'CD schedule init failed'));
 
     // Leader-only: sample every project's health on a sub-minute cadence (finer than node-cron
     // supports), feeding the uptime time series that powers the status page and public API.

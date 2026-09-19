@@ -61,6 +61,7 @@ export enum API_ROUTES {
     POST_DEPLOYMENT_LOG_UPDATE = '/deploy/update',
     POST_GITHUB_LOGIN = '/login/github/:token',
     POST_GITHUB_LOGOUT = '/logout/github/:token',
+    POST_GITHUB_WEBHOOK = '/github/webhook/:projectId',
     POST_SET_TEAM_DEFAULTS = '/team/:ownerId/defaults',
     POST_SET_TEAM_OVERRIDE = '/team/:ownerId/override',
     POST_DELETE_TEAM_OVERRIDE = '/team/:ownerId/override/delete',
@@ -158,6 +159,7 @@ export interface API_PARAMS {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: {};
     [API_ROUTES.POST_GITHUB_LOGIN]: { token: string };
     [API_ROUTES.POST_GITHUB_LOGOUT]: { token: string };
+    [API_ROUTES.POST_GITHUB_WEBHOOK]: { projectId: string };
     [API_ROUTES.POST_SET_TEAM_DEFAULTS]: { ownerId: string };
     [API_ROUTES.POST_SET_TEAM_OVERRIDE]: { ownerId: string };
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: { ownerId: string };
@@ -257,6 +259,7 @@ export interface API_BODY {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: DeploymentLogUpdate;
     [API_ROUTES.POST_GITHUB_LOGIN]: {};
     [API_ROUTES.POST_GITHUB_LOGOUT]: {};
+    [API_ROUTES.POST_GITHUB_WEBHOOK]: unknown;
     [API_ROUTES.POST_SET_TEAM_DEFAULTS]: { capabilities: Capability[] };
     [API_ROUTES.POST_SET_TEAM_OVERRIDE]: { memberId: string; memberLogin: string; capabilities: Capability[] };
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: { memberId: string };
@@ -354,6 +357,7 @@ export interface API_RETURN {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: undefined;
     [API_ROUTES.POST_GITHUB_LOGIN]: User | undefined;
     [API_ROUTES.POST_GITHUB_LOGOUT]: undefined;
+    [API_ROUTES.POST_GITHUB_WEBHOOK]: undefined;
     [API_ROUTES.POST_SET_TEAM_DEFAULTS]: undefined;
     [API_ROUTES.POST_SET_TEAM_OVERRIDE]: undefined;
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: undefined;
@@ -453,6 +457,7 @@ export interface API_AUTH {
     [API_ROUTES.POST_DEPLOYMENT_LOG_UPDATE]: string;
     [API_ROUTES.POST_GITHUB_LOGIN]: undefined;
     [API_ROUTES.POST_GITHUB_LOGOUT]: string;
+    [API_ROUTES.POST_GITHUB_WEBHOOK]: undefined;
     [API_ROUTES.POST_SET_TEAM_DEFAULTS]: string;
     [API_ROUTES.POST_SET_TEAM_OVERRIDE]: string;
     [API_ROUTES.POST_DELETE_TEAM_OVERRIDE]: string;

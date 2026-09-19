@@ -10,7 +10,9 @@ export const initApp = async () => {
     const app = express();
     app.use(requestLogger);
     app.use(cors());
-    app.use(express.json({ limit: '100mb' }));
+    // Capture the raw request bytes so webhook handlers can verify HMAC signatures over the exact
+    // payload GitHub signed (JSON.stringify of the parsed body would not byte-match).
+    app.use(express.json({ limit: '100mb', verify: (req, _res, buf) => ((req as any).rawBody = buf) }));
     app.use(express.urlencoded({ extended: true, limit: '100mb' }));
     app.set('trust proxy', true);
 

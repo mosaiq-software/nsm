@@ -1,4 +1,4 @@
-import { Alert, Autocomplete, Button, Checkbox, Code, Group, List, Radio, Stack, Stepper, Text, TextInput } from '@mantine/core';
+import { Alert, Autocomplete, Button, Checkbox, Group, List, Stack, Stepper, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { CdTrigger, Project } from '@mosaiq/nsm-common/types';
@@ -10,8 +10,7 @@ const TRIGGER_LABELS: { value: CdTrigger; label: string; description: string }[]
     { value: CdTrigger.PR_MERGE, label: 'On pull request merge', description: 'Deploy when a pull request into the deploy branch is merged.' },
     { value: CdTrigger.RELEASE, label: 'On release published', description: 'Deploy when a GitHub release is published.' },
     { value: CdTrigger.TAG, label: 'On tag', description: 'Deploy when a tag matching a pattern is pushed.' },
-    { value: CdTrigger.MANUAL, label: 'Manual', description: 'Allow triggering the deploy manually from the Actions tab.' },
-    { value: CdTrigger.SCHEDULE, label: 'On a schedule', description: 'Deploy on a recurring cron schedule.' },
+    { value: CdTrigger.SCHEDULE, label: 'On a schedule', description: 'Deploy on a recurring cron schedule (handled by NSM).' },
 ];
 
 interface CdWizardProps {
@@ -20,8 +19,8 @@ interface CdWizardProps {
     onCancel: () => void;
 }
 
-// Multi-step wizard that collects the trigger/branch/commit choices and calls POST_CICD_SETUP to
-// have NSM provision the deploy-key secret and commit a managed GitHub Actions workflow.
+// Multi-step wizard that collects the trigger/branch choices and calls POST_CICD_SETUP to have NSM
+// register a GitHub repository webhook (secret + event filter) that drives deployments.
 export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
     const api = useAPI();
     const [active, setActive] = useState(0);
@@ -29,7 +28,6 @@ export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
     const [branch, setBranch] = useState(project.repoBranch || 'main');
     const [tagPattern, setTagPattern] = useState('v*');
     const [cron, setCron] = useState('0 0 * * *');
-    const [viaPr, setViaPr] = useState(false);
     const [branches, setBranches] = useState<string[]>([]);
     const [submitting, setSubmitting] = useState(false);
 
@@ -65,14 +63,13 @@ export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
                     triggers,
                     tagPattern: has(CdTrigger.TAG) ? tagPattern.trim() : undefined,
                     cron: has(CdTrigger.SCHEDULE) ? cron.trim() : undefined,
-                    viaPr,
                 }
             );
             if (!updated) {
                 notifications.show({ message: 'Failed to set up CI/CD', color: 'red' });
                 return;
             }
-            notifications.show({ message: viaPr ? 'CI/CD pull request opened' : 'CI/CD workflow committed', color: 'green' });
+            notifications.show({ message: 'CI/CD webhook registered', color: 'green' });
             onComplete(updated);
         } catch {
             notifications.show({ message: 'Failed to set up CI/CD', color: 'red' });
@@ -106,23 +103,9 @@ export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
                 <Stepper.Step label="Branch" description="Deploy branch">
                     <Stack mt="md">
                         <Text size="sm" c="dimmed">
-                            The branch the workflow file is committed to, and the branch watched for push / pull-request triggers.
+                            The branch watched for push and pull-request triggers.
                         </Text>
                         <Autocomplete label="Deploy branch" data={branches} value={branch} onChange={setBranch} placeholder="main" w="32ch" />
-                    </Stack>
-                </Stepper.Step>
-
-                <Stepper.Step label="Commit" description="How to apply">
-                    <Stack mt="md">
-                        <Text size="sm" c="dimmed">
-                            NSM commits <Code>.github/workflows/nsm-deploy-{project.id}.yml</Code> to your repository.
-                        </Text>
-                        <Radio.Group value={viaPr ? 'pr' : 'direct'} onChange={(v) => setViaPr(v === 'pr')}>
-                            <Stack gap="xs" mt="xs">
-                                <Radio value="direct" label="Push directly" description={`Commit the workflow straight to ${branch || 'the deploy branch'}.`} />
-                                <Radio value="pr" label="Open a pull request" description="Create a branch and open a PR you can review and merge." />
-                            </Stack>
-                        </Radio.Group>
                     </Stack>
                 </Stepper.Step>
 
@@ -146,12 +129,9 @@ export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
                                     Cron: <b>{cron}</b>
                                 </List.Item>
                             )}
-                            <List.Item>
-                                Commit method: <b>{viaPr ? 'Open a pull request' : 'Push directly'}</b>
-                            </List.Item>
                         </List>
                         <Alert color="blue" variant="light">
-                            NSM will store the deploy key as an encrypted repository secret and commit the workflow via the GitHub App.
+                            NSM will register a GitHub repository webhook (with a signing secret and an event filter) via the GitHub App. Deployments are triggered when a delivered event matches these conditions.
                         </Alert>
                     </Stack>
                 </Stepper.Completed>
@@ -161,13 +141,13 @@ export const CdWizard = ({ project, onComplete, onCancel }: CdWizardProps) => {
                 <Button variant="default" onClick={active === 0 ? onCancel : () => setActive((s) => s - 1)}>
                     {active === 0 ? 'Cancel' : 'Back'}
                 </Button>
-                {active < 3 ? (
+                {active < 2 ? (
                     <Button onClick={() => setActive((s) => s + 1)} disabled={nextDisabled}>
                         Next
                     </Button>
                 ) : (
                     <Button color="green" onClick={handleSubmit} loading={submitting}>
-                        {viaPr ? 'Open pull request' : 'Commit workflow'}
+                        Register webhook
                     </Button>
                 )}
             </Group>

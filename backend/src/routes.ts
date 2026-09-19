@@ -31,6 +31,7 @@ import { createReservation, deleteReservation, listAllReservations, listNodeRese
 import { buildMeResponse, clearTeamOverride, getTeamDetail, getVisibleProjects, listAllTeams, redactProjectSecrets, setTeamDefaults, setTeamOverride } from '@/controllers/teamController';
 import { addAdmin, getAdmins, removeAdmin } from '@/controllers/adminController';
 import { removeManagedCd, setupManagedCd } from '@/controllers/cicdController';
+import { handleGithubWebhook } from '@/controllers/githubWebhookController';
 import { getProjectNotificationEnabled, getVapidPublicKey, sendTestNotification, setProjectNotification, subscribe, unsubscribe } from '@/controllers/pushController';
 import { getAllNodesModel, getNodeByIdModel } from '@/persistence/nodePersistence';
 import { config, gitSshKeyPath, isGithubAppConfigured } from '@/config';
@@ -169,6 +170,28 @@ publicRouter.get(API_ROUTES.GET_DEPLOY, async (req, res) => {
         res.status(200).json(undefined);
     } catch (e) {
         routeLog.error({ action: 'deploy_webhook_error', err: (e as any)?.message }, 'error deploying (webhook)');
+        res.status(500).send();
+    }
+});
+
+// GitHub repository webhook receiver (managed CD). Verifies the HMAC signature, evaluates the
+// project's CD conditions, and enqueues a deploy on a match. Write -> must run on leader.
+publicRouter.post(API_ROUTES.POST_GITHUB_WEBHOOK, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.POST_GITHUB_WEBHOOK];
+    try {
+        if (!params.projectId) return void res.status(400).send('No projectId');
+        if (!requireLeader(req, res)) return;
+        const rawBody: Buffer = (req as any).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
+        const eventType = req.header('x-github-event');
+        const signature = req.header('x-hub-signature-256');
+        const outcome = await handleGithubWebhook(params.projectId, eventType, signature, rawBody, req.body);
+        if (outcome.deploy) {
+            if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
+            await enqueueDeploy(params.projectId);
+        }
+        res.status(outcome.status).send(outcome.message);
+    } catch (e) {
+        routeLog.error({ action: 'github_webhook_error', err: (e as any)?.message }, 'error handling GitHub webhook');
         res.status(500).send();
     }
 });
@@ -664,7 +687,7 @@ privateRouter.post(API_ROUTES.POST_CICD_SETUP, async (req, res) => {
         if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
         const project = await setupManagedCd(params.projectId, body);
         if (!project) return void res.status(404).send('Project not found');
-        res.status(200).json(project);
+        res.status(200).json(redactProjectSecrets(project, true));
     } catch (e) {
         routeLog.error({ action: 'cicd_setup_error', err: (e as any)?.message }, 'error setting up managed CI/CD');
         res.status(500).send((e as any)?.message || 'Failed to set up CI/CD');
@@ -680,7 +703,7 @@ privateRouter.post(API_ROUTES.POST_CICD_REMOVE, async (req, res) => {
         if (!(await requireOwnerInstalledForProject(res, params.projectId))) return;
         const project = await removeManagedCd(params.projectId);
         if (!project) return void res.status(404).send('Project not found');
-        res.status(200).json(project);
+        res.status(200).json(redactProjectSecrets(project, true));
     } catch (e) {
         routeLog.error({ action: 'cicd_remove_error', err: (e as any)?.message }, 'error removing managed CI/CD');
         res.status(500).send((e as any)?.message || 'Failed to remove CI/CD');

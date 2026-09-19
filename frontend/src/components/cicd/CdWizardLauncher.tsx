@@ -1,4 +1,4 @@
-import { Anchor, Button, Card, Group, Modal, Stack, Text, Title } from '@mantine/core';
+import { Button, Card, Code, Group, Modal, Stack, Text, Title } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { Project } from '@mosaiq/nsm-common/types';
@@ -52,7 +52,7 @@ export const CdWizardLauncher = ({ project }: { project: Project }) => {
                 <Stack>
                     <Title order={3}>Remove Continuous Deployment</Title>
                     <Text>
-                        This deletes the managed workflow file{cd?.viaPr ? ' and its pull-request branch' : ''} and the deploy-key repository secret. To change the configuration, remove it and run the wizard again.
+                        This deletes the GitHub webhook NSM registered for this project. To change the configuration, remove it and run the wizard again.
                     </Text>
                     <Group justify="space-between">
                         <Button variant="filled" onClick={() => setModal(null)}>
@@ -98,20 +98,12 @@ export const CdWizardLauncher = ({ project }: { project: Project }) => {
                                 Deploy branch: <b>{cd.branch}</b>
                             </Text>
                             <Text size="sm">
-                                Workflow file: <b>{cd.workflowPath}</b>
+                                Delivering to: <Code>{cd.deliveryUrl}</Code>
                             </Text>
-                            {cd.prUrl && (
-                                <Text size="sm">
-                                    Pull request:{' '}
-                                    <Anchor href={cd.prUrl} target="_blank" rel="noreferrer">
-                                        {cd.prUrl}
-                                    </Anchor>
-                                </Text>
-                            )}
                         </Stack>
                     ) : (
                         <Text size="sm" c="dimmed">
-                            Let NSM provision a managed GitHub Actions workflow that deploys this project automatically. The deploy key is stored as an encrypted repository secret.
+                            Let NSM register a GitHub repository webhook that deploys this project automatically when matching events are delivered.
                         </Text>
                     )}
                 </Stack>

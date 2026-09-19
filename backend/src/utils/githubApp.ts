@@ -3,7 +3,6 @@ import { readFileSync } from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import sodium from 'libsodium-wrappers';
 import { config } from '@/config';
 import { cluster } from '@/cluster/node';
 import { postToLeader } from '@/cluster/leaderClient';
@@ -246,137 +245,34 @@ export const listRepoBranches = async (owner: string, repo: string): Promise<str
     return names;
 };
 
-// ===== Managed CI/CD provisioning (leader-only) =====
-// These helpers write to a repo (secrets + workflow file) using a repo-scoped installation token.
-// They require the App to be granted "Secrets: write", "Contents: write" and "Workflows: write".
+// ===== Managed CD provisioning (leader-only) =====
+// These helpers register/remove a repository webhook using a repo-scoped installation token. They
+// require the App to be granted the repository "Webhooks: write" permission (repository_hooks).
 
-// PUT a repository Actions secret. GitHub requires the value to be encrypted with the repo's public
-// key using a libsodium sealed box, so we fetch the key, encrypt, then upload the base64 ciphertext.
-export const putRepoSecret = async (owner: string, repo: string, name: string, value: string): Promise<void> => {
+// Create a repository webhook that delivers the given events (JSON payload) to `url`, signed with
+// `secret` (HMAC-SHA256). Returns the numeric hook id so it can be updated or removed later.
+export const createRepoWebhook = async (owner: string, repo: string, url: string, secret: string, events: string[]): Promise<number> => {
     const token = (await mintInstallationToken(owner, repo)).token;
-    const keyRes = await ghInstallationRequest(token, `/repos/${owner}/${repo}/actions/secrets/public-key`);
-    if (!keyRes.ok) throw new Error(`Failed to fetch Actions public key for ${owner}/${repo}: ${keyRes.status} ${await keyRes.text()}`);
-    const { key, key_id } = (await keyRes.json()) as { key: string; key_id: string };
-
-    await sodium.ready;
-    const messageBytes = sodium.from_string(value);
-    const keyBytes = sodium.from_base64(key, sodium.base64_variants.ORIGINAL);
-    const encryptedBytes = sodium.crypto_box_seal(messageBytes, keyBytes);
-    const encryptedValue = sodium.to_base64(encryptedBytes, sodium.base64_variants.ORIGINAL);
-
-    const putRes = await ghInstallationRequest(token, `/repos/${owner}/${repo}/actions/secrets/${name}`, {
-        method: 'PUT',
-        body: JSON.stringify({ encrypted_value: encryptedValue, key_id }),
-    });
-    if (!putRes.ok) throw new Error(`Failed to set secret ${name} for ${owner}/${repo}: ${putRes.status} ${await putRes.text()}`);
-};
-
-// DELETE a repository Actions secret. Best-effort: a 404 (already gone) is treated as success.
-export const deleteRepoSecret = async (owner: string, repo: string, name: string): Promise<void> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/actions/secrets/${name}`, { method: 'DELETE' });
-    if (!res.ok && res.status !== 404) throw new Error(`Failed to delete secret ${name} for ${owner}/${repo}: ${res.status} ${await res.text()}`);
-};
-
-// Fetch the blob SHA of a file on a branch, or undefined if it does not exist. Needed to update an
-// existing workflow file (GitHub requires the prior SHA on update).
-export const getRepoFileSha = async (owner: string, repo: string, filePath: string, ref: string): Promise<string | undefined> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/contents/${encodeContentsPath(filePath)}?ref=${encodeURIComponent(ref)}`);
-    if (res.status === 404) return undefined;
-    if (!res.ok) throw new Error(`Failed to read ${filePath} in ${owner}/${repo}: ${res.status} ${await res.text()}`);
-    const data = (await res.json()) as { sha: string };
-    return data.sha;
-};
-
-// Create or update a file on a branch. Returns the resulting commit SHA.
-export const putRepoFile = async (
-    owner: string,
-    repo: string,
-    filePath: string,
-    content: string,
-    message: string,
-    branch: string,
-    sha?: string
-): Promise<string> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/contents/${encodeContentsPath(filePath)}`, {
-        method: 'PUT',
+    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/hooks`, {
+        method: 'POST',
         body: JSON.stringify({
-            message,
-            content: Buffer.from(content, 'utf-8').toString('base64'),
-            branch,
-            ...(sha ? { sha } : {}),
+            name: 'web',
+            active: true,
+            events,
+            config: { url, content_type: 'json', secret, insecure_ssl: '0' },
         }),
     });
-    if (!res.ok) throw new Error(`Failed to commit ${filePath} to ${owner}/${repo}@${branch}: ${res.status} ${await res.text()}`);
-    const data = (await res.json()) as { commit: { sha: string } };
-    return data.commit.sha;
+    if (!res.ok) throw new Error(`Failed to create webhook for ${owner}/${repo}: ${res.status} ${await res.text()}`);
+    const data = (await res.json()) as { id: number };
+    return data.id;
 };
 
-// Delete a file on a branch. Best-effort: a 404 (already gone) is treated as success.
-export const deleteRepoFile = async (owner: string, repo: string, filePath: string, message: string, branch: string): Promise<void> => {
-    const sha = await getRepoFileSha(owner, repo, filePath, branch);
-    if (!sha) return;
+// Delete a repository webhook by id. Best-effort: a 404 (already gone) is treated as success.
+export const deleteRepoWebhook = async (owner: string, repo: string, hookId: number): Promise<void> => {
     const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/contents/${encodeContentsPath(filePath)}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ message, sha, branch }),
-    });
-    if (!res.ok && res.status !== 404) throw new Error(`Failed to delete ${filePath} from ${owner}/${repo}@${branch}: ${res.status} ${await res.text()}`);
+    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/hooks/${hookId}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) throw new Error(`Failed to delete webhook ${hookId} for ${owner}/${repo}: ${res.status} ${await res.text()}`);
 };
-
-// The repository's default branch (used as the base when opening a PR).
-export const getDefaultBranch = async (owner: string, repo: string): Promise<string> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}`);
-    if (!res.ok) throw new Error(`Failed to read repo ${owner}/${repo}: ${res.status} ${await res.text()}`);
-    const data = (await res.json()) as { default_branch: string };
-    return data.default_branch;
-};
-
-// The tip commit SHA of a branch.
-export const getBranchSha = async (owner: string, repo: string, branch: string): Promise<string> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/git/ref/${encodeURIComponent(`heads/${branch}`)}`);
-    if (!res.ok) throw new Error(`Failed to read branch ${branch} in ${owner}/${repo}: ${res.status} ${await res.text()}`);
-    const data = (await res.json()) as { object: { sha: string } };
-    return data.object.sha;
-};
-
-// Create a new branch pointing at the given commit SHA.
-export const createBranch = async (owner: string, repo: string, branch: string, fromSha: string): Promise<void> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/git/refs`, {
-        method: 'POST',
-        body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: fromSha }),
-    });
-    if (!res.ok) throw new Error(`Failed to create branch ${branch} in ${owner}/${repo}: ${res.status} ${await res.text()}`);
-};
-
-// Delete a branch (used to clean up an NSM PR branch on CD removal). Best-effort.
-export const deleteBranch = async (owner: string, repo: string, branch: string): Promise<void> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/git/refs/${encodeURIComponent(`heads/${branch}`)}`, { method: 'DELETE' });
-    if (!res.ok && res.status !== 404 && res.status !== 422) {
-        throw new Error(`Failed to delete branch ${branch} in ${owner}/${repo}: ${res.status} ${await res.text()}`);
-    }
-};
-
-// Open a pull request. Returns its html_url.
-export const createPullRequest = async (owner: string, repo: string, head: string, base: string, title: string, body: string): Promise<string> => {
-    const token = (await mintInstallationToken(owner, repo)).token;
-    const res = await ghInstallationRequest(token, `/repos/${owner}/${repo}/pulls`, {
-        method: 'POST',
-        body: JSON.stringify({ head, base, title, body }),
-    });
-    if (!res.ok) throw new Error(`Failed to open pull request in ${owner}/${repo}: ${res.status} ${await res.text()}`);
-    const data = (await res.json()) as { html_url: string };
-    return data.html_url;
-};
-
-// The contents API expects each path segment encoded but slashes preserved.
-const encodeContentsPath = (filePath: string): string => filePath.split('/').map(encodeURIComponent).join('/');
 
 // Role-aware: the leader mints locally; a follower asks the leader for a fresh token so the App
 // private key never leaves the leader.
