@@ -1,21 +1,14 @@
-import { ActionIcon, Alert, Anchor, Badge, Button, Divider, Fieldset, Group, Modal, MultiSelect, NumberInput, Select, Stack, Switch, Table, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Anchor, Badge, Button, Center, Divider, Fieldset, Group, Loader, Modal, MultiSelect, NumberInput, Select, Stack, Switch, Table, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core';
 import { Sparkline } from '@mantine/charts';
 import { notifications } from '@mantine/notifications';
 import { DnsNameAnalytics, DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, DnsZoneAnalytics, PortReservation, Team } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAPI } from '@/utils/api';
-import { MdOpenInNew, MdOutlineDelete, MdOutlineEdit } from 'react-icons/md';
-
-interface DomainDetailModalProps {
-    zone: DnsZone;
-    teams: Team[];
-    isAdmin: boolean;
-    isSuperAdmin: boolean;
-    publicIp: string | null;
-    onClose: () => void;
-    onChanged: () => void;
-}
+import { useMe } from '@/contexts/me-context';
+import { useDomains } from '@/contexts/domains-context';
+import { MdArrowBack, MdOpenInNew, MdOutlineDelete, MdOutlineEdit } from 'react-icons/md';
 
 const PROXYABLE = new Set<DnsRecordType>(['A', 'AAAA', 'CNAME']);
 const DYNAMIC_CAPABLE = new Set<DnsRecordType>(['A', 'AAAA']);
@@ -32,7 +25,82 @@ const NEW_ID_PREFIX = 'new:';
 const tempId = (): string => `${NEW_ID_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const isNewRecord = (id: string): boolean => id.startsWith(NEW_ID_PREFIX);
 
-export const DomainDetailModal = (props: DomainDetailModalProps) => {
+const DomainDetailPage = () => {
+    const api = useAPI();
+    const meCtx = useMe();
+    const domainsCtx = useDomains();
+    const navigate = useNavigate();
+    const { zoneId = '' } = useParams();
+
+    const [teams, setTeams] = useState<Team[]>([]);
+    const [publicIp, setPublicIp] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!meCtx.isAdmin) return;
+        void api.get(API_ROUTES.GET_TEAMS, {}).then((res) => setTeams(res ?? []));
+        void api.get(API_ROUTES.GET_PUBLIC_IP, {}).then((res) => setPublicIp((res as { ip: string | null })?.ip ?? null));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [meCtx.isAdmin, api.token]);
+
+    const zone = domainsCtx.domains.find((z) => z.id === zoneId);
+
+    const backLink = (
+        <Anchor component={Link} to="/domains" c="dimmed">
+            <Group gap={4}>
+                <MdArrowBack />
+                <Text>Domains</Text>
+            </Group>
+        </Anchor>
+    );
+
+    if (!domainsCtx.ready) {
+        return (
+            <Center>
+                <Loader />
+            </Center>
+        );
+    }
+
+    if (!zone) {
+        return (
+            <Stack>
+                {backLink}
+                <Title order={4}>Domain not found.</Title>
+                <Text c="dimmed" fz="sm">
+                    This domain may have been removed, or you may not have access to it.
+                </Text>
+            </Stack>
+        );
+    }
+
+    return (
+        <Stack>
+            {backLink}
+            <DomainDetail
+                key={zone.id}
+                zone={zone}
+                teams={teams}
+                isAdmin={meCtx.isAdmin}
+                isSuperAdmin={meCtx.isSuperAdmin}
+                publicIp={publicIp}
+                onChanged={domainsCtx.refresh}
+                onDeleted={() => navigate('/domains')}
+            />
+        </Stack>
+    );
+};
+
+interface DomainDetailProps {
+    zone: DnsZone;
+    teams: Team[];
+    isAdmin: boolean;
+    isSuperAdmin: boolean;
+    publicIp: string | null;
+    onChanged: () => void;
+    onDeleted: () => void;
+}
+
+const DomainDetail = (props: DomainDetailProps) => {
     const api = useAPI();
     const { zone } = props;
     const [records, setRecords] = useState<DnsRecord[] | null>(null);
@@ -200,7 +268,7 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
             notifications.show({ color: 'green', message: `${zone.name} deleted from Cloudflare.` });
             setDeleteOpen(false);
             props.onChanged();
-            props.onClose();
+            props.onDeleted();
         } catch (e) {
             notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Delete failed.' });
         } finally {
@@ -209,9 +277,9 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
     };
 
     return (
-        <>
-            <Modal opened onClose={props.onClose} size="xl" closeOnClickOutside={false} title={<Title order={4}>{zone.name}</Title>}>
-            <Stack>
+        <Stack>
+            <Group justify="space-between" align="flex-start">
+                <Title order={3}>{zone.name}</Title>
                 {zone.dashboardUrl && (
                     <Anchor href={zone.dashboardUrl} target="_blank" rel="noopener noreferrer" fz="sm">
                         <Group gap={4} align="center">
@@ -220,174 +288,173 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
                         </Group>
                     </Anchor>
                 )}
-                <Group gap="xs">
-                    <Badge color={zone.status === 'active' ? 'green' : 'yellow'} variant="light">
-                        {zone.status}
-                    </Badge>
-                    {zone.paused && <Badge color="orange">paused</Badge>}
-                    {zone.billing?.registrationStatus && <Badge variant="outline">{zone.billing.registrationStatus}</Badge>}
-                    {zone.billing?.autoRenew !== undefined && <Badge variant="outline">auto-renew {zone.billing.autoRenew ? 'on' : 'off'}</Badge>}
-                </Group>
-                {hasBilling && (
-                    <>
-                        <Divider label="Billing" />
-                        <Group gap="xl">
-                            {zone.billing?.registrationCost && (
-                                <Text fz="sm">
-                                    <Text span c="dimmed">Registration: </Text>
-                                    {money(zone.billing.registrationCost)}
-                                    <Text span c="dimmed"> (one-time)</Text>
-                                </Text>
-                            )}
-                            {zone.billing?.renewalCost && (
-                                <Text fz="sm">
-                                    <Text span c="dimmed">Renewal: </Text>
-                                    {money(zone.billing.renewalCost)}
-                                    <Text span c="dimmed">/yr</Text>
-                                </Text>
-                            )}
-                            {monthlyEstimate && (
-                                <Text fz="sm">
-                                    <Text span c="dimmed">Est. monthly: </Text>
-                                    {monthlyEstimate}
-                                </Text>
-                            )}
-                            {zone.billing?.expiresAt && (
-                                <Text fz="sm">
-                                    <Text span c="dimmed">Expires: </Text>
-                                    {new Date(zone.billing.expiresAt).toLocaleDateString()}
-                                </Text>
-                            )}
-                        </Group>
-                    </>
-                )}
-                {props.publicIp && (
-                    <Text fz="sm" c="dimmed">
-                        Detected public IP: {props.publicIp}
-                    </Text>
-                )}
-
-                {props.isAdmin && (
-                    <>
-                        <Divider label="Team allocations" />
-                        <Text fz="xs" c="dimmed">
-                            Teams allowed to use this domain in their project config. A team cannot be removed while its projects still reference the domain.
-                        </Text>
-                        <MultiSelect data={props.teams.map((t) => ({ value: t.ownerId, label: t.login }))} value={allocations} onChange={setAllocations} placeholder="No teams" searchable />
-
-                        <Divider label="DNS records" />
-                        <Group justify="space-between" align="center">
-                            <Text fz="sm" c="dimmed">
-                                Managed at the domain level. Cloudflare is authoritative.
+            </Group>
+            <Group gap="xs">
+                <Badge color={zone.status === 'active' ? 'green' : 'yellow'} variant="light">
+                    {zone.status}
+                </Badge>
+                {zone.paused && <Badge color="orange">paused</Badge>}
+                {zone.billing?.registrationStatus && <Badge variant="outline">{zone.billing.registrationStatus}</Badge>}
+                {zone.billing?.autoRenew !== undefined && <Badge variant="outline">auto-renew {zone.billing.autoRenew ? 'on' : 'off'}</Badge>}
+            </Group>
+            {hasBilling && (
+                <>
+                    <Divider label="Billing" />
+                    <Group gap="xl">
+                        {zone.billing?.registrationCost && (
+                            <Text fz="sm">
+                                <Text span c="dimmed">Registration: </Text>
+                                {money(zone.billing.registrationCost)}
+                                <Text span c="dimmed"> (one-time)</Text>
                             </Text>
-                            <Group gap="sm" align="center">
-                                {analytics && analytics.total > 0 && (
-                                    <Tooltip label={`${analytics.total.toLocaleString()} DNS queries from ${analytics.since} to ${analytics.until}`}>
-                                        <Group gap={6} align="center">
-                                            <Sparkline w={90} h={26} data={analytics.totalSeries.map((p) => p.count)} curveType="monotone" color="blue" fillOpacity={0.2} strokeWidth={1.5} />
-                                            <Text fz="xs" c="dimmed">
-                                                {analytics.total.toLocaleString()} queries / 7d
-                                            </Text>
-                                        </Group>
-                                    </Tooltip>
-                                )}
-                                <Button size="compact-sm" onClick={startNew} disabled={editing !== null}>
-                                    Add record
-                                </Button>
-                            </Group>
-                        </Group>
-
-                        {editing !== null && (
-                            <RecordForm
-                                draft={draft}
-                                setDraft={setDraft}
-                                dataJson={dataJson}
-                                setDataJson={setDataJson}
-                                zoneName={zone.name}
-                                reservations={reservations}
-                                busy={busy}
-                                onCancel={() => setEditing(null)}
-                                onSave={applyRecord}
-                            />
                         )}
-
-                        <Table striped withRowBorders={false} verticalSpacing="xs" fz="sm">
-                            <Table.Thead>
-                                <Table.Tr>
-                                    <Table.Th>Type</Table.Th>
-                                    <Table.Th>Name</Table.Th>
-                                    <Table.Th>Content</Table.Th>
-                                    <Table.Th>TTL</Table.Th>
-                                    <Table.Th>Flags</Table.Th>
-                                    <Table.Th>Traffic (7d)</Table.Th>
-                                    <Table.Th />
-                                </Table.Tr>
-                            </Table.Thead>
-                            <Table.Tbody>
-                                {(records ?? []).map((r) => (
-                                    <Table.Tr key={r.id}>
-                                        <Table.Td>
-                                            <Badge variant="light">{r.type}</Badge>
-                                        </Table.Td>
-                                        <Table.Td>{r.name}</Table.Td>
-                                        <Table.Td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.data ? JSON.stringify(r.data) : r.content}</Table.Td>
-                                        <Table.Td>{r.ttl === 1 ? 'auto' : r.ttl}</Table.Td>
-                                        <Table.Td>
-                                            <Group gap={4}>
-                                                {r.proxied && <Badge size="xs" color="orange">proxied</Badge>}
-                                                {r.dynamic && <Badge size="xs" color="blue">dynamic</Badge>}
-                                                {r.portReservationId && <Badge size="xs" color="teal">port</Badge>}
-                                            </Group>
-                                        </Table.Td>
-                                        <Table.Td>
-                                            <RecordTraffic stats={analyticsByName.get(normName(r.name))} loading={props.isAdmin && analytics === null} />
-                                        </Table.Td>
-                                        <Table.Td>
-                                            <Group gap={4} justify="flex-end">
-                                                <Tooltip label="Edit">
-                                                    <ActionIcon variant="subtle" onClick={() => startEdit(r)} disabled={editing !== null}>
-                                                        <MdOutlineEdit />
-                                                    </ActionIcon>
-                                                </Tooltip>
-                                                <Tooltip label="Remove">
-                                                    <ActionIcon variant="subtle" color="red" onClick={() => removeRecord(r)} disabled={busy}>
-                                                        <MdOutlineDelete />
-                                                    </ActionIcon>
-                                                </Tooltip>
-                                            </Group>
-                                        </Table.Td>
-                                    </Table.Tr>
-                                ))}
-                                {records && records.length === 0 && (
-                                    <Table.Tr>
-                                        <Table.Td colSpan={7}>
-                                            <Text c="dimmed" fz="sm">
-                                                No records.
-                                            </Text>
-                                        </Table.Td>
-                                    </Table.Tr>
-                                )}
-                            </Table.Tbody>
-                        </Table>
-                    </>
-                )}
-
-                {props.isAdmin && (
-                    <Group justify="space-between" mt="md">
-                        <div>
-                            {props.isSuperAdmin && (
-                                <Button color="red" variant="light" onClick={() => setDeleteOpen(true)}>
-                                    Delete domain
-                                </Button>
-                            )}
-                        </div>
-                        <Button loading={busy} onClick={saveAll}>
-                            Save
-                        </Button>
+                        {zone.billing?.renewalCost && (
+                            <Text fz="sm">
+                                <Text span c="dimmed">Renewal: </Text>
+                                {money(zone.billing.renewalCost)}
+                                <Text span c="dimmed">/yr</Text>
+                            </Text>
+                        )}
+                        {monthlyEstimate && (
+                            <Text fz="sm">
+                                <Text span c="dimmed">Est. monthly: </Text>
+                                {monthlyEstimate}
+                            </Text>
+                        )}
+                        {zone.billing?.expiresAt && (
+                            <Text fz="sm">
+                                <Text span c="dimmed">Expires: </Text>
+                                {new Date(zone.billing.expiresAt).toLocaleDateString()}
+                            </Text>
+                        )}
                     </Group>
-                )}
-            </Stack>
-            </Modal>
+                </>
+            )}
+            {props.publicIp && (
+                <Text fz="sm" c="dimmed">
+                    Detected public IP: {props.publicIp}
+                </Text>
+            )}
+
+            {props.isAdmin && (
+                <>
+                    <Divider label="Team allocations" />
+                    <Text fz="xs" c="dimmed">
+                        Teams allowed to use this domain in their project config. A team cannot be removed while its projects still reference the domain.
+                    </Text>
+                    <MultiSelect data={props.teams.map((t) => ({ value: t.ownerId, label: t.login }))} value={allocations} onChange={setAllocations} placeholder="No teams" searchable />
+
+                    <Divider label="DNS records" />
+                    <Group justify="space-between" align="center">
+                        <Text fz="sm" c="dimmed">
+                            Managed at the domain level. Cloudflare is authoritative.
+                        </Text>
+                        <Group gap="sm" align="center">
+                            {analytics && analytics.total > 0 && (
+                                <Tooltip label={`${analytics.total.toLocaleString()} DNS queries from ${analytics.since} to ${analytics.until}`}>
+                                    <Group gap={6} align="center">
+                                        <Sparkline w={90} h={26} data={analytics.totalSeries.map((p) => p.count)} curveType="monotone" color="blue" fillOpacity={0.2} strokeWidth={1.5} />
+                                        <Text fz="xs" c="dimmed">
+                                            {analytics.total.toLocaleString()} queries / 7d
+                                        </Text>
+                                    </Group>
+                                </Tooltip>
+                            )}
+                            <Button size="compact-sm" onClick={startNew} disabled={editing !== null}>
+                                Add record
+                            </Button>
+                        </Group>
+                    </Group>
+
+                    {editing !== null && (
+                        <RecordForm
+                            draft={draft}
+                            setDraft={setDraft}
+                            dataJson={dataJson}
+                            setDataJson={setDataJson}
+                            zoneName={zone.name}
+                            reservations={reservations}
+                            busy={busy}
+                            onCancel={() => setEditing(null)}
+                            onSave={applyRecord}
+                        />
+                    )}
+
+                    <Table striped withRowBorders={false} verticalSpacing="xs" fz="sm">
+                        <Table.Thead>
+                            <Table.Tr>
+                                <Table.Th>Type</Table.Th>
+                                <Table.Th>Name</Table.Th>
+                                <Table.Th>Content</Table.Th>
+                                <Table.Th>TTL</Table.Th>
+                                <Table.Th>Flags</Table.Th>
+                                <Table.Th>Traffic (7d)</Table.Th>
+                                <Table.Th />
+                            </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                            {(records ?? []).map((r) => (
+                                <Table.Tr key={r.id}>
+                                    <Table.Td>
+                                        <Badge variant="light">{r.type}</Badge>
+                                    </Table.Td>
+                                    <Table.Td>{r.name}</Table.Td>
+                                    <Table.Td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.data ? JSON.stringify(r.data) : r.content}</Table.Td>
+                                    <Table.Td>{r.ttl === 1 ? 'auto' : r.ttl}</Table.Td>
+                                    <Table.Td>
+                                        <Group gap={4}>
+                                            {r.proxied && <Badge size="xs" color="orange">proxied</Badge>}
+                                            {r.dynamic && <Badge size="xs" color="blue">dynamic</Badge>}
+                                            {r.portReservationId && <Badge size="xs" color="teal">port</Badge>}
+                                        </Group>
+                                    </Table.Td>
+                                    <Table.Td>
+                                        <RecordTraffic stats={analyticsByName.get(normName(r.name))} loading={props.isAdmin && analytics === null} />
+                                    </Table.Td>
+                                    <Table.Td>
+                                        <Group gap={4} justify="flex-end">
+                                            <Tooltip label="Edit">
+                                                <ActionIcon variant="subtle" onClick={() => startEdit(r)} disabled={editing !== null}>
+                                                    <MdOutlineEdit />
+                                                </ActionIcon>
+                                            </Tooltip>
+                                            <Tooltip label="Remove">
+                                                <ActionIcon variant="subtle" color="red" onClick={() => removeRecord(r)} disabled={busy}>
+                                                    <MdOutlineDelete />
+                                                </ActionIcon>
+                                            </Tooltip>
+                                        </Group>
+                                    </Table.Td>
+                                </Table.Tr>
+                            ))}
+                            {records && records.length === 0 && (
+                                <Table.Tr>
+                                    <Table.Td colSpan={7}>
+                                        <Text c="dimmed" fz="sm">
+                                            No records.
+                                        </Text>
+                                    </Table.Td>
+                                </Table.Tr>
+                            )}
+                        </Table.Tbody>
+                    </Table>
+                </>
+            )}
+
+            {props.isAdmin && (
+                <Group justify="space-between" mt="md">
+                    <div>
+                        {props.isSuperAdmin && (
+                            <Button color="red" variant="light" onClick={() => setDeleteOpen(true)}>
+                                Delete domain
+                            </Button>
+                        )}
+                    </div>
+                    <Button loading={busy} onClick={saveAll}>
+                        Save
+                    </Button>
+                </Group>
+            )}
 
             <Modal opened={deleteOpen} onClose={() => setDeleteOpen(false)} title={<Title order={4} c="red">Delete domain</Title>}>
                 <Alert color="red" variant="light">
@@ -405,7 +472,7 @@ export const DomainDetailModal = (props: DomainDetailModalProps) => {
                     </Stack>
                 </Alert>
             </Modal>
-        </>
+        </Stack>
     );
 };
 
@@ -503,3 +570,5 @@ const RecordForm = (props: RecordFormProps) => {
         </Fieldset>
     );
 };
+
+export default DomainDetailPage;

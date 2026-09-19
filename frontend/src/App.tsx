@@ -7,6 +7,7 @@ import { UserProvider } from '@/contexts/user-context';
 import { MeProvider } from '@/contexts/me-context';
 import { ProjectProvider } from '@/contexts/project-context';
 import { ClusterProvider } from '@/contexts/cluster-context';
+import { DomainsProvider } from '@/contexts/domains-context';
 import { createTheme, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { BrowserRouter } from 'react-router-dom';
@@ -27,7 +28,9 @@ const App = () => {
                     <MeProvider>
                         <ProjectProvider>
                             <ClusterProvider>
-                                <Router />
+                                <DomainsProvider>
+                                    <Router />
+                                </DomainsProvider>
                             </ClusterProvider>
                         </ProjectProvider>
                     </MeProvider>

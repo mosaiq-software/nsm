@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Card, Center, Group, Loader, Modal, Select, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
-import { Capability, DnsZone, DomainBillingSummary, DomainRequest, DomainRequestStatus, DomainSearchResult, Team } from '@mosaiq/nsm-common/types';
+import { Capability, DomainBillingSummary, DomainRequest, DomainRequestStatus, DomainSearchResult, Team } from '@mosaiq/nsm-common/types';
+import { useNavigate } from 'react-router-dom';
 import { useAPI } from '@/utils/api';
 import { useMe } from '@/contexts/me-context';
-import { DomainDetailModal } from '@/components/DomainDetailModal';
+import { useDomains } from '@/contexts/domains-context';
 import { MdOutlineCloudSync, MdOutlineRefresh, MdOutlineSearch, MdOutlineSync } from 'react-icons/md';
 
 const requestStatusColor: Record<DomainRequestStatus, string> = {
@@ -19,18 +20,18 @@ const requestStatusColor: Record<DomainRequestStatus, string> = {
 const DomainsPage = () => {
     const api = useAPI();
     const meCtx = useMe();
+    const navigate = useNavigate();
+    const domainsCtx = useDomains();
     const isAdmin = meCtx.isAdmin;
     const isSuperAdmin = meCtx.isSuperAdmin;
+    const domains = domainsCtx.domains;
 
-    const [domains, setDomains] = useState<DnsZone[]>([]);
     const [requests, setRequests] = useState<DomainRequest[]>([]);
     const [billing, setBilling] = useState<DomainBillingSummary | null>(null);
     const [teams, setTeams] = useState<Team[]>([]);
-    const [publicIp, setPublicIp] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [syncingIp, setSyncingIp] = useState(false);
     const [syncingCf, setSyncingCf] = useState(false);
-    const [selected, setSelected] = useState<DnsZone | null>(null);
 
     // Search + request flow
     const [query, setQuery] = useState('');
@@ -45,18 +46,15 @@ const DomainsPage = () => {
     const refresh = useCallback(async () => {
         setLoading(true);
         try {
-            const [reqs, doms, bill, tms, ip] = await Promise.all([
+            const [reqs, bill, tms] = await Promise.all([
                 api.get(API_ROUTES.GET_DOMAIN_REQUESTS, {}),
-                isAdmin ? api.get(API_ROUTES.GET_DOMAINS, {}) : Promise.resolve([]),
                 isAdmin ? api.get(API_ROUTES.GET_DOMAIN_BILLING, {}) : Promise.resolve(null),
                 isAdmin ? api.get(API_ROUTES.GET_TEAMS, {}) : Promise.resolve([]),
-                isAdmin ? api.get(API_ROUTES.GET_PUBLIC_IP, {}) : Promise.resolve({ ip: null }),
+                domainsCtx.refresh(),
             ]);
             setRequests(reqs ?? []);
-            setDomains(doms ?? []);
             setBilling((bill as DomainBillingSummary) ?? null);
             setTeams(tms ?? []);
-            setPublicIp((ip as { ip: string | null })?.ip ?? null);
         } finally {
             setLoading(false);
         }
@@ -139,7 +137,6 @@ const DomainsPage = () => {
         try {
             const res = await api.post(API_ROUTES.POST_PUBLIC_IP_REFRESH, {}, {});
             if (!res) throw new Error('Request failed');
-            setPublicIp(res.ip);
             if (res.changed) {
                 notifications.show({ color: 'green', title: 'Dynamic DNS updated', message: `Public IP changed to ${res.ip}. Dynamic records were repushed to Cloudflare.` });
                 await refresh();
@@ -342,7 +339,7 @@ const DomainsPage = () => {
                             </Table.Thead>
                             <Table.Tbody>
                                 {domains.map((z) => (
-                                    <Table.Tr key={z.id} style={{ cursor: 'pointer' }} onClick={() => setSelected(z)}>
+                                    <Table.Tr key={z.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/domains/${z.id}`)}>
                                         <Table.Td fw={600}>{z.name}</Table.Td>
                                         <Table.Td>
                                             <Badge color={z.status === 'active' ? 'green' : 'yellow'} variant="light">
@@ -416,18 +413,6 @@ const DomainsPage = () => {
                     </Stack>
                 )}
             </Modal>
-
-            {selected && (
-                <DomainDetailModal
-                    zone={selected}
-                    teams={teams}
-                    isAdmin={isAdmin}
-                    isSuperAdmin={isSuperAdmin}
-                    publicIp={publicIp}
-                    onClose={() => setSelected(null)}
-                    onChanged={refresh}
-                />
-            )}
         </Stack>
     );
 };

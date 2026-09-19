@@ -8,6 +8,7 @@ import ProjectStatusPage from '@/pages/ProjectStatusPage';
 import NodesPage from '@/pages/NodesPage';
 import NodeDetailPage from '@/pages/NodeDetailPage';
 import DomainsPage from '@/pages/DomainsPage';
+import DomainDetailPage from '@/pages/DomainDetailPage';
 import NsmLogsPage from '@/pages/NsmLogsPage';
 import LandingPage from '@/pages/LandingPage';
 import UserManagementPage from '@/pages/UserManagementPage';
@@ -65,6 +66,7 @@ const Router = () => {
                 {meCtx.isAdmin && <Route path="/nodes" element={<NodesPage />} />}
                 {meCtx.isAdmin && <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />}
                 <Route path="/domains" element={<DomainsPage />} />
+                <Route path="/domains/:zoneId" element={<DomainDetailPage />} />
 
                 {meCtx.isAdmin && <Route path="/logs" element={<NsmLogsPage />} />}
                 {meCtx.isAdmin && <Route path="/users" element={<UserManagementPage />} />}

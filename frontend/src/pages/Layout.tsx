@@ -5,6 +5,7 @@ import RouterLink, { pathMatchesShape } from '@/components/RouterLink';
 import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { useProjects } from '@/contexts/project-context';
 import { useMe } from '@/contexts/me-context';
+import { useDomains } from '@/contexts/domains-context';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Capability, Project } from '@mosaiq/nsm-common/types';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
@@ -24,6 +25,7 @@ const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle }] = useDisclosure();
     const projectCtx = useProjects();
     const meCtx = useMe();
+    const domainsCtx = useDomains();
     const userCtx = useUser();
     const navigate = useNavigate();
     const location = useLocation();
@@ -204,7 +206,10 @@ const Layout = (props: { children: React.ReactNode }) => {
                     }}
                 >
                     <RouterLink to="/" label="Dashboard" showActive />
-                    <RouterLink to="/domains" label="Domains" showActive />
+                    <RouterLink to="/domains" label="Domains" showActive>
+                        {domainsCtx.domains.length > 0 &&
+                            domainsCtx.domains.map((zone) => <RouterLink to={`/domains/${zone.id}`} label={zone.name} key={zone.id} showActive />)}
+                    </RouterLink>
                     {meCtx.isAdmin && (
                         <>
                             <RouterLink to="/nodes" label="Nodes" showActive />
