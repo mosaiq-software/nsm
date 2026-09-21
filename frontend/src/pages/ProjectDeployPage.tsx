@@ -13,7 +13,7 @@ import { MdOutlineCancel, MdOutlineDelete, MdOutlineRocketLaunch } from 'react-i
 import { DeployQueueBadge } from '@/components/DeployQueueBadge';
 import { DeploymentInstanceList } from '@/components/deploy/DeploymentInstanceList';
 import { DeploymentInstanceDetail } from '@/components/deploy/DeploymentInstanceDetail';
-import { isInProgressState } from '@/components/deploy/DeploymentStateBadge';
+import { isInProgressState } from '@/utils/projectStatus';
 import { deployQueueStatusFor, formatDeployEta } from '@/utils/deployQueue';
 
 const LIST_REFRESH_INTERVAL_MS = 5000;

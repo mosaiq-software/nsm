@@ -1,5 +1,5 @@
 import { DeploymentState, ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
-import { isInProgressState } from '@/components/deploy/DeploymentStateBadge';
+import { isInProgressState } from '@/utils/projectStatus';
 
 // How long a deployment took, or - for one still in flight - how long it has been running so far
 // (pass `now` from a ticking clock so live values count up). Returns undefined when there is nothing
@@ -10,7 +10,7 @@ export const deploymentDurationMs = (header: ProjectInstanceHeader, now: number)
     if (header.state === DeploymentState.DEPLOYED || header.state === DeploymentState.HEALTHY) {
         return header.deployDurationMs ?? Math.max(0, header.lastUpdated - start);
     }
-    if (header.state === DeploymentState.FAILED || header.state === DeploymentState.CANCELLED) {
+    if([DeploymentState.FAILED, DeploymentState.CANCELLED, DeploymentState.DESTROYED].includes(header.state)) {
         return Math.max(0, header.lastUpdated - start);
     }
     return undefined;

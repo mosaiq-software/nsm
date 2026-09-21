@@ -17,7 +17,7 @@ import { getDotenvForProject } from './secretController';
 import { getProject, syncProjectToRepoData } from './projectController';
 import { stringifyDynamicVariablePath } from '@mosaiq/nsm-common/secretUtil';
 import { buildNginxConfigForProject } from '@/utils/nginxUtils';
-import { appendToDeploymentLog, createProjectInstanceModel, getProjectInstanceByIdModel, getProjectInstancesByProjectIdModel, updateProjectInstanceModel } from '@/persistence/projectInstancePersistence';
+import { appendToDeploymentLog, createProjectInstanceModel, getProjectInstanceByIdModel, getProjectInstancesByProjectIdModel, getProjectInstancesByStateModel, updateProjectInstanceModel } from '@/persistence/projectInstancePersistence';
 import { DockerCompose } from '@mosaiq/nsm-common/dockerComposeTypes';
 import { createServiceInstanceModel } from '@/persistence/serviceInstancePersistence';
 import { buildDockerComposeString, sanitizeComposeForCoexistence } from '@/utils/repositoryUtils';
@@ -264,7 +264,7 @@ export const deployProject = async (projectId: string, existingInstanceId?: stri
     return instanceId;
 };
 
-const TERMINAL_DEPLOY_STATES = [DeploymentState.DEPLOYED, DeploymentState.HEALTHY, DeploymentState.FAILED, DeploymentState.CANCELLED];
+const TERMINAL_DEPLOY_STATES = [DeploymentState.DEPLOYED, DeploymentState.HEALTHY, DeploymentState.FAILED, DeploymentState.CANCELLED, DeploymentState.DESTROYED];
 
 export const updateDeploymentLog = async (instanceId: string, status: DeploymentState, logText: string) => {
     // Read the prior state first so we can fire a push notification only on the transition into a
@@ -276,6 +276,14 @@ export const updateDeploymentLog = async (instanceId: string, status: Deployment
     const extra: Partial<ProjectInstanceHeader> = {};
     if (transitioned && status === DeploymentState.DEPLOYED && prev?.deployStartedAt) {
         extra.deployDurationMs = Date.now() - prev.deployStartedAt;
+    }
+    // A deploy that ended (failed/cancelled/torn down) is no longer serving, so clear its active flag.
+    // This keeps a settled instance from being re-swept into DESTROYING by a later teardown, and stops
+    // deriveProjectState from treating a finished attempt as the live deployment. DEPLOYED/HEALTHY keep
+    // active: true (set on the QUEUED->DEPLOYING transition and cleared for superseded generations by
+    // promoteDeployment) so the serving generation stays the active one.
+    if (transitioned && (status === DeploymentState.FAILED || status === DeploymentState.CANCELLED || status === DeploymentState.DESTROYED)) {
+        extra.active = false;
     }
     await updateProjectInstanceModel(instanceId, { state: status, ...extra });
     await appendToDeploymentLog(instanceId, logText);
@@ -407,10 +415,41 @@ export const teardownProject = async (projectId: string): Promise<void> => {
     const instances = await getProjectInstancesByProjectIdModel(projectId);
     const activeCount = instances.filter((i) => i.active).length;
     deployLog.info({ action: 'teardown_initiated', projectId, activeInstanceCount: activeCount }, `teardown initiated for ${projectId}`);
+    const tornDownInstanceIds: string[] = [];
     for (const inst of instances) {
-        if (inst.active) await updateProjectInstanceModel(inst.id, { state: DeploymentState.DESTROYING, active: false });
+        if (inst.active) {
+            await updateProjectInstanceModel(inst.id, { state: DeploymentState.DESTROYING, active: false });
+            tornDownInstanceIds.push(inst.id);
+        }
     }
     await cluster.propose({ type: OpType.CLEAR_DESIRED_DEPLOYMENT, projectId });
+    // The node-side teardown is awaited by teardownProjectWithCleanup before this runs, so the stack is
+    // already gone by now. DESTROYING is only a transient marker; advance the instances to the terminal
+    // DESTROYED state here so the project settles offline instead of showing "Tearing down" forever.
+    for (const instId of tornDownInstanceIds) {
+        await updateProjectInstanceModel(instId, { state: DeploymentState.DESTROYED });
+    }
+    if (tornDownInstanceIds.length) {
+        deployLog.info({ action: 'teardown_completed', projectId, tornDownInstanceIds }, `teardown completed for ${projectId}`);
+    }
+};
+
+// Self-heal any instances left in the transient DESTROYING state (e.g. a leader that crashed mid-
+// teardown, or instances predating the terminal DESTROYED transition). Teardown is synchronous, so a
+// lingering DESTROYING always means the teardown already finished; advance them to DESTROYED. Runs
+// leader-only at startup, mirroring recoverDeployQueue.
+export const sweepStuckDestroyingInstances = async (): Promise<void> => {
+    if (!cluster.isLeader()) return;
+    const stuck = await getProjectInstancesByStateModel(DeploymentState.DESTROYING);
+    for (const inst of stuck) {
+        await updateProjectInstanceModel(inst.id, { state: DeploymentState.DESTROYED, active: false });
+    }
+    if (stuck.length) {
+        deployLog.info(
+            { action: 'destroying_swept', sweptCount: stuck.length, sweptInstanceIds: stuck.map((i) => i.id) },
+            `swept ${stuck.length} stuck destroying instance(s) to destroyed`
+        );
+    }
 };
 
 // Ask a project's assigned node to cancel an in-flight local deployment (SIGKILL the build + tear

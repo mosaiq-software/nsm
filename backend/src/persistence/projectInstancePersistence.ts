@@ -50,6 +50,17 @@ export const getProjectInstancesByProjectIdModel = async (projectId: string): Pr
     });
 };
 
+export const getProjectInstancesByStateModel = async (state: DeploymentState): Promise<ProjectInstanceModelType[]> => {
+    const instances = (await ProjectInstanceModel.findAll({ where: { state } }))?.map((sec) => sec.toJSON());
+    return instances.map((instance) => {
+        const directories = JSON.parse(instance.directoriesJson || '{}') as ProjectInstance['directories'];
+        if (instance?.directoriesJson) {
+            delete instance.directoriesJson;
+        }
+        return { ...instance, directories } as ProjectInstanceModelType;
+    });
+};
+
 export const getProjectInstanceByIdModel = async (id: string): Promise<ProjectInstanceModelType | null> => {
     const instance = (await ProjectInstanceModel.findByPk(id))?.toJSON();
     const directories = JSON.parse(instance?.directoriesJson || '{}') as ProjectInstance['directories'];

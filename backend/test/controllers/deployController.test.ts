@@ -13,7 +13,7 @@ import { cluster } from '@/cluster/node';
 import { getProject, syncProjectToRepoData } from '@/controllers/projectController';
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
 import { postToNode } from '@/cluster/leaderClient';
-import { deployProject, teardownProject, updateDeploymentLog, planLocally, promoteDeployment, cancelDeploy } from '@/controllers/deployController';
+import { deployProject, teardownProject, updateDeploymentLog, planLocally, promoteDeployment, cancelDeploy, sweepStuckDestroyingInstances } from '@/controllers/deployController';
 import { NSM_LABEL_SERVICE_INSTANCE_ID, NSM_LABEL_MANAGED, NSM_LABEL_PROJECT_ID } from '@/constants';
 import { OpType, DesiredDeployment } from '@mosaiq/nsm-common/clusterOps';
 import { DeploymentState, DockerStatus, NginxConfigLocationType, Project } from '@mosaiq/nsm-common/types';
@@ -205,12 +205,34 @@ describe('teardownProject', () => {
         await expect(teardownProject('p1')).rejects.toThrow(/leader/);
     });
 
-    it('marks active instances inactive and proposes CLEAR_DESIRED_DEPLOYMENT', async () => {
+    it('marks active instances DESTROYED (terminal), inactive, and proposes CLEAR_DESIRED_DEPLOYMENT', async () => {
         await upsertProjectModel({ id: 'p1', state: DeploymentState.READY, repoOwner: 'o', repoName: 'r', deploymentKey: 'k', allowCICD: false, nginxConfigJson: '{"servers":[]}', dockerComposeJson: '{"services":{}}', servicesJson: '[]' });
         await createProjectInstanceModel({ id: 'i1', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DEPLOYED, created: Date.now(), lastUpdated: Date.now(), active: true, directories: {} });
         await teardownProject('p1');
-        expect((await getProjectInstanceByIdModel('i1'))?.active).toBe(false);
+        const inst = await getProjectInstanceByIdModel('i1');
+        expect(inst?.active).toBe(false);
+        expect(inst?.state).toBe(DeploymentState.DESTROYED);
         expect(proposedOps().some((o) => o.type === OpType.CLEAR_DESIRED_DEPLOYMENT)).toBe(true);
+    });
+});
+
+describe('sweepStuckDestroyingInstances', () => {
+    it('advances lingering DESTROYING instances to terminal DESTROYED (no-op otherwise)', async () => {
+        await createProjectInstanceModel({ id: 'iStuck', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DESTROYING, created: 1, lastUpdated: 1, active: false, directories: {} });
+        await createProjectInstanceModel({ id: 'iDone', projectId: 'p2', workerNodeId: 'n1', state: DeploymentState.DEPLOYED, created: 1, lastUpdated: 1, active: true, directories: {} });
+
+        await sweepStuckDestroyingInstances();
+
+        expect((await getProjectInstanceByIdModel('iStuck'))?.state).toBe(DeploymentState.DESTROYED);
+        expect((await getProjectInstanceByIdModel('iStuck'))?.active).toBe(false);
+        expect((await getProjectInstanceByIdModel('iDone'))?.state).toBe(DeploymentState.DEPLOYED);
+    });
+
+    it('does nothing when not the leader', async () => {
+        await createProjectInstanceModel({ id: 'iStuck', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DESTROYING, created: 1, lastUpdated: 1, active: false, directories: {} });
+        isLeader.mockReturnValue(false);
+        await sweepStuckDestroyingInstances();
+        expect((await getProjectInstanceByIdModel('iStuck'))?.state).toBe(DeploymentState.DESTROYING);
     });
 });
 
@@ -273,6 +295,16 @@ describe('updateDeploymentLog + planLocally', () => {
         const inst = await getProjectInstanceByIdModel('i1');
         expect(inst?.state).toBe(DeploymentState.DEPLOYED);
         expect(inst?.deploymentLog).toContain('done');
+        // A successful deploy stays the active/serving instance.
+        expect(inst?.active).toBe(true);
+    });
+
+    it('clears active when transitioning into a terminal failure state', async () => {
+        await createProjectInstanceModel({ id: 'iFail', projectId: 'p1', workerNodeId: 'n1', state: DeploymentState.DEPLOYING, created: Date.now(), lastUpdated: Date.now(), active: true, directories: {} });
+        await updateDeploymentLog('iFail', DeploymentState.FAILED, 'boom\n');
+        const inst = await getProjectInstanceByIdModel('iFail');
+        expect(inst?.state).toBe(DeploymentState.FAILED);
+        expect(inst?.active).toBe(false);
     });
 
     it('planLocally allocates ports only when proxies exist', async () => {

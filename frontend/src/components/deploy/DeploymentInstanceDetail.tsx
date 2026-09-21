@@ -6,7 +6,8 @@ import { useLiveProjectInstance } from '@/hooks/useLiveProjectInstance';
 import { useNow } from '@/hooks/useNow';
 import { deploymentDurationMs, formatDuration } from '@/utils/deployDuration';
 import { BuildLogConsole } from './BuildLogConsole';
-import { DeploymentStateBadge, isInProgressState } from './DeploymentStateBadge';
+import { DeploymentStateBadge } from './DeploymentStateBadge';
+import { isInProgressState } from '@/utils/projectStatus';
 import { ServiceStatusCard } from './ServiceStatusCard';
 
 const SummaryField = ({ label, children }: { label: string; children: React.ReactNode }) => (

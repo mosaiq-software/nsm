@@ -9,6 +9,7 @@ import { startStatusReporting } from './cluster/statusGossip';
 import { ensureObservabilityStack, ensureAgentStack } from './reconcile/observabilityStack';
 import { runMigrations } from './db/migrator';
 import { recoverDeployQueue } from './controllers/deployQueue';
+import { sweepStuckDestroyingInstances } from './controllers/deployController';
 import { initWebPush } from './controllers/pushController';
 import { collectDiskUsage } from './reconcile/diskUsage';
 import { areaLog, serializeError } from './utils/log';
@@ -51,6 +52,7 @@ const start = async () => {
     if (config.role === 'leader') {
         await ensureObservabilityStack();
         await recoverDeployQueue();
+        await sweepStuckDestroyingInstances();
         await initWebPush();
         bootLog.info({ action: 'leader_services_ready' }, 'observability stack, deploy queue and web push initialized');
     }

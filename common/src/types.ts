@@ -139,6 +139,7 @@ export enum DeploymentState {
     DEPLOYED = 'deployed',
     HEALTHY = 'healthy',
     DESTROYING = 'destroying',
+    DESTROYED = 'destroyed',
     CANCELLED = 'cancelled',
 }
 

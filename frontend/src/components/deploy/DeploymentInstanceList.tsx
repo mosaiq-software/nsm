@@ -1,7 +1,8 @@
 import { Card, Group, ScrollArea, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { ProjectInstanceHeader } from '@mosaiq/nsm-common/types';
 import { MdOutlineBolt } from 'react-icons/md';
-import { DeploymentStateBadge, isInProgressState } from './DeploymentStateBadge';
+import { DeploymentStateBadge } from './DeploymentStateBadge';
+import { isInProgressState } from '@/utils/projectStatus';
 import { useNow } from '@/hooks/useNow';
 import { deploymentDurationMs, formatDuration } from '@/utils/deployDuration';
 
