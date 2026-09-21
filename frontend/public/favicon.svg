@@ -1,15 +1,225 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-    <rect width="64" height="64" rx="12" fill="#1f2933" />
-    <g fill="#4dabf7">
-        <circle cx="20" cy="20" r="6" />
-        <circle cx="44" cy="20" r="6" />
-        <circle cx="20" cy="44" r="6" />
-        <circle cx="44" cy="44" r="6" />
-    </g>
-    <g stroke="#4dabf7" stroke-width="3">
-        <line x1="20" y1="20" x2="44" y2="20" />
-        <line x1="20" y1="20" x2="20" y2="44" />
-        <line x1="44" y1="20" x2="44" y2="44" />
-        <line x1="20" y1="44" x2="44" y2="44" />
-    </g>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 64 64"
+   width="64"
+   height="64"
+   version="1.1"
+   id="svg7"
+   sodipodi:docname="favicon.svg"
+   inkscape:export-filename="favicon.png"
+   inkscape:export-xdpi="768"
+   inkscape:export-ydpi="768"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs7">
+    <linearGradient
+       id="linearGradient41"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#21286c;stop-opacity:1;"
+         offset="0"
+         id="stop40" />
+      <stop
+         style="stop-color:#d31757;stop-opacity:1;"
+         offset="1"
+         id="stop41" />
+    </linearGradient>
+    <linearGradient
+       id="linearGradient38"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#932e76;stop-opacity:1;"
+         offset="0"
+         id="stop38" />
+      <stop
+         style="stop-color:#21286c;stop-opacity:1;"
+         offset="1"
+         id="stop37" />
+    </linearGradient>
+    <linearGradient
+       id="linearGradient36"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#2384ca;stop-opacity:1;"
+         offset="0"
+         id="stop35" />
+      <stop
+         style="stop-color:#932e76;stop-opacity:1;"
+         offset="1"
+         id="stop36" />
+    </linearGradient>
+    <linearGradient
+       id="linearGradient31"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#2384ca;stop-opacity:1;"
+         offset="0"
+         id="stop31" />
+      <stop
+         style="stop-color:#d31757;stop-opacity:1;"
+         offset="1"
+         id="stop32" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient31"
+       id="linearGradient32"
+       x1="20"
+       y1="26"
+       x2="20"
+       y2="38"
+       gradientUnits="userSpaceOnUse"
+       spreadMethod="pad" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient38"
+       id="linearGradient33"
+       gradientUnits="userSpaceOnUse"
+       x1="20"
+       y1="26"
+       x2="20"
+       y2="38"
+       spreadMethod="pad"
+       gradientTransform="translate(24)" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient41"
+       id="linearGradient34"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="rotate(90,20,44)"
+       x1="20"
+       y1="26"
+       x2="20"
+       y2="38"
+       spreadMethod="pad" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient36"
+       id="linearGradient35"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0,1,1,0,1e-6,0)"
+       x1="20"
+       y1="26"
+       x2="20"
+       y2="38"
+       spreadMethod="pad" />
+  </defs>
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="false"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="8.994132"
+     inkscape:cx="20.624558"
+     inkscape:cy="37.746833"
+     inkscape:window-width="1728"
+     inkscape:window-height="1084"
+     inkscape:window-x="806"
+     inkscape:window-y="1113"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg7" />
+  <rect
+     width="64"
+     height="64"
+     rx="12"
+     fill="#1f2933"
+     id="rect1"
+     style="fill:#482362;fill-opacity:1" />
+  <circle
+     cx="20"
+     cy="20"
+     r="6"
+     id="circle1"
+     style="fill:#2384ca;fill-opacity:1" />
+  <circle
+     cx="44"
+     cy="20"
+     r="6"
+     id="circle2"
+     style="fill:#932e76;fill-opacity:1" />
+  <circle
+     cx="20"
+     cy="44"
+     r="6"
+     id="circle3"
+     style="fill:#d31757;fill-opacity:1" />
+  <circle
+     cx="44"
+     cy="44"
+     r="6"
+     id="circle4"
+     style="fill:#21286c;fill-opacity:1" />
+  <g
+     id="g62"
+     style="stroke:#ffffff;stroke-opacity:1;stroke-width:5;stroke-dasharray:none">
+    <path
+       style="fill:#482362;fill-opacity:1;stroke:#ffffff;stroke-width:5;stroke-dasharray:none;stroke-opacity:1"
+       d="M 20,20 V 44"
+       id="path59" />
+    <path
+       style="fill:#482362;fill-opacity:1;stroke:#ffffff;stroke-width:5;stroke-dasharray:none;stroke-opacity:1"
+       d="M 44,20 V 44"
+       id="path60" />
+    <path
+       style="fill:#482362;fill-opacity:1;stroke:#ffffff;stroke-width:5;stroke-dasharray:none;stroke-opacity:1"
+       d="M 44,44 H 20"
+       id="path61" />
+    <path
+       style="fill:#482362;fill-opacity:1;stroke:#ffffff;stroke-width:5;stroke-dasharray:none;stroke-opacity:1"
+       d="M 20,20 H 44"
+       id="path62" />
+  </g>
+  <g
+     id="g59"
+     style="stroke:#ffffff;stroke-opacity:1;stroke-width:0.9;stroke-dasharray:none">
+    <circle
+       cx="20"
+       cy="20"
+       r="6"
+       id="circle56"
+       style="fill:#2384ca;fill-opacity:1;stroke:#ffffff;stroke-opacity:1;stroke-width:0.9;stroke-dasharray:none" />
+    <circle
+       cx="44"
+       cy="20"
+       r="6"
+       id="circle57"
+       style="fill:#932e76;fill-opacity:1;stroke:#ffffff;stroke-opacity:1;stroke-width:0.9;stroke-dasharray:none" />
+    <circle
+       cx="20"
+       cy="44"
+       r="6"
+       id="circle58"
+       style="fill:#d31757;fill-opacity:1;stroke:#ffffff;stroke-opacity:1;stroke-width:0.9;stroke-dasharray:none" />
+    <circle
+       cx="44"
+       cy="44"
+       r="6"
+       id="circle59"
+       style="fill:#21286c;fill-opacity:1;stroke:#ffffff;stroke-opacity:1;stroke-width:0.9;stroke-dasharray:none" />
+  </g>
+  <path
+     style="fill:#482362;fill-opacity:1;stroke:url(#linearGradient32);stroke-width:3;stroke-dasharray:none;stroke-opacity:1"
+     d="M 20,20 V 44"
+     id="path31" />
+  <path
+     style="fill:#482362;fill-opacity:1;stroke:url(#linearGradient33);stroke-width:3;stroke-dasharray:none;stroke-opacity:1"
+     d="M 44,20 V 44"
+     id="path32" />
+  <path
+     style="fill:#482362;fill-opacity:1;stroke:url(#linearGradient34);stroke-width:3;stroke-dasharray:none;stroke-opacity:1"
+     d="M 44,44 H 20"
+     id="path33" />
+  <path
+     style="fill:#482362;fill-opacity:1;stroke:url(#linearGradient35);stroke-width:3;stroke-dasharray:none;stroke-opacity:1"
+     d="M 20,20 H 44"
+     id="path34" />
 </svg>
