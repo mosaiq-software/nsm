@@ -7,12 +7,13 @@ export interface RouterLinkProps extends MantineNavLinkProps {
     to: string;
     showActive?: boolean;
     activeWithin?: boolean;
+    onNavigate?: () => void;
     children?: React.ReactNode;
 }
 export default function RouterLink(props: RouterLinkProps) {
     const navigate = useNavigate();
     const location = useLocation();
-    const { to, showActive, activeWithin, children, rightSection, ...rest } = props;
+    const { to, showActive, activeWithin, onNavigate, children, rightSection, ...rest } = props;
     const shape = children ? `${to}/*` : to;
     const selfActive = pathMatchesShape(location.pathname, shape);
     const active = !!(showActive && selfActive);
@@ -53,6 +54,7 @@ export default function RouterLink(props: RouterLinkProps) {
             onClick={(e) => {
                 e.preventDefault();
                 navigate(to);
+                onNavigate?.();
             }}
             active={active}
             opened={children ? opened : undefined}

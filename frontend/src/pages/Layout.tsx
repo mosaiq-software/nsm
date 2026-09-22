@@ -22,7 +22,7 @@ const emptyProject: Project = {
 };
 
 const Layout = (props: { children: React.ReactNode }) => {
-    const [opened, { toggle }] = useDisclosure();
+    const [opened, { toggle, close }] = useDisclosure();
     const createProject = useCreateProject();
     const meCtx = useMe();
     const domainsCtx = useDomains();
@@ -183,19 +183,19 @@ const Layout = (props: { children: React.ReactNode }) => {
                         overflowY: 'auto',
                     }}
                 >
-                    <RouterLink to="/" label="Dashboard" showActive />
-                    <RouterLink to="/domains" label="Domains" showActive>
+                    <RouterLink to="/" label="Dashboard" showActive onNavigate={close} />
+                    <RouterLink to="/domains" label="Domains" showActive onNavigate={close}>
                         {domainsCtx.domains.length > 0 &&
-                            domainsCtx.domains.map((zone) => <RouterLink to={`/domains/${zone.id}`} label={zone.name} key={zone.id} showActive />)}
+                            domainsCtx.domains.map((zone) => <RouterLink to={`/domains/${zone.id}`} label={zone.name} key={zone.id} showActive onNavigate={close} />)}
                     </RouterLink>
                     {meCtx.isAdmin && (
                         <>
-                            <RouterLink to="/nodes" label="Nodes" showActive>
+                            <RouterLink to="/nodes" label="Nodes" showActive onNavigate={close}>
                                 {clusterCtx.nodes.length > 0 &&
-                                    clusterCtx.nodes.map((node) => <RouterLink to={`/nodes/${node.nodeId}`} label={node.nodeId} key={node.nodeId} showActive />)}
+                                    clusterCtx.nodes.map((node) => <RouterLink to={`/nodes/${node.nodeId}`} label={node.nodeId} key={node.nodeId} showActive onNavigate={close} />)}
                             </RouterLink>
-                            <RouterLink to="/logs" label="NSM Logs" showActive />
-                            <RouterLink to="/users" label="User Management" showActive />
+                            <RouterLink to="/logs" label="NSM Logs" showActive onNavigate={close} />
+                            <RouterLink to="/users" label="User Management" showActive onNavigate={close} />
                         </>
                     )}
                     <Space h="md" />
@@ -207,30 +207,31 @@ const Layout = (props: { children: React.ReactNode }) => {
                             label={team.login}
                             key={team.ownerId}
                             showActive
+                            onNavigate={close}
                             rightSection={!team.installed ? <MdOutlineWarningAmber color="var(--mantine-color-red-6)" /> : undefined}
                         >
                             {team.installed &&
                                 team.projects
                                     .filter((p) => p.capabilities.includes(Capability.VIEW))
                                     .map((project) => (
-                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive rightSection={<ProjectStatusChip projectId={project.id} />}>
+                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive onNavigate={close} rightSection={<ProjectStatusChip projectId={project.id} />}>
                                             {project.capabilities.includes(Capability.CONFIGURE) && (
-                                                <RouterLink to={`/p/${project.id}/config`} label="Config" showActive>
-                                                    <RouterLink to={`/p/${project.id}/config/project`} label="Project" showActive />
-                                                    <RouterLink to={`/p/${project.id}/config/routing`} label="Routing" showActive />
-                                                    <RouterLink to={`/p/${project.id}/config/system`} label="System" showActive />
-                                                    <RouterLink to={`/p/${project.id}/config/resources`} label="Resources" showActive />
-                                                    <RouterLink to={`/p/${project.id}/config/keys`} label="Keys" showActive />
-                                                    <RouterLink to={`/p/${project.id}/config/webhooks`} label="Webhooks" showActive />
-                                                    <RouterLink to={`/p/${project.id}/config/cd`} label="Continuous Deployment" showActive />
+                                                <RouterLink to={`/p/${project.id}/config`} label="Config" showActive onNavigate={close}>
+                                                    <RouterLink to={`/p/${project.id}/config/project`} label="Project" showActive onNavigate={close} />
+                                                    <RouterLink to={`/p/${project.id}/config/routing`} label="Routing" showActive onNavigate={close} />
+                                                    <RouterLink to={`/p/${project.id}/config/system`} label="System" showActive onNavigate={close} />
+                                                    <RouterLink to={`/p/${project.id}/config/resources`} label="Resources" showActive onNavigate={close} />
+                                                    <RouterLink to={`/p/${project.id}/config/keys`} label="Keys" showActive onNavigate={close} />
+                                                    <RouterLink to={`/p/${project.id}/config/webhooks`} label="Webhooks" showActive onNavigate={close} />
+                                                    <RouterLink to={`/p/${project.id}/config/cd`} label="Continuous Deployment" showActive onNavigate={close} />
                                                 </RouterLink>
                                             )}
-                                            {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive />}
-                                            <RouterLink to={`/p/${project.id}/monitoring`} label="Monitoring" showActive>
-                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/logs`} label="Logs" showActive />}
-                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/metrics`} label="Metrics" showActive />}
-                                                <RouterLink to={`/p/${project.id}/monitoring/status`} label="Status" showActive />
-                                                <RouterLink to={`/p/${project.id}/monitoring/incidents`} label="Incidents" showActive />
+                                            {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive onNavigate={close} />}
+                                            <RouterLink to={`/p/${project.id}/monitoring`} label="Monitoring" showActive onNavigate={close}>
+                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/logs`} label="Logs" showActive onNavigate={close} />}
+                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/metrics`} label="Metrics" showActive onNavigate={close} />}
+                                                <RouterLink to={`/p/${project.id}/monitoring/status`} label="Status" showActive onNavigate={close} />
+                                                <RouterLink to={`/p/${project.id}/monitoring/incidents`} label="Incidents" showActive onNavigate={close} />
                                             </RouterLink>
                                         </RouterLink>
                                     ))}
