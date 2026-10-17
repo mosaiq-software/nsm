@@ -11,7 +11,6 @@ import { checkAllQuotas } from '@/controllers/quotaController';
 import { initCdSchedules } from '@/controllers/cdScheduler';
 import { syncCloudflare } from '@/reconcile/cloudflareSync';
 import { checkPublicIp } from '@/reconcile/publicIpWatcher';
-import { isCloudflareConfigured } from '@/config';
 import { HEALTH_SAMPLE_INTERVAL_MS, pruneHealthRollups, pruneHealthSamples, rollupHealthSamples, sampleAllProjects } from '@/controllers/healthController';
 import { areaLog, serializeError } from '@/utils/log';
 
@@ -42,6 +41,14 @@ export const ensureBaseDirectories = async () => {
         } catch (e: any) {
             initLog.error({ action: 'base_dir_failed', path: p, err: serializeError(e) }, `error creating path ${p}`);
         }
+    }
+    // Registrar DNS-01 credentials live here; lock to the nsm user only (0700) since they hold
+    // registrar API tokens written for certbot's DNS plugin.
+    try {
+        await fs.mkdir(config.registrarCredsDir, { recursive: true });
+        await fs.chmod(config.registrarCredsDir, 0o700);
+    } catch (e: any) {
+        initLog.error({ action: 'base_dir_failed', path: config.registrarCredsDir, err: serializeError(e) }, `error creating path ${config.registrarCredsDir}`);
     }
     initLog.info({ action: 'base_directories_ensured', pathCount: paths.length }, 'base directories ensured');
 };
@@ -87,14 +94,16 @@ export const registerCronJobs = () => {
         initLog.debug({ action: 'cron_fired', job: 'quota_check', isLeader: cluster.isLeader() }, 'quota check cron fired');
         if (cluster.isLeader()) void checkAllQuotas().catch((e) => initLog.error({ action: 'quota_check_failed', err: serializeError(e) }, 'quota check failed'));
     });
-    // Leader-only: mirror Cloudflare zones/records into the cache (Cloudflare authoritative).
+    // Leader-only: mirror every registrar account's Cloudflare zones/records into the cache
+    // (Cloudflare authoritative). syncCloudflare self-gates on leader + configured accounts.
     cron.schedule('*/5 * * * *', () => {
-        if (cluster.isLeader() && isCloudflareConfigured()) void syncCloudflare();
+        if (cluster.isLeader()) void syncCloudflare();
     });
-    // Leader-only: watch for a public (WAN) IP change and repush dynamic DNS records.
+    // Leader-only: watch for a public (WAN) IP change and repush dynamic DNS records. checkPublicIp
+    // self-gates on leader + any configured registrar account.
     const ipCron = `*/${Math.max(1, config.publicIpPollMinutes)} * * * *`;
     cron.schedule(ipCron, () => {
-        if (cluster.isLeader() && isCloudflareConfigured()) void checkPublicIp();
+        if (cluster.isLeader()) void checkPublicIp();
     });
     // Leader-only: prune raw health samples and old rollups past their retention windows (node-cron
     // min granularity is 1 minute; the frequent health sampling itself is a setInterval below).

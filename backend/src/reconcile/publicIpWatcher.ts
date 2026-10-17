@@ -1,9 +1,9 @@
 import { cluster } from '@/cluster/node';
-import { isCloudflareConfigured } from '@/config';
 import { getMeta, setMeta } from '@/persistence/clusterMetaPersistence';
 import { getAllDynamicRecordsModel } from '@/persistence/dnsRecordPersistence';
-import { updateDnsRecord } from '@/utils/cloudflare';
+import { CfCreds, updateDnsRecord } from '@/utils/cloudflare';
 import { syncZoneRecords } from '@/reconcile/cloudflareSync';
+import { anyRegistrarConfigured, getCredsForZone } from '@/controllers/registrarController';
 import { areaLog, serializeError } from '@/utils/log';
 
 const ipLog = areaLog('cloudflare');
@@ -56,7 +56,7 @@ export interface PublicIpCheckResult {
 // A (IPv4) / AAAA (IPv6) record to Cloudflare, then refresh the affected zones' caches. Returns the
 // resulting IPv4 and whether anything changed so callers (cron and the manual button) can report it.
 export const checkPublicIp = async (): Promise<PublicIpCheckResult> => {
-    if (!cluster.isLeader() || !isCloudflareConfigured()) return { ip: null, changed: false };
+    if (!cluster.isLeader() || !(await anyRegistrarConfigured())) return { ip: null, changed: false };
     try {
         const dynamicRecords = await getAllDynamicRecordsModel();
         const lastV4 = await getMeta(PUBLIC_IP4_META_KEY);
@@ -73,11 +73,19 @@ export const checkPublicIp = async (): Promise<PublicIpCheckResult> => {
         if (!v4Changed && !v6Changed) return { ip: ipv4 || lastV4, changed: false };
 
         const touchedZones = new Set<string>();
+        // Dynamic records can span multiple registrar accounts; resolve each zone's creds (cached).
+        const credsByZone = new Map<string, CfCreds | null>();
         for (const rec of dynamicRecords) {
             const target = rec.type === 'A' ? (v4Changed ? ipv4 : null) : rec.type === 'AAAA' ? (v6Changed ? ipv6 : null) : null;
             if (!target) continue;
             try {
-                await updateDnsRecord(rec.zoneId, rec.id, { content: target });
+                if (!credsByZone.has(rec.zoneId)) credsByZone.set(rec.zoneId, await getCredsForZone(rec.zoneId));
+                const creds = credsByZone.get(rec.zoneId);
+                if (!creds?.apiToken) {
+                    ipLog.warn({ action: 'dynamic_record_no_creds', recordId: rec.id, zoneId: rec.zoneId }, `no registrar credentials for zone ${rec.zoneId}; skipping dynamic record`);
+                    continue;
+                }
+                await updateDnsRecord(creds, rec.zoneId, rec.id, { content: target });
                 touchedZones.add(rec.zoneId);
                 ipLog.info({ action: 'dynamic_record_updated', recordId: rec.id, name: rec.name, type: rec.type, ip: target }, `updated dynamic ${rec.type} ${rec.name} -> ${target}`);
             } catch (e: any) {

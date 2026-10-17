@@ -1,4 +1,15 @@
-import { Admin, AllowedGithubEntity, ApiKey, DiscordMessageRef, DomainRequest, Incident, IncidentUpdate, PortReservation, Project, ProjectServiceInstance, ProjectWebhook, Secret, TeamConfig, TeamMemberOverride, User } from './types';
+import { Admin, AllowedGithubEntity, ApiKey, DiscordMessageRef, DomainRequest, Incident, IncidentUpdate, PortReservation, Project, ProjectServiceInstance, ProjectWebhook, RegistrarProvider, Secret, TeamConfig, TeamMemberOverride, User } from './types';
+
+// A registrar account as replicated across the cluster. `credentials` includes secret values (e.g.
+// the Cloudflare API token) and is applied to every node's DB so the leader can use it after a
+// failover, exactly like replicated project secrets. It is never serialized into API responses.
+export interface RegistrarAccountRecord {
+    id: string; // stable shared id, e.g. `cloudflare:<accountId>`
+    provider: RegistrarProvider;
+    label?: string;
+    credentials: Record<string, string>;
+    createdAt: number;
+}
 
 // Static description of a peer in the cluster. Identity is nodeId; address is the current IP.
 export interface NodeInfo {
@@ -77,8 +88,13 @@ export enum OpType {
     DELETE_TEAM_OVERRIDE = 'DELETE_TEAM_OVERRIDE',
     ADD_ADMIN = 'ADD_ADMIN',
     REMOVE_ADMIN = 'REMOVE_ADMIN',
+    // Deprecated: team-domain allocations were removed. Kept only so historical replicated log
+    // entries deserialize and are tolerated (ignored) by applyOp's default case; never proposed.
     SET_DOMAIN_ALLOCATIONS = 'SET_DOMAIN_ALLOCATIONS',
     UPSERT_DOMAIN_REQUEST = 'UPSERT_DOMAIN_REQUEST',
+    UPSERT_REGISTRAR_ACCOUNT = 'UPSERT_REGISTRAR_ACCOUNT',
+    DELETE_REGISTRAR_ACCOUNT = 'DELETE_REGISTRAR_ACCOUNT',
+    SET_TEAM_REGISTRAR = 'SET_TEAM_REGISTRAR',
     UPSERT_PORT_RESERVATION = 'UPSERT_PORT_RESERVATION',
     DELETE_PORT_RESERVATION = 'DELETE_PORT_RESERVATION',
     UPSERT_INCIDENT = 'UPSERT_INCIDENT',
@@ -108,8 +124,10 @@ export type Op =
     | { type: OpType.DELETE_TEAM_OVERRIDE; ownerId: string; memberId: string }
     | { type: OpType.ADD_ADMIN; admin: Admin }
     | { type: OpType.REMOVE_ADMIN; id: string }
-    | { type: OpType.SET_DOMAIN_ALLOCATIONS; zoneId: string; ownerIds: string[] }
     | { type: OpType.UPSERT_DOMAIN_REQUEST; request: DomainRequest }
+    | { type: OpType.UPSERT_REGISTRAR_ACCOUNT; account: RegistrarAccountRecord }
+    | { type: OpType.DELETE_REGISTRAR_ACCOUNT; accountId: string }
+    | { type: OpType.SET_TEAM_REGISTRAR; ownerId: string; registrarAccountId: string | null }
     | { type: OpType.UPSERT_PORT_RESERVATION; reservation: PortReservation }
     | { type: OpType.DELETE_PORT_RESERVATION; reservationId: string }
     | { type: OpType.UPSERT_INCIDENT; incident: Incident }

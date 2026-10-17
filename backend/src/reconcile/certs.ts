@@ -1,9 +1,13 @@
+import * as fs from 'fs/promises';
 import { config } from '@/config';
 import { execStream, execSafe } from '@/host/exec';
 import { sudo } from '@/host/privilege';
 import { deleteCertModel, getAllCertsModel, upsertCertModel } from '@/persistence/certPersistence';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 import { dashboardDomain } from './dashboardIngress';
+import { getAccountForDomain } from '@/controllers/registrarController';
+import { cloudflareCredsForAccount } from '@/registrar/provider';
+import { RegistrarProvider } from '@mosaiq/nsm-common/types';
 import { CertRecord } from '@mosaiq/nsm-common/clusterOps';
 import { areaLog, serializeError } from '@/utils/log';
 
@@ -37,19 +41,44 @@ export const leaderEnsureCerts = async (): Promise<void> => {
 const CERT_RETRY_COOLDOWN_MS = 15 * 60 * 1000;
 const lastFailedAt = new Map<string, number>();
 
+// Materialize a certbot cloudflare DNS plugin credentials file for the given registrar account and
+// return the certbot DNS-01 args that use it, or null when the domain has no Cloudflare account (so
+// the caller falls back to the global env args or HTTP-01). The file is written 0600 under the
+// nsm-owned registrarCredsDir; certbot runs via sudo (root) and can read it.
+const dnsArgsForDomain = async (domain: string): Promise<string | null> => {
+    try {
+        const account = await getAccountForDomain(domain);
+        if (!account || account.provider !== RegistrarProvider.CLOUDFLARE) return null;
+        const creds = cloudflareCredsForAccount(account);
+        if (!creds.apiToken) return null;
+        const safeId = account.id.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `${config.registrarCredsDir}/${safeId}.ini`;
+        await fs.writeFile(path, `dns_cloudflare_api_token = ${creds.apiToken}\n`, { mode: 0o600 });
+        await fs.chmod(path, 0o600);
+        return `--dns-cloudflare --dns-cloudflare-credentials ${path} --dns-cloudflare-propagation-seconds 30`;
+    } catch (e) {
+        // Degraded fallback: if we can't resolve the registrar account for this domain, fall back to
+        // the global env DNS args / HTTP-01 rather than failing issuance.
+        certLog.debug({ action: 'cert_dns_creds_unresolved', domain, err: serializeError(e) }, `could not resolve registrar DNS creds for ${domain}`);
+        return null;
+    }
+};
+
 const obtainCert = async (domain: string): Promise<void> => {
     const failedAt = lastFailedAt.get(domain);
     if (failedAt && Date.now() - failedAt < CERT_RETRY_COOLDOWN_MS) return;
 
-    // DNS-01 when configured (recommended); otherwise nginx/HTTP-01 on the leader's ingress.
-    const method = config.certbotDnsArgs ? config.certbotDnsArgs : '--nginx';
+    // Prefer DNS-01 with the Cloudflare account that owns the domain's zone; fall back to any global
+    // env DNS args, and finally to nginx/HTTP-01 on the leader's ingress.
+    const perAccountDnsArgs = await dnsArgsForDomain(domain);
+    const method = perAccountDnsArgs ? perAccountDnsArgs : config.certbotDnsArgs ? config.certbotDnsArgs : '--nginx';
     // Pin --cert-name and --key-type so certbot reuses one deterministic lineage per domain (whose
     // live dir matches the path nginx references) instead of auto-selecting a stray lineage, and so
     // it never blocks in --non-interactive mode asking to confirm an ECDSA<->RSA key-type change.
     const cmd = sudo(
         `certbot certonly ${method} -d ${domain} --cert-name ${domain} --key-type ecdsa --agree-tos --non-interactive --keep-until-expiring`,
     );
-    certLog.info({ action: 'cert_issuance_started', domain, method: config.certbotDnsArgs ? 'dns' : 'nginx' }, `obtaining cert for ${domain}`);
+    certLog.info({ action: 'cert_issuance_started', domain, method: perAccountDnsArgs || config.certbotDnsArgs ? 'dns' : 'nginx' }, `obtaining cert for ${domain}`);
     const { out, code } = await execStream(cmd, 1000 * 60 * 3);
     if (code !== 0) {
         lastFailedAt.set(domain, Date.now());

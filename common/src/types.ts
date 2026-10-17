@@ -962,6 +962,69 @@ export interface MeResponse {
     teams: MeTeam[];
 }
 
+// === Registrars ===
+
+// The registrar providers NSM can integrate with. Only Cloudflare is implemented today; the field
+// specs below let the UI render provider-specific credential forms as more are added.
+export enum RegistrarProvider {
+    CLOUDFLARE = 'cloudflare',
+}
+
+// A single credential/config field a registrar requires. `secret: true` fields are stored
+// server-side and never returned to the UI once saved (only their configured state is exposed).
+export interface RegistrarFieldSpec {
+    key: string;
+    label: string;
+    description?: string;
+    secret: boolean;
+    required: boolean;
+}
+
+export interface RegistrarProviderSpec {
+    label: string;
+    fields: RegistrarFieldSpec[];
+}
+
+// Declarative per-provider credential schema driving the registrar settings form.
+export const REGISTRAR_PROVIDER_SPECS: Record<RegistrarProvider, RegistrarProviderSpec> = {
+    [RegistrarProvider.CLOUDFLARE]: {
+        label: 'Cloudflare',
+        fields: [
+            {
+                key: 'apiToken',
+                label: 'API token',
+                description: 'Cloudflare API token with DNS + registrar permissions. Stored as a secret server-side and never shown again after saving.',
+                secret: true,
+                required: true,
+            },
+            {
+                key: 'accountId',
+                label: 'Account ID',
+                description: 'Cloudflare account ID. Any team configured with the same account ID shares the same set of domains.',
+                secret: false,
+                required: true,
+            },
+        ],
+    },
+};
+
+// Secret-free view of a registrar account for the UI. Secret values are never serialized; only the
+// keys of configured secrets are listed so the form can render a "configured" state.
+export interface RegistrarAccountSummary {
+    id: string;
+    provider: RegistrarProvider;
+    label?: string;
+    nonSecretValues: Record<string, string>;
+    configuredSecrets: string[];
+}
+
+// A team's registrar configuration: the (possibly shared) account it points at, or null, plus
+// whether the requester may edit it. Editing a shared account affects every team pointing at it.
+export interface TeamRegistrarConfig {
+    account: RegistrarAccountSummary | null;
+    canManage: boolean;
+}
+
 // === Cloudflare DNS + Domains ===
 
 // The DNS record types NSM offers rich editing for. The backend passes `type` straight through to
@@ -1032,8 +1095,9 @@ export interface DnsZone {
     status: string; // active | pending | moved | ...
     paused: boolean;
     billing?: DomainBilling;
-    // NSM-side associations (durable, replicated via ops).
-    allocatedTeamIds?: string[]; // team ownerIds
+    // The registrar account (Cloudflare account) this zone belongs to. Zones are keyed to an
+    // account, not a team; teams sharing an account share its zones.
+    registrarAccountId?: string;
     recordCount?: number;
     lastSyncedAt?: number;
     // Cloudflare dashboard overview URL for this zone; set when the account id is configured.
@@ -1086,14 +1150,14 @@ export enum DomainRequestStatus {
     FAILED = 'failed',
 }
 
-// A request by a non-super-admin to purchase a domain. Only the super admin may approve (buy) or
-// deny it. Price is snapshotted at request time so the approver sees what was quoted.
+// A request by a non-owner team member to purchase a domain. A team owner (or NSM admin) may approve
+// (buy) or deny it. Price is snapshotted at request time so the approver sees what was quoted.
 export interface DomainRequest {
     id: string;
     domainName: string;
     requesterId: string; // github id
     requesterLogin: string;
-    ownerId?: string; // target team to allocate the domain to on purchase
+    ownerId?: string; // target team the purchase is scoped to (its registrar account is used)
     ownerLogin?: string;
     priceCurrency?: string;
     priceRegistration?: string;
@@ -1104,12 +1168,6 @@ export interface DomainRequest {
     reason?: string; // denial reason or failure detail
     createdAt: number;
     updatedAt: number;
-}
-
-// Per-domain team allocation (which teams may use a domain in their project config).
-export interface DomainTeamAllocation {
-    zoneId: string;
-    ownerId: string;
 }
 
 // Billing rollup for the domains page. Totals are grouped by currency since domains may bill in
@@ -1125,13 +1183,6 @@ export interface DomainBillingEntry {
 export interface DomainBillingSummary {
     entries: DomainBillingEntry[];
     totalsByCurrency: { currency: string; monthly: number; yearly: number }[];
-}
-
-// Result of a team-allocation change: when `ok` is false, `blockedBy` lists the projects still using
-// the domain that prevented removing a team's access.
-export interface DomainAllocationResult {
-    ok: boolean;
-    blockedBy?: { projectId: string; ownerLogin: string }[];
 }
 
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error';

@@ -20,7 +20,6 @@ import NodeDetailLayout from '@/pages/node/NodeDetailLayout';
 import NodeOverviewPage from '@/pages/node/NodeOverviewPage';
 import NodeConfigPage from '@/pages/node/NodeConfigPage';
 import NodeStoragePage from '@/pages/node/NodeStoragePage';
-import DomainsPage from '@/pages/DomainsPage';
 import DomainDetailPage from '@/pages/DomainDetailPage';
 import NsmLogsPage from '@/pages/NsmLogsPage';
 import LandingPage from '@/pages/LandingPage';
@@ -106,12 +105,10 @@ const Router = () => {
                         <Route path="storage" element={<NodeStoragePage />} />
                     </Route>
                 )}
-                <Route path="/domains" element={<DomainsPage />} />
-                <Route path="/domains/:zoneId" element={<DomainDetailPage />} />
-
                 {meCtx.isAdmin && <Route path="/logs" element={<NsmLogsPage />} />}
                 {meCtx.isAdmin && <Route path="/users" element={<UserManagementPage />} />}
                 <Route path="/teams/:ownerId" element={<TeamDetailPage />} />
+                <Route path="/teams/:ownerId/domains/:zoneId" element={<DomainDetailPage />} />
                 <Route path="/*" element={<p>404</p>} />
             </Routes>
         </Layout>

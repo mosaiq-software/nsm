@@ -1,14 +1,12 @@
-import { ActionIcon, Alert, Anchor, Badge, Button, Center, Divider, Fieldset, Group, Loader, Modal, MultiSelect, NumberInput, Select, Stack, Switch, Table, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Anchor, Badge, Button, Center, Divider, Fieldset, Group, Loader, Modal, NumberInput, Select, Stack, Switch, Table, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core';
 import { Sparkline } from '@mantine/charts';
 import { notifications } from '@mantine/notifications';
-import { DnsNameAnalytics, DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, PortReservation, Team } from '@mosaiq/nsm-common/types';
+import { DnsNameAnalytics, DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, PortReservation } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMe } from '@/hooks/queries/useMe';
-import { useDomains } from '@/hooks/queries/useDomains';
-import { useTeams } from '@/hooks/queries/teamHooks';
-import { usePublicIp, useDnsRecords, useDnsAnalytics, usePortReservations } from '@/hooks/queries/domainHooks';
-import { useSetDomainAllocations, useCreateDnsRecord, useUpdateDnsRecord, useDeleteDnsRecord, useDeleteDomain } from '@/hooks/mutations/domainMutations';
+import { usePublicIp, useTeamDomains, useTeamDnsRecords, useTeamDnsAnalytics, useTeamPortReservations } from '@/hooks/queries/domainHooks';
+import { useCreateDnsRecord, useUpdateDnsRecord, useDeleteDnsRecord, useDeleteDomain } from '@/hooks/mutations/domainMutations';
 import { MdArrowBack, MdOpenInNew, MdOutlineDelete, MdOutlineEdit } from 'react-icons/md';
 
 const PROXYABLE = new Set<DnsRecordType>(['A', 'AAAA', 'CNAME']);
@@ -28,25 +26,26 @@ const isNewRecord = (id: string): boolean => id.startsWith(NEW_ID_PREFIX);
 
 const DomainDetailPage = () => {
     const meCtx = useMe();
-    const domainsCtx = useDomains();
     const navigate = useNavigate();
-    const { zoneId = '' } = useParams();
+    const { ownerId = '', zoneId = '' } = useParams();
 
-    const teams = useTeams(meCtx.isAdmin).data ?? [];
+    const team = meCtx.teams.find((t) => t.ownerId === ownerId);
+    const canManage = meCtx.isAdmin || !!team?.isOwner;
+    const domainsQuery = useTeamDomains(ownerId);
     const publicIp = usePublicIp(meCtx.isAdmin).data ?? null;
 
-    const zone = domainsCtx.domains.find((z) => z.id === zoneId);
+    const zone = (domainsQuery.data ?? []).find((z) => z.id === zoneId);
 
     const backLink = (
-        <Anchor component={Link} to="/domains" c="dimmed">
+        <Anchor component={Link} to={`/teams/${ownerId}`} c="dimmed">
             <Group gap={4}>
                 <MdArrowBack />
-                <Text>Domains</Text>
+                <Text>{team?.login ? `${team.login} domains` : 'Domains'}</Text>
             </Group>
         </Anchor>
     );
 
-    if (!domainsCtx.ready) {
+    if (domainsQuery.isLoading) {
         return (
             <Center>
                 <Loader />
@@ -71,39 +70,36 @@ const DomainDetailPage = () => {
             {backLink}
             <DomainDetail
                 key={zone.id}
+                ownerId={ownerId}
                 zone={zone}
-                teams={teams}
-                isAdmin={meCtx.isAdmin}
-                isSuperAdmin={meCtx.isSuperAdmin}
+                canManage={canManage}
                 publicIp={publicIp}
-                onChanged={domainsCtx.refresh}
-                onDeleted={() => navigate('/domains')}
+                onChanged={() => domainsQuery.refetch()}
+                onDeleted={() => navigate(`/teams/${ownerId}`)}
             />
         </Stack>
     );
 };
 
 interface DomainDetailProps {
+    ownerId: string;
     zone: DnsZone;
-    teams: Team[];
-    isAdmin: boolean;
-    isSuperAdmin: boolean;
+    canManage: boolean;
     publicIp: string | null;
     onChanged: () => void;
     onDeleted: () => void;
 }
 
 const DomainDetail = (props: DomainDetailProps) => {
-    const { zone } = props;
-    const recordsQuery = useDnsRecords(zone.id, props.isAdmin);
-    const analytics = useDnsAnalytics(zone.id, props.isAdmin).data ?? null;
-    const reservations = usePortReservations(props.isAdmin).data ?? [];
+    const { ownerId, zone } = props;
+    const recordsQuery = useTeamDnsRecords(ownerId, zone.id);
+    const analytics = useTeamDnsAnalytics(ownerId, zone.id).data ?? null;
+    const reservations = useTeamPortReservations(ownerId, props.canManage).data ?? [];
 
-    const setAllocationsMutation = useSetDomainAllocations(zone.id);
-    const createRecordMutation = useCreateDnsRecord(zone.id);
-    const updateRecordMutation = useUpdateDnsRecord(zone.id);
-    const deleteRecordMutation = useDeleteDnsRecord(zone.id);
-    const deleteDomainMutation = useDeleteDomain(zone.id);
+    const createRecordMutation = useCreateDnsRecord(ownerId, zone.id);
+    const updateRecordMutation = useUpdateDnsRecord(ownerId, zone.id);
+    const deleteRecordMutation = useDeleteDnsRecord(ownerId, zone.id);
+    const deleteDomainMutation = useDeleteDomain(ownerId, zone.id);
 
     // Local working copy of records, seeded from the query. Edits are staged here (add/edit/remove)
     // and only pushed to Cloudflare on Save; a refetch reseeds and clears the staged sets.
@@ -115,7 +111,6 @@ const DomainDetail = (props: DomainDetailProps) => {
     const [dataJson, setDataJson] = useState('');
     const [busy, setBusy] = useState(false);
 
-    const [allocations, setAllocations] = useState<string[]>(zone.allocatedTeamIds ?? []);
     const [confirmName, setConfirmName] = useState('');
     const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -199,18 +194,10 @@ const DomainDetail = (props: DomainDetailProps) => {
         return body;
     };
 
-    // Single Save: persist team allocations, then push staged DNS record deletes/updates/creates.
+    // Single Save: push staged DNS record deletes/updates/creates.
     const saveAll = async () => {
         setBusy(true);
         try {
-            const alloc = await setAllocationsMutation.mutateAsync(allocations);
-            if (alloc && alloc.ok === false) {
-                const list = (alloc.blockedBy || []).map((b) => `${b.projectId} (${b.ownerLogin})`).join(', ');
-                notifications.show({ color: 'red', title: 'Domain in use', message: `Cannot remove a team while these projects use the domain: ${list}` });
-                setAllocations(zone.allocatedTeamIds ?? []);
-                return;
-            }
-
             const errors: string[] = [];
             const working = records ?? [];
 
@@ -325,14 +312,8 @@ const DomainDetail = (props: DomainDetailProps) => {
                 </Text>
             )}
 
-            {props.isAdmin && (
+            {props.canManage && (
                 <>
-                    <Divider label="Team allocations" />
-                    <Text fz="xs" c="dimmed">
-                        Teams allowed to use this domain in their project config. A team cannot be removed while its projects still reference the domain.
-                    </Text>
-                    <MultiSelect data={props.teams.map((t) => ({ value: t.ownerId, label: t.login }))} value={allocations} onChange={setAllocations} placeholder="No teams" searchable />
-
                     <Divider label="DNS records" />
                     <Group justify="space-between" align="center">
                         <Text fz="sm" c="dimmed">
@@ -398,7 +379,7 @@ const DomainDetail = (props: DomainDetailProps) => {
                                         </Group>
                                     </Table.Td>
                                     <Table.Td>
-                                        <RecordTraffic stats={analyticsByName.get(normName(r.name))} loading={props.isAdmin && analytics === null} />
+                                        <RecordTraffic stats={analyticsByName.get(normName(r.name))} loading={analytics === null} />
                                     </Table.Td>
                                     <Table.Td>
                                         <Group gap={4} justify="flex-end">
@@ -430,15 +411,11 @@ const DomainDetail = (props: DomainDetailProps) => {
                 </>
             )}
 
-            {props.isAdmin && (
+            {props.canManage && (
                 <Group justify="space-between" mt="md">
-                    <div>
-                        {props.isSuperAdmin && (
-                            <Button color="red" variant="light" onClick={() => setDeleteOpen(true)}>
-                                Delete domain
-                            </Button>
-                        )}
-                    </div>
+                    <Button color="red" variant="light" onClick={() => setDeleteOpen(true)}>
+                        Delete domain
+                    </Button>
                     <Button loading={busy} onClick={saveAll}>
                         Save
                     </Button>

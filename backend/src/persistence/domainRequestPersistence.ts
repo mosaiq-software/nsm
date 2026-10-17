@@ -62,3 +62,7 @@ export const getAllDomainRequestsModel = async (): Promise<DomainRequest[]> => {
 export const getDomainRequestsByRequesterModel = async (requesterId: string): Promise<DomainRequest[]> => {
     return (await DomainRequestModel.findAll({ where: { requesterId } })).map((r) => rowToRequest(r.toJSON())).sort((a, b) => b.createdAt - a.createdAt);
 };
+
+export const getDomainRequestsByOwnerModel = async (ownerId: string): Promise<DomainRequest[]> => {
+    return (await DomainRequestModel.findAll({ where: { ownerId } })).map((r) => rowToRequest(r.toJSON())).sort((a, b) => b.createdAt - a.createdAt);
+};

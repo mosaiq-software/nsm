@@ -1,9 +1,12 @@
 import { ActionIcon, Alert, Badge, Button, Card, Center, Code, Collapse, CopyButton, Group, Loader, Paper, SimpleGrid, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import { useCluster } from '@/hooks/queries/useCluster';
 import { useJoinInfo } from '@/hooks/queries/nodeHooks';
-import { MdExpandLess, MdExpandMore, MdOutlineStar } from 'react-icons/md';
+import { usePublicIp } from '@/hooks/queries/domainHooks';
+import { usePublicIpRefresh } from '@/hooks/mutations/domainMutations';
+import { MdExpandLess, MdExpandMore, MdOutlineStar, MdOutlineSync } from 'react-icons/md';
 
 const relativeTime = (ts: number) => {
     if (!ts) return 'never';
@@ -82,12 +85,35 @@ const NodesPage = () => {
     const status = clusterCtx.status;
     const navigate = useNavigate();
 
+    const publicIp = usePublicIp().data ?? null;
+    const publicIpRefresh = usePublicIpRefresh();
+
     const reachableCount = status?.health.filter((h) => h.reachable).length ?? 0;
     const totalCount = status?.nodes.length ?? clusterCtx.nodes.length;
 
+    const syncPublicIp = async () => {
+        try {
+            const res = await publicIpRefresh.mutateAsync();
+            if (res.changed) {
+                notifications.show({ color: 'green', title: 'Dynamic DNS updated', message: `Public IP changed to ${res.ip}. Dynamic records were repushed.` });
+            } else {
+                notifications.show({ color: 'blue', message: res.ip ? `Public IP unchanged (${res.ip}).` : 'No public IP detected.' });
+            }
+        } catch (e) {
+            notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Public IP refresh failed.' });
+        }
+    };
+
     return (
         <Stack>
-            <Title order={2}>Nodes</Title>
+            <Group justify="space-between" align="center">
+                <Title order={2}>Nodes</Title>
+                <Tooltip label="Check the public IP now and repush dynamic-IP DNS records if it changed">
+                    <Button variant="light" leftSection={<MdOutlineSync />} onClick={syncPublicIp} loading={publicIpRefresh.isPending}>
+                        Sync public IP{publicIp ? ` (${publicIp})` : ''}
+                    </Button>
+                </Tooltip>
+            </Group>
             <Text c="dimmed">Nodes self-register with the leader. This registry is read-only; membership is declared in each node&apos;s configuration.</Text>
             <AddNodePanel />
             {!clusterCtx.hasLeader && (

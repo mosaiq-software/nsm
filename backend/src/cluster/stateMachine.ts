@@ -9,8 +9,9 @@ import { createAllowedEntityModel, deleteAllowedEntitiesModel, getAllAllowedEnti
 import { upsertTeamConfigModel } from '@/persistence/teamConfigPersistence';
 import { deleteTeamOverrideModel, upsertTeamOverrideModel } from '@/persistence/teamOverridePersistence';
 import { createAdminModel, deleteAdminModel } from '@/persistence/adminPersistence';
-import { setDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
 import { upsertDomainRequestModel } from '@/persistence/domainRequestPersistence';
+import { deleteRegistrarAccountModel, upsertRegistrarAccountModel } from '@/persistence/registrarAccountPersistence';
+import { setTeamRegistrarModel } from '@/persistence/teamRegistrarPersistence';
 import { deletePortReservationModel, deletePortReservationsForProjectModel, upsertPortReservationModel } from '@/persistence/portReservationPersistence';
 import { addIncidentUpdateModel, deleteIncidentModel, upsertIncidentModel } from '@/persistence/incidentPersistence';
 import { revokeApiKeyModel, upsertApiKeyModel } from '@/persistence/apiKeyPersistence';
@@ -53,10 +54,14 @@ const opDetails = (op: Op): Record<string, unknown> => {
             return { id: op.admin.id, login: op.admin.login };
         case OpType.REMOVE_ADMIN:
             return { id: op.id };
-        case OpType.SET_DOMAIN_ALLOCATIONS:
-            return { zoneId: op.zoneId, ownerCount: op.ownerIds.length };
         case OpType.UPSERT_DOMAIN_REQUEST:
             return { requestId: op.request.id, domainName: op.request.domainName, status: op.request.status };
+        case OpType.UPSERT_REGISTRAR_ACCOUNT:
+            return { accountId: op.account.id, provider: op.account.provider };
+        case OpType.DELETE_REGISTRAR_ACCOUNT:
+            return { accountId: op.accountId };
+        case OpType.SET_TEAM_REGISTRAR:
+            return { ownerId: op.ownerId, registrarAccountId: op.registrarAccountId };
         case OpType.UPSERT_PORT_RESERVATION:
             return { reservationId: op.reservation.id, nodeId: op.reservation.nodeId, projectId: op.reservation.projectId, port: op.reservation.port, protocol: op.reservation.protocol };
         case OpType.DELETE_PORT_RESERVATION:
@@ -160,11 +165,17 @@ export const applyOp = async (op: Op): Promise<void> => {
         case OpType.REMOVE_ADMIN:
             await deleteAdminModel(op.id);
             break;
-        case OpType.SET_DOMAIN_ALLOCATIONS:
-            await setDomainAllocationsModel(op.zoneId, op.ownerIds);
-            break;
         case OpType.UPSERT_DOMAIN_REQUEST:
             await upsertDomainRequestModel(op.request);
+            break;
+        case OpType.UPSERT_REGISTRAR_ACCOUNT:
+            await upsertRegistrarAccountModel(op.account);
+            break;
+        case OpType.DELETE_REGISTRAR_ACCOUNT:
+            await deleteRegistrarAccountModel(op.accountId);
+            break;
+        case OpType.SET_TEAM_REGISTRAR:
+            await setTeamRegistrarModel(op.ownerId, op.registrarAccountId);
             break;
         case OpType.UPSERT_PORT_RESERVATION:
             await upsertPortReservationModel(op.reservation);

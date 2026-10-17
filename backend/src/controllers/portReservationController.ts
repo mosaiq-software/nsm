@@ -9,7 +9,8 @@ import {
     getPortReservationsByProjectModel,
 } from '@/persistence/portReservationPersistence';
 import { getNodeByIdModel } from '@/persistence/nodePersistence';
-import { getProjectByIdModel } from '@/persistence/projectPersistence';
+import { getAllProjectsModel, getProjectByIdModel } from '@/persistence/projectPersistence';
+import { resolveTeamById } from '@/controllers/authz';
 import { getReservedPorts } from '@/reconcile/ports';
 import { cluster } from '@/cluster/node';
 import { syncPortBoundRecords } from './dnsController';
@@ -29,6 +30,16 @@ export const listProjectReservations = async (projectId: string): Promise<PortRe
 
 export const listAllReservations = async (): Promise<PortReservation[]> => {
     return (await getAllPortReservationsModel()).sort((a, b) => a.nodeId.localeCompare(b.nodeId) || a.port - b.port);
+};
+
+// Reservations for the projects owned by a team (matched by repoOwner === team login). Scopes the
+// DNS port-binding picker to a team's own ports so a team owner never sees other teams' reservations.
+export const listTeamReservations = async (ownerId: string): Promise<PortReservation[]> => {
+    const team = await resolveTeamById(ownerId);
+    if (!team) return [];
+    const login = team.login.toLowerCase();
+    const projectIds = new Set((await getAllProjectsModel()).filter((p) => p.repoOwner.toLowerCase() === login).map((p) => p.id));
+    return (await listAllReservations()).filter((r) => projectIds.has(r.projectId));
 };
 
 export const createReservation = async (nodeId: string, body: CreatePortReservationBody): Promise<PortReservation> => {

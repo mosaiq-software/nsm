@@ -7,10 +7,11 @@ import * as dropServiceInstanceCollectLogs from './0006-service-instances-drop-c
 import * as dnsRecordsAddPortReservation from './0007-dns-records-add-port-reservation';
 import * as projectInstancesAddDeployTiming from './0008-project-instances-add-deploy-timing';
 import * as webhooksAndHashedSecrets from './0009-webhooks-and-hashed-secrets';
+import * as dnsZonesAddRegistrarAccount from './0010-dns-zones-add-registrar-account';
 
 // Ordered list of migrations. Statically imported (rather than glob-loaded) so module resolution
 // is identical under tsx, the test runner, and production. Append new migrations to the end.
-export const migrations = [addSecretComment, addProjectColumns, migrateAdmins, addProjectCicdColumn, addProjectResourceQuotaColumn, dropServiceInstanceCollectLogs, dnsRecordsAddPortReservation, projectInstancesAddDeployTiming, webhooksAndHashedSecrets].map((m) => ({
+export const migrations = [addSecretComment, addProjectColumns, migrateAdmins, addProjectCicdColumn, addProjectResourceQuotaColumn, dropServiceInstanceCollectLogs, dnsRecordsAddPortReservation, projectInstancesAddDeployTiming, webhooksAndHashedSecrets, dnsZonesAddRegistrarAccount].map((m) => ({
     name: m.name,
     up: m.up,
     down: m.down,

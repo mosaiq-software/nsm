@@ -1,10 +1,10 @@
 import { DnsRecord, DnsRecordType, DomainBilling } from '@mosaiq/nsm-common/types';
+import { RegistrarAccountRecord } from '@mosaiq/nsm-common/clusterOps';
 import { cluster } from '@/cluster/node';
-import { isCloudflareConfigured, isCloudflareRegistrarConfigured } from '@/config';
-import { CfDnsRecord, CfRegistrarDomain, getPortReservationIdFromComment, hasDynamicTag, listDnsRecords, listRegistrarDomains, listZones } from '@/utils/cloudflare';
-import { deleteDnsZonesNotInModel, getDnsZoneByNameModel, getDnsZoneModel, upsertDnsZoneModel } from '@/persistence/dnsZonePersistence';
+import { CfCreds, CfDnsRecord, CfRegistrarDomain, getPortReservationIdFromComment, hasDynamicTag, listDnsRecords, listRegistrarDomains, listZones } from '@/utils/cloudflare';
+import { deleteDnsZonesNotInModelForAccount, getDnsZoneByNameModel, getDnsZoneModel, upsertDnsZoneModel } from '@/persistence/dnsZonePersistence';
 import { deleteRecordsForZoneModel, replaceZoneRecordsModel } from '@/persistence/dnsRecordPersistence';
-import { setDomainAllocationsModel } from '@/persistence/domainTeamAllocationPersistence';
+import { getAllAccountCreds, getCredsForZone } from '@/controllers/registrarController';
 import { areaLog, serializeError } from '@/utils/log';
 
 const syncLog = areaLog('cloudflare');
@@ -40,26 +40,26 @@ const mergeBilling = (existing: DomainBilling | undefined, reg: CfRegistrarDomai
     };
 };
 
-// Cloudflare-authoritative mirror of zones + records + registrar metadata into the leader-local
-// cache. Cascades external changes: zones removed on Cloudflare are pruned from the cache along with
-// their records and NSM associations. Throws on a Cloudflare failure so on-demand callers can
-// surface the underlying error.
-const performCloudflareSync = async (): Promise<{ zoneCount: number }> => {
-    const zones = await listZones();
+// Cloudflare-authoritative mirror of one registrar account's zones + records + registrar metadata
+// into the leader-local cache. Zones are tagged with the account id so sync and prune are scoped per
+// account; a zone removed on Cloudflare is pruned (within this account only) along with its records.
+// Throws on a Cloudflare failure so on-demand callers can surface the underlying error.
+export const performAccountSync = async (account: RegistrarAccountRecord, creds: CfCreds): Promise<{ zoneCount: number }> => {
+    const zones = await listZones(creds);
 
     const registrarByName = new Map<string, CfRegistrarDomain>();
-    if (isCloudflareRegistrarConfigured()) {
+    if (creds.accountId) {
         try {
-            for (const r of await listRegistrarDomains()) if (r.name) registrarByName.set(r.name.toLowerCase(), r);
+            for (const r of await listRegistrarDomains(creds)) if (r.name) registrarByName.set(r.name.toLowerCase(), r);
         } catch (e: any) {
-            syncLog.warn({ action: 'registrar_list_failed', err: serializeError(e) }, 'could not list registrar domains (registrar API may be unavailable)');
+            syncLog.warn({ action: 'registrar_list_failed', accountId: account.id, err: serializeError(e) }, 'could not list registrar domains (registrar API may be unavailable)');
         }
     }
 
     for (const z of zones) {
         const existing = await getDnsZoneModel(z.id);
         const reg = registrarByName.get(z.name.toLowerCase());
-        const records = await listDnsRecords(z.id);
+        const records = await listDnsRecords(creds, z.id);
         await replaceZoneRecordsModel(z.id, records.map((r) => cfToRecord(r, z.id)));
         await upsertDnsZoneModel({
             id: z.id,
@@ -67,50 +67,55 @@ const performCloudflareSync = async (): Promise<{ zoneCount: number }> => {
             status: z.status,
             paused: z.paused,
             billing: mergeBilling(existing?.billing, reg),
+            registrarAccountId: account.id,
             recordCount: records.length,
             lastSyncedAt: Date.now(),
         });
     }
 
-    const gone = await deleteDnsZonesNotInModel(zones.map((z) => z.id));
+    const gone = await deleteDnsZonesNotInModelForAccount(account.id, zones.map((z) => z.id));
     for (const zoneId of gone) {
         await deleteRecordsForZoneModel(zoneId);
-        await setDomainAllocationsModel(zoneId, []);
-        syncLog.info({ action: 'zone_pruned', zoneId }, `pruned zone ${zoneId} no longer present on Cloudflare`);
+        syncLog.info({ action: 'zone_pruned', zoneId, accountId: account.id }, `pruned zone ${zoneId} no longer present on Cloudflare`);
     }
 
-    syncLog.debug({ action: 'sync_complete', zoneCount: zones.length }, `synced ${zones.length} Cloudflare zone(s)`);
+    syncLog.debug({ action: 'sync_complete', accountId: account.id, zoneCount: zones.length }, `synced ${zones.length} zone(s) for ${account.id}`);
     return { zoneCount: zones.length };
 };
 
-// Leader-only, cron-driven mirror. Failures are logged and swallowed so the scheduler keeps running.
+// Leader-only, cron-driven mirror across every configured registrar account. Failures are logged and
+// swallowed per account so the scheduler keeps running and one bad account cannot block the rest.
 export const syncCloudflare = async (): Promise<void> => {
-    if (!cluster.isLeader() || !isCloudflareConfigured()) return;
-    try {
-        await performCloudflareSync();
-    } catch (e: any) {
-        syncLog.error({ action: 'sync_failed', err: serializeError(e) }, 'Cloudflare sync failed');
+    if (!cluster.isLeader()) return;
+    for (const { account, creds } of await getAllAccountCreds()) {
+        try {
+            await performAccountSync(account, creds);
+        } catch (e: any) {
+            syncLog.error({ action: 'sync_failed', accountId: account.id, err: serializeError(e) }, 'Cloudflare sync failed');
+        }
     }
 };
 
-// On-demand sync triggered from the UI. Returns a structured result instead of throwing so the
-// caller can surface the exact Cloudflare error (e.g. an API-token permission failure) to the admin.
-export const syncCloudflareNow = async (): Promise<{ ok: boolean; zoneCount?: number; error?: string }> => {
-    if (!isCloudflareConfigured()) return { ok: false, error: 'Cloudflare is not configured (CLOUDFLARE_API_TOKEN missing)' };
+// On-demand sync of a single account triggered from a team's domains UI. Returns a structured result
+// instead of throwing so the caller can surface the exact Cloudflare error to the user.
+export const syncAccountNow = async (account: RegistrarAccountRecord, creds: CfCreds): Promise<{ ok: boolean; zoneCount?: number; error?: string }> => {
+    if (!creds.apiToken) return { ok: false, error: 'Registrar is not configured for this team.' };
     try {
-        const { zoneCount } = await performCloudflareSync();
+        const { zoneCount } = await performAccountSync(account, creds);
         return { ok: true, zoneCount };
     } catch (e: any) {
-        syncLog.error({ action: 'sync_failed', err: serializeError(e) }, 'Cloudflare sync failed');
+        syncLog.error({ action: 'sync_failed', accountId: account.id, err: serializeError(e) }, 'Cloudflare sync failed');
         return { ok: false, error: e?.message || 'Cloudflare sync failed' };
     }
 };
 
-// Refresh a single zone's cached records after an in-NSM write, without a full re-sync.
+// Refresh a single zone's cached records after an in-NSM write, without a full re-sync. Resolves the
+// zone's registrar account credentials internally so callers need not thread them.
 export const syncZoneRecords = async (zoneId: string): Promise<void> => {
-    if (!isCloudflareConfigured()) return;
+    const creds = await getCredsForZone(zoneId);
+    if (!creds?.apiToken) return;
     try {
-        const records = await listDnsRecords(zoneId);
+        const records = await listDnsRecords(creds, zoneId);
         await replaceZoneRecordsModel(zoneId, records.map((r) => cfToRecord(r, zoneId)));
         const existing = await getDnsZoneModel(zoneId);
         if (existing) await upsertDnsZoneModel({ ...existing, recordCount: records.length, lastSyncedAt: Date.now() });

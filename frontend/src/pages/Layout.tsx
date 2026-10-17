@@ -5,7 +5,6 @@ import RouterLink, { pathMatchesShape } from '@/components/RouterLink';
 import { ProjectStatusChip } from '@/components/ProjectStatusChip';
 import { useCreateProject } from '@/hooks/mutations/projectMutations';
 import { useMe } from '@/hooks/queries/useMe';
-import { useDomains } from '@/hooks/queries/useDomains';
 import { useCluster } from '@/hooks/queries/useCluster';
 import { useGithubRepos, useGithubBranches } from '@/hooks/queries/githubHooks';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -25,7 +24,6 @@ const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle, close }] = useDisclosure();
     const createProject = useCreateProject();
     const meCtx = useMe();
-    const domainsCtx = useDomains();
     const clusterCtx = useCluster();
     const userCtx = useUser();
     const navigate = useNavigate();
@@ -184,10 +182,6 @@ const Layout = (props: { children: React.ReactNode }) => {
                     }}
                 >
                     <RouterLink to="/" label="Dashboard" showActive onNavigate={close} />
-                    <RouterLink to="/domains" label="Domains" showActive onNavigate={close}>
-                        {domainsCtx.domains.length > 0 &&
-                            domainsCtx.domains.map((zone) => <RouterLink to={`/domains/${zone.id}`} label={zone.name} key={zone.id} showActive onNavigate={close} />)}
-                    </RouterLink>
                     {meCtx.isAdmin && (
                         <>
                             <RouterLink to="/nodes" label="Nodes" showActive onNavigate={close}>

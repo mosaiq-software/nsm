@@ -45,31 +45,14 @@ export interface NodeConfigUpdate {
 }
 
 export const EDITABLE_ENV_SPECS: EnvVarSpec[] = [
-    // === Cloudflare (leader-only DNS + domains) ===
-    {
-        key: 'CLOUDFLARE_API_TOKEN',
-        label: 'Cloudflare API token',
-        description: 'Token used for all Cloudflare DNS and domain operations. Empty disables the whole Cloudflare feature.',
-        category: 'Cloudflare',
-        type: 'string',
-        required: false,
-        secret: true,
-        leaderOnly: true,
-    },
-    {
-        key: 'CLOUDFLARE_ACCOUNT_ID',
-        label: 'Cloudflare account ID',
-        description: 'Account ID required for registrar (domain search/purchase) operations.',
-        category: 'Cloudflare',
-        type: 'string',
-        required: false,
-        leaderOnly: true,
-    },
+    // === Dynamic DNS (leader-only) ===
+    // Registrar credentials are configured per team in the UI (not via env), so the only Cloudflare-
+    // related env setting left is the public-IP poll interval that drives dynamic-record repush.
     {
         key: 'PUBLIC_IP_POLL_MINUTES',
         label: 'Public IP poll interval (minutes)',
         description: 'How often the leader checks its public (WAN) IP to repush dynamic-IP DNS records.',
-        category: 'Cloudflare',
+        category: 'Dynamic DNS',
         type: 'number',
         required: false,
         placeholder: '10',
