@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { MdOutlineSync } from 'react-icons/md';
 import { useGithubBranches } from '@/hooks/queries/githubHooks';
 import { useSetupCicd, useRemoveCicd } from '@/hooks/mutations/deployMutations';
-import { useUpdateProject, usePatchProjectCache } from '@/hooks/mutations/projectMutations';
+import { usePatchProjectCache } from '@/hooks/mutations/projectMutations';
 import { useMe } from '@/hooks/queries/useMe';
 import { RecurrenceInput } from '@/components/cicd/RecurrenceInput';
 import { buildCron, DEFAULT_RECURRENCE, describeRecurrence, parseCron, RecurrenceState } from '@/components/cicd/recurrence';
@@ -24,7 +24,6 @@ const ConfigContinuousDeploymentPage = () => {
     const meCtx = useMe();
     const setupCicd = useSetupCicd();
     const removeCicd = useRemoveCicd();
-    const updateProject = useUpdateProject();
     const patchProject = usePatchProjectCache();
 
     const projectTeam = meCtx.teams.find((t) => t.projects.some((p) => p.id === project.id));
@@ -37,7 +36,6 @@ const ConfigContinuousDeploymentPage = () => {
     const [tagPattern, setTagPattern] = useState('v*');
     const [recurrence, setRecurrence] = useState<RecurrenceState>(DEFAULT_RECURRENCE);
     const [scheduleImportFailed, setScheduleImportFailed] = useState(false);
-    const [allowCICD, setAllowCICD] = useState(false);
 
     // Seed the form from the persisted project once per project. Local state (not the shared config
     // draft) because managed CD persists through its own endpoints rather than the layout's save flow.
@@ -50,7 +48,6 @@ const ConfigContinuousDeploymentPage = () => {
         const parsed = parseCron(cd?.cron);
         setRecurrence(parsed ?? DEFAULT_RECURRENCE);
         setScheduleImportFailed(!!cd?.cron && !parsed);
-        setAllowCICD(!!project.allowCICD);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [project.id]);
 
@@ -65,15 +62,11 @@ const ConfigContinuousDeploymentPage = () => {
     const configValid = !enabled || (triggersValid && branchValid);
 
     const wasManaged = !!project.cicd?.managed;
-    const saving = setupCicd.isPending || removeCicd.isPending || updateProject.isPending;
+    const saving = setupCicd.isPending || removeCicd.isPending;
 
     const handleSave = async () => {
         notifications.show({ message: 'Saving continuous deployment...', color: 'blue' });
         try {
-            // The effective server value of allowCICD after the managed-CD step: setup forces it true,
-            // remove leaves it untouched, and with no managed change it stays as persisted.
-            let serverAllowCICD = !!project.allowCICD;
-
             if (enabled) {
                 const updated = await setupCicd.mutateAsync({
                     projectId: project.id,
@@ -87,7 +80,6 @@ const ConfigContinuousDeploymentPage = () => {
                     return;
                 }
                 patchProject(project.id, { cicd: updated.cicd, allowCICD: updated.allowCICD });
-                serverAllowCICD = !!updated.allowCICD;
                 setScheduleImportFailed(false);
             } else if (wasManaged) {
                 const updated = await removeCicd.mutateAsync(project.id);
@@ -96,11 +88,6 @@ const ConfigContinuousDeploymentPage = () => {
                     return;
                 }
                 patchProject(project.id, { cicd: undefined });
-                serverAllowCICD = !!updated.allowCICD;
-            }
-
-            if (allowCICD !== serverAllowCICD) {
-                await updateProject.mutateAsync({ id: project.id, patch: { allowCICD } });
             }
 
             notifications.show({ message: 'Continuous deployment saved', color: 'green' });
@@ -123,7 +110,7 @@ const ConfigContinuousDeploymentPage = () => {
 
             {!installed ? (
                 <Alert color="yellow" variant="light" title="GitHub App not installed">
-                    Install the NSM GitHub App for this project&apos;s organization to enable managed continuous deployment. You can still allow the external deploy-key trigger below.
+                    Install the NSM GitHub App for this project&apos;s organization to enable managed continuous deployment. You can still allow the external deploy-key trigger on the Keys page.
                 </Alert>
             ) : (
                 <Card withBorder>
@@ -176,17 +163,6 @@ const ConfigContinuousDeploymentPage = () => {
                     </Stack>
                 </Card>
             )}
-
-            <Card withBorder>
-                <Stack gap="xs">
-                    <Switch
-                        label="Allow deploy-key trigger"
-                        description="Allow external systems (e.g. a CI pipeline) to trigger a deployment using this project's deploy key."
-                        checked={allowCICD}
-                        onChange={(e) => setAllowCICD(e.currentTarget.checked)}
-                    />
-                </Stack>
-            </Card>
 
             {cd?.managed && (
                 <Card withBorder>

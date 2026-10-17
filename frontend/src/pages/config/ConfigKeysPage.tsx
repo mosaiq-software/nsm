@@ -1,21 +1,39 @@
-import { ActionIcon, Alert, Button, Card, Code, CopyButton, Group, Modal, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Button, Card, Code, CopyButton, Group, Modal, Stack, Switch, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { Capability } from '@mosaiq/nsm-common/types';
 import { useState } from 'react';
 import { MdOutlineCheckBox, MdOutlineContentCopy, MdOutlineWarningAmber } from 'react-icons/md';
 import { useMe } from '@/hooks/queries/useMe';
 import { useResetDeploymentKey } from '@/hooks/mutations/deployMutations';
+import { useUpdateProject } from '@/hooks/mutations/projectMutations';
 import { ApiKeysCard } from '@/components/ApiKeysCard';
+import { logger } from '@/utils/logger';
 import { useProjectConfig } from './projectConfigContext';
 
 const ConfigKeysPage = () => {
     const { project } = useProjectConfig();
     const meCtx = useMe();
     const resetKey = useResetDeploymentKey(project.id);
+    const updateProject = useUpdateProject();
     const [confirmModal, setConfirmModal] = useState(false);
     const rotating = resetKey.isPending;
     // The raw key is only ever available in-memory right after a rotate; it is never fetched again.
     const [revealedKey, setRevealedKey] = useState<string | null>(null);
+    // Persisted immediately on toggle (not through the layout's save flow); mirror the server value
+    // locally so the switch is optimistic and reverts if the update fails.
+    const [allowCICD, setAllowCICD] = useState(!!project.allowCICD);
+
+    const handleAllowCICD = async (checked: boolean) => {
+        setAllowCICD(checked);
+        try {
+            await updateProject.mutateAsync({ id: project.id, patch: { allowCICD: checked } });
+            notifications.show({ message: checked ? 'Deploy-key trigger enabled' : 'Deploy-key trigger disabled', color: 'green' });
+        } catch (e) {
+            setAllowCICD(!checked);
+            logger.error('project', 'failed to update deploy-key trigger setting', { err: e, projectId: project.id });
+            notifications.show({ message: 'Failed to update deploy-key trigger', color: 'red' });
+        }
+    };
 
     const handleRotate = async () => {
         const newKey = await resetKey.mutateAsync();
@@ -108,6 +126,19 @@ const ConfigKeysPage = () => {
                                     Rotate Key
                                 </Button>
                             </Group>
+                        </Stack>
+                    </Card>
+                )}
+                {meCtx.canProject(project.id, Capability.CONFIGURE) && (
+                    <Card withBorder>
+                        <Stack gap="xs">
+                            <Switch
+                                label="Allow deploy-key trigger"
+                                description="Allow external systems (e.g. a CI pipeline) to trigger a deployment using this project's deploy key."
+                                checked={allowCICD}
+                                onChange={(e) => void handleAllowCICD(e.currentTarget.checked)}
+                                disabled={updateProject.isPending}
+                            />
                         </Stack>
                     </Card>
                 )}
