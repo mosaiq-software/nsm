@@ -1,12 +1,13 @@
 import { cluster } from '@/cluster/node';
 import { getMeta, setMeta } from '@/persistence/clusterMetaPersistence';
 import { getAllDynamicRecordsModel } from '@/persistence/dnsRecordPersistence';
-import { CfCreds, updateDnsRecord } from '@/utils/cloudflare';
+import { getDnsZoneModel } from '@/persistence/dnsZonePersistence';
+import { DnsProvider } from '@/registrar/provider';
 import { syncZoneRecords } from '@/reconcile/cloudflareSync';
-import { anyRegistrarConfigured, getCredsForZone } from '@/controllers/registrarController';
+import { anyRegistrarConfigured, getProviderForZone } from '@/controllers/registrarController';
 import { areaLog, serializeError } from '@/utils/log';
 
-const ipLog = areaLog('cloudflare');
+const ipLog = areaLog('dns');
 
 const PUBLIC_IP4_META_KEY = 'publicIpv4';
 const PUBLIC_IP6_META_KEY = 'publicIpv6';
@@ -73,19 +74,23 @@ export const checkPublicIp = async (): Promise<PublicIpCheckResult> => {
         if (!v4Changed && !v6Changed) return { ip: ipv4 || lastV4, changed: false };
 
         const touchedZones = new Set<string>();
-        // Dynamic records can span multiple registrar accounts; resolve each zone's creds (cached).
-        const credsByZone = new Map<string, CfCreds | null>();
+        // Dynamic records can span multiple registrar accounts; resolve each zone's provider (cached).
+        const zoneHandles = new Map<string, { provider: DnsProvider; zone: { id: string; name: string } } | null>();
         for (const rec of dynamicRecords) {
             const target = rec.type === 'A' ? (v4Changed ? ipv4 : null) : rec.type === 'AAAA' ? (v6Changed ? ipv6 : null) : null;
             if (!target) continue;
             try {
-                if (!credsByZone.has(rec.zoneId)) credsByZone.set(rec.zoneId, await getCredsForZone(rec.zoneId));
-                const creds = credsByZone.get(rec.zoneId);
-                if (!creds?.apiToken) {
+                if (!zoneHandles.has(rec.zoneId)) {
+                    const resolved = await getProviderForZone(rec.zoneId);
+                    const zone = await getDnsZoneModel(rec.zoneId);
+                    zoneHandles.set(rec.zoneId, resolved && zone ? { provider: resolved.provider, zone: { id: zone.id, name: zone.name } } : null);
+                }
+                const handle = zoneHandles.get(rec.zoneId);
+                if (!handle || !handle.provider.hasRemoteConfig()) {
                     ipLog.warn({ action: 'dynamic_record_no_creds', recordId: rec.id, zoneId: rec.zoneId }, `no registrar credentials for zone ${rec.zoneId}; skipping dynamic record`);
                     continue;
                 }
-                await updateDnsRecord(creds, rec.zoneId, rec.id, { content: target });
+                await handle.provider.updateRecord(handle.zone, rec.id, { content: target });
                 touchedZones.add(rec.zoneId);
                 ipLog.info({ action: 'dynamic_record_updated', recordId: rec.id, name: rec.name, type: rec.type, ip: target }, `updated dynamic ${rec.type} ${rec.name} -> ${target}`);
             } catch (e: any) {

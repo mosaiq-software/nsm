@@ -14,34 +14,6 @@ export interface CfCreds {
     accountId: string;
 }
 
-// Marker written into a Cloudflare record's `comment` to mark it as NSM-managed dynamic-IP. Keeping
-// the flag in the comment (rather than a local table) means it lives in Cloudflare and survives a
-// re-sync, so Cloudflare stays authoritative for which records are dynamic.
-export const DYNAMIC_TAG = 'nsm-dynamic-ip';
-
-export const hasDynamicTag = (comment?: string | null): boolean => !!comment && comment.includes(DYNAMIC_TAG);
-export const addDynamicTag = (comment?: string | null): string => {
-    const base = (comment || '').replace(DYNAMIC_TAG, '').trim();
-    return base ? `${base} ${DYNAMIC_TAG}` : DYNAMIC_TAG;
-};
-export const removeDynamicTag = (comment?: string | null): string => (comment || '').replace(DYNAMIC_TAG, '').replace(/\s+/g, ' ').trim();
-
-// Marker binding a record's port (e.g. SRV data.port) to a port reservation. Like DYNAMIC_TAG the
-// binding lives in the CF comment (`nsm-port:<reservationId>`) so it survives a re-sync and
-// Cloudflare stays authoritative for which records NSM drives.
-export const PORT_TAG_PREFIX = 'nsm-port:';
-const PORT_TAG_RE = new RegExp(`${PORT_TAG_PREFIX}([A-Za-z0-9_-]+)`);
-
-export const getPortReservationIdFromComment = (comment?: string | null): string | undefined => {
-    const m = (comment || '').match(PORT_TAG_RE);
-    return m ? m[1] : undefined;
-};
-export const setPortTag = (comment: string | null | undefined, reservationId: string): string => {
-    const base = removePortTag(comment);
-    return base ? `${base} ${PORT_TAG_PREFIX}${reservationId}` : `${PORT_TAG_PREFIX}${reservationId}`;
-};
-export const removePortTag = (comment?: string | null): string => (comment || '').replace(PORT_TAG_RE, '').replace(/\s+/g, ' ').trim();
-
 // Cloudflare wraps every response in { success, errors, messages, result, result_info }.
 interface CfEnvelope<T> {
     success: boolean;

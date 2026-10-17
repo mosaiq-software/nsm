@@ -1,11 +1,11 @@
 import { ActionIcon, Alert, Anchor, Badge, Button, Center, Divider, Fieldset, Group, Loader, Modal, NumberInput, Select, Stack, Switch, Table, Text, Textarea, TextInput, Title, Tooltip } from '@mantine/core';
 import { Sparkline } from '@mantine/charts';
 import { notifications } from '@mantine/notifications';
-import { DnsNameAnalytics, DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, PortReservation } from '@mosaiq/nsm-common/types';
+import { DnsNameAnalytics, DnsRecord, DnsRecordType, DNS_RECORD_TYPES, DNS_STRUCTURED_TYPES, DnsZone, PortReservation, REGISTRAR_PROVIDER_SPECS, RegistrarProviderCapabilities } from '@mosaiq/nsm-common/types';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMe } from '@/hooks/queries/useMe';
-import { usePublicIp, useTeamDomains, useTeamDnsRecords, useTeamDnsAnalytics, useTeamPortReservations } from '@/hooks/queries/domainHooks';
+import { usePublicIp, useTeamDomains, useTeamDnsRecords, useTeamDnsAnalytics, useTeamPortReservations, useTeamRegistrar } from '@/hooks/queries/domainHooks';
 import { useCreateDnsRecord, useUpdateDnsRecord, useDeleteDnsRecord, useDeleteDomain } from '@/hooks/mutations/domainMutations';
 import { MdArrowBack, MdOpenInNew, MdOutlineDelete, MdOutlineEdit } from 'react-icons/md';
 
@@ -19,7 +19,7 @@ type Draft = Partial<DnsRecord>;
 
 const emptyDraft = (): Draft => ({ type: 'A', name: '', content: '', ttl: 1, proxied: false, dynamic: false });
 
-// Client-only id prefix for records staged for creation but not yet pushed to Cloudflare.
+// Client-only id prefix for records staged for creation but not yet pushed to the registrar.
 const NEW_ID_PREFIX = 'new:';
 const tempId = (): string => `${NEW_ID_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const isNewRecord = (id: string): boolean => id.startsWith(NEW_ID_PREFIX);
@@ -90,10 +90,17 @@ interface DomainDetailProps {
     onDeleted: () => void;
 }
 
+// Default to the fully-capable (Cloudflare-like) feature set until the team's registrar config loads,
+// so the richer UI never flashes off for an existing Cloudflare team.
+const ALL_CAPABILITIES: RegistrarProviderCapabilities = { purchase: true, analytics: true, proxy: true, deleteZone: true };
+
 const DomainDetail = (props: DomainDetailProps) => {
     const { ownerId, zone } = props;
     const recordsQuery = useTeamDnsRecords(ownerId, zone.id);
-    const analytics = useTeamDnsAnalytics(ownerId, zone.id).data ?? null;
+    const registrarAccount = useTeamRegistrar(ownerId).data?.account ?? null;
+    const caps = registrarAccount ? REGISTRAR_PROVIDER_SPECS[registrarAccount.provider].capabilities : ALL_CAPABILITIES;
+    const providerLabel = registrarAccount ? REGISTRAR_PROVIDER_SPECS[registrarAccount.provider].label : 'registrar';
+    const analytics = useTeamDnsAnalytics(ownerId, zone.id, caps.analytics).data ?? null;
     const reservations = useTeamPortReservations(ownerId, props.canManage).data ?? [];
 
     const createRecordMutation = useCreateDnsRecord(ownerId, zone.id);
@@ -102,7 +109,7 @@ const DomainDetail = (props: DomainDetailProps) => {
     const deleteDomainMutation = useDeleteDomain(ownerId, zone.id);
 
     // Local working copy of records, seeded from the query. Edits are staged here (add/edit/remove)
-    // and only pushed to Cloudflare on Save; a refetch reseeds and clears the staged sets.
+    // and only pushed to the registrar on Save; a refetch reseeds and clears the staged sets.
     const [records, setRecords] = useState<DnsRecord[] | null>(null);
     const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
     const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
@@ -144,7 +151,7 @@ const DomainDetail = (props: DomainDetailProps) => {
         setEditing(r.id);
     };
 
-    // Stage a record add/edit into the local working list. Nothing is pushed to Cloudflare until Save.
+    // Stage a record add/edit into the local working list. Nothing is pushed to the registrar until Save.
     const applyRecord = () => {
         if (!draft.type || !draft.name) {
             notifications.show({ color: 'red', message: 'Type and name are required.' });
@@ -241,7 +248,7 @@ const DomainDetail = (props: DomainDetailProps) => {
         setBusy(true);
         try {
             await deleteDomainMutation.mutateAsync(confirmName);
-            notifications.show({ color: 'green', message: `${zone.name} deleted from Cloudflare.` });
+            notifications.show({ color: 'green', message: `${zone.name} deleted.` });
             setDeleteOpen(false);
             props.onChanged();
             props.onDeleted();
@@ -259,7 +266,7 @@ const DomainDetail = (props: DomainDetailProps) => {
                 {zone.dashboardUrl && (
                     <Anchor href={zone.dashboardUrl} target="_blank" rel="noopener noreferrer" fz="sm">
                         <Group gap={4} align="center">
-                            View on Cloudflare
+                            View on {providerLabel}
                             <MdOpenInNew />
                         </Group>
                     </Anchor>
@@ -317,7 +324,7 @@ const DomainDetail = (props: DomainDetailProps) => {
                     <Divider label="DNS records" />
                     <Group justify="space-between" align="center">
                         <Text fz="sm" c="dimmed">
-                            Managed at the domain level. Cloudflare is authoritative.
+                            Managed at the domain level. The registrar is authoritative.
                         </Text>
                         <Group gap="sm" align="center">
                             {analytics && analytics.total > 0 && (
@@ -344,6 +351,7 @@ const DomainDetail = (props: DomainDetailProps) => {
                             setDataJson={setDataJson}
                             zoneName={zone.name}
                             reservations={reservations}
+                            showProxy={caps.proxy}
                             busy={busy}
                             onCancel={() => setEditing(null)}
                             onSave={applyRecord}
@@ -413,9 +421,13 @@ const DomainDetail = (props: DomainDetailProps) => {
 
             {props.canManage && (
                 <Group justify="space-between" mt="md">
-                    <Button color="red" variant="light" onClick={() => setDeleteOpen(true)}>
-                        Delete domain
-                    </Button>
+                    {caps.deleteZone ? (
+                        <Button color="red" variant="light" onClick={() => setDeleteOpen(true)}>
+                            Delete domain
+                        </Button>
+                    ) : (
+                        <div />
+                    )}
                     <Button loading={busy} onClick={saveAll}>
                         Save
                     </Button>
@@ -425,7 +437,7 @@ const DomainDetail = (props: DomainDetailProps) => {
             <Modal opened={deleteOpen} onClose={() => setDeleteOpen(false)} title={<Title order={4} c="red">Delete domain</Title>}>
                 <Alert color="red" variant="light">
                     <Stack gap="xs">
-                        <Text fz="sm">Removes {zone.name} from Cloudflare and best-effort disables auto-renew to stop billing. This cannot be undone. Type the domain name to confirm.</Text>
+                        <Text fz="sm">Removes {zone.name} from the registrar and best-effort disables auto-renew to stop billing. This cannot be undone. Type the domain name to confirm.</Text>
                         <TextInput placeholder={zone.name} value={confirmName} onChange={(e) => setConfirmName(e.currentTarget.value)} />
                         <Group justify="flex-end">
                             <Button variant="subtle" color="gray" onClick={() => setDeleteOpen(false)} disabled={busy}>
@@ -481,6 +493,7 @@ interface RecordFormProps {
     setDataJson: (s: string) => void;
     zoneName: string;
     reservations: PortReservation[];
+    showProxy: boolean;
     busy: boolean;
     onCancel: () => void;
     onSave: () => void;
@@ -501,7 +514,7 @@ const RecordForm = (props: RecordFormProps) => {
                     <NumberInput label="TTL (1 = auto)" min={1} value={draft.ttl ?? 1} onChange={(v) => props.setDraft({ ...draft, ttl: typeof v === 'number' ? v : 1 })} />
                 </Group>
                 {structured ? (
-                    <Textarea label="Data (JSON)" description="Structured record fields, e.g. SRV/CAA. See Cloudflare's DNS record data schema." autosize minRows={3} value={props.dataJson} onChange={(e) => props.setDataJson(e.currentTarget.value)} />
+                    <Textarea label="Data (JSON)" description="Structured record fields, e.g. SRV ({ priority, weight, port, target }) or CAA." autosize minRows={3} value={props.dataJson} onChange={(e) => props.setDataJson(e.currentTarget.value)} />
                 ) : (
                     <TextInput label="Content" placeholder={type === 'A' ? '203.0.113.10' : type === 'CNAME' ? 'target.example.com' : ''} value={draft.content ?? ''} onChange={(e) => props.setDraft({ ...draft, content: e.currentTarget.value })} disabled={!!draft.dynamic && type === 'A'} />
                 )}
@@ -520,7 +533,7 @@ const RecordForm = (props: RecordFormProps) => {
                     />
                 )}
                 <Group>
-                    {PROXYABLE.has(type) && <Switch label="Cloudflare proxy" checked={!!draft.proxied} onChange={(e) => props.setDraft({ ...draft, proxied: e.currentTarget.checked })} />}
+                    {props.showProxy && PROXYABLE.has(type) && <Switch label="Cloudflare proxy" checked={!!draft.proxied} onChange={(e) => props.setDraft({ ...draft, proxied: e.currentTarget.checked })} />}
                     {DYNAMIC_CAPABLE.has(type) && <Switch label="Bind to dynamic IP" description="NSM repushes this record when the public IP changes" checked={!!draft.dynamic} onChange={(e) => props.setDraft({ ...draft, dynamic: e.currentTarget.checked })} />}
                 </Group>
                 <TextInput label="Comment" value={draft.comment ?? ''} onChange={(e) => props.setDraft({ ...draft, comment: e.currentTarget.value })} />

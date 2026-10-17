@@ -2,28 +2,26 @@ import { DnsRecord, DnsZone, DnsZoneAnalytics, DNS_STRUCTURED_TYPES } from '@mos
 import { getDnsZonesForAccountModel, getDnsZoneModel, DnsZoneCache } from '@/persistence/dnsZonePersistence';
 import { getRecordsByPortReservationModel, getRecordsForZoneModel } from '@/persistence/dnsRecordPersistence';
 import { getPortReservationByIdModel } from '@/persistence/portReservationPersistence';
-import { CfCreds, CfDnsRecordInput, addDynamicTag, createDnsRecord, deleteDnsRecord, getDnsAnalytics, removeDynamicTag, removePortTag, setPortTag, updateDnsRecord } from '@/utils/cloudflare';
+import { addDynamicTag, removeDynamicTag, removePortTag, setPortTag } from '@/utils/dnsTags';
+import { DnsProvider, DnsWriteInput } from '@/registrar/provider';
 import { syncZoneRecords } from '@/reconcile/cloudflareSync';
-import { getCredsForZone, getRegistrarAccountForTeam } from '@/controllers/registrarController';
+import { getProviderForTeam, getProviderForZone } from '@/controllers/registrarController';
 import { checkPublicIp, getKnownPublicIp } from '@/reconcile/publicIpWatcher';
 import { areaLog, serializeError } from '@/utils/log';
 
 // Record types that carry a port NSM can drive from a reservation. SRV's port lives in `data.port`.
 const PORT_BINDABLE_TYPES = new Set(['SRV']);
 
-const dnsLog = areaLog('cloudflare');
+const dnsLog = areaLog('dns');
+
+type ZoneRef = { id: string; name: string };
 
 // Proxying (orange cloud) is only meaningful on these record types.
 const PROXYABLE_TYPES = new Set(['A', 'AAAA', 'CNAME']);
 
-// Cloudflare dashboard overview URL for a zone, when the registrar account id is known.
-const zoneDashboardUrl = (zoneName: string, accountId?: string): string | undefined => {
-    return accountId ? `https://dash.cloudflare.com/${accountId}/${zoneName}` : undefined;
-};
-
-// Project a cached zone into the shared DnsZone view. `accountId` (the registrar account's external
-// id, e.g. the Cloudflare account id) powers the dashboard link.
-export const buildZoneView = (zone: DnsZoneCache, accountId?: string): DnsZone => ({
+// Project a cached zone into the shared DnsZone view. `dashboardUrl` is the registrar's management
+// link for the zone (provider-specific), when available.
+export const buildZoneView = (zone: DnsZoneCache, dashboardUrl?: string): DnsZone => ({
     id: zone.id,
     name: zone.name,
     status: zone.status,
@@ -32,16 +30,15 @@ export const buildZoneView = (zone: DnsZoneCache, accountId?: string): DnsZone =
     registrarAccountId: zone.registrarAccountId,
     recordCount: zone.recordCount,
     lastSyncedAt: zone.lastSyncedAt,
-    dashboardUrl: zoneDashboardUrl(zone.name, accountId),
+    dashboardUrl,
 });
 
 // All zones for the team's registrar account. Teams sharing an account see the same zones.
 export const listTeamDomains = async (ownerId: string): Promise<DnsZone[]> => {
-    const account = await getRegistrarAccountForTeam(ownerId);
-    if (!account) return [];
-    const accountId = account.credentials.accountId;
-    const zones = await getDnsZonesForAccountModel(account.id);
-    return zones.map((z) => buildZoneView(z, accountId)).sort((a, b) => a.name.localeCompare(b.name));
+    const resolved = await getProviderForTeam(ownerId);
+    if (!resolved) return [];
+    const zones = await getDnsZonesForAccountModel(resolved.account.id);
+    return zones.map((z) => buildZoneView(z, resolved.provider.dashboardUrl(z.name))).sort((a, b) => a.name.localeCompare(b.name));
 };
 
 export const listRecords = async (zoneId: string): Promise<DnsRecord[]> => {
@@ -63,7 +60,7 @@ const ANALYTICS_WINDOW_DAYS = 7;
 // Past-week DNS query traffic for a zone, aggregated per query name plus a zone-wide total. Traffic
 // is attributed to records by name (summed across query types). Returns an empty window if the
 // Cloudflare token lacks analytics access so the UI degrades gracefully.
-export const getZoneAnalytics = async (creds: CfCreds, zoneId: string): Promise<DnsZoneAnalytics> => {
+export const getZoneAnalytics = async (provider: DnsProvider, zoneId: string): Promise<DnsZoneAnalytics> => {
     const days: string[] = [];
     for (let i = ANALYTICS_WINDOW_DAYS - 1; i >= 0; i--) days.push(dayString(-i));
     const since = days[0];
@@ -73,7 +70,7 @@ export const getZoneAnalytics = async (creds: CfCreds, zoneId: string): Promise<
 
     let rows;
     try {
-        rows = await getDnsAnalytics(creds, zoneId, since, until);
+        rows = await provider.getAnalytics(zoneId, since, until);
     } catch (e: any) {
         dnsLog.warn({ action: 'dns_analytics_failed', zoneId, err: serializeError(e) }, `failed to load DNS analytics for zone ${zoneId}`);
         return empty;
@@ -107,15 +104,15 @@ export const getZoneAnalytics = async (creds: CfCreds, zoneId: string): Promise<
     return { since, until, days, total, totalSeries: days.map((date, i) => ({ date, count: totalPerDay[i] })), byName };
 };
 
-// Build the Cloudflare create/update body from a partial DnsRecord, honoring the dynamic-IP toggle:
-// dynamic records get the marker written into their comment, and (for A/AAAA) their content set to
-// the currently-detected public IP.
-const buildCfInput = async (input: Partial<DnsRecord>, existing?: DnsRecord): Promise<CfDnsRecordInput> => {
+// Build the provider-neutral create/update body from a partial DnsRecord, honoring the dynamic-IP
+// toggle: dynamic records get the marker written into their comment, and (for A/AAAA) their content
+// set to the currently-detected public IP. The resolved provider maps this to its own API shape.
+const buildRecordInput = async (input: Partial<DnsRecord>, existing?: DnsRecord): Promise<DnsWriteInput> => {
     const type = (input.type || existing?.type)!;
     const name = (input.name ?? existing?.name)!;
     const dynamic = input.dynamic ?? existing?.dynamic ?? false;
 
-    const body: CfDnsRecordInput = { type, name, ttl: input.ttl ?? existing?.ttl ?? 1 };
+    const body: DnsWriteInput = { type, name, ttl: input.ttl ?? existing?.ttl ?? 1 };
 
     const isStructured = DNS_STRUCTURED_TYPES.includes(type as any);
     if (isStructured && (input.data || existing?.data)) {
@@ -169,27 +166,27 @@ const readBack = async (zoneId: string, recordId: string): Promise<DnsRecord | u
     return (await getRecordsForZoneModel(zoneId)).find((r) => r.id === recordId);
 };
 
-export const createRecord = async (creds: CfCreds, zoneId: string, input: Partial<DnsRecord>): Promise<DnsRecord | undefined> => {
+export const createRecord = async (provider: DnsProvider, zone: ZoneRef, input: Partial<DnsRecord>): Promise<DnsRecord | undefined> => {
     if (!input.type || !input.name) throw new Error('type and name are required');
-    const body = await buildCfInput({ ...input, zoneId });
-    const created = await createDnsRecord(creds, zoneId, body);
-    dnsLog.info({ action: 'record_created', zoneId, recordId: created.id, type: body.type, name: body.name }, `created ${body.type} record ${body.name}`);
-    return readBack(zoneId, created.id);
+    const body = await buildRecordInput(input);
+    const created = await provider.createRecord(zone, body);
+    dnsLog.info({ action: 'record_created', zoneId: zone.id, recordId: created.id, type: body.type, name: body.name }, `created ${body.type} record ${body.name}`);
+    return readBack(zone.id, created.id);
 };
 
-export const updateRecord = async (creds: CfCreds, zoneId: string, recordId: string, input: Partial<DnsRecord>): Promise<DnsRecord | undefined> => {
-    const existing = (await getRecordsForZoneModel(zoneId)).find((r) => r.id === recordId);
+export const updateRecord = async (provider: DnsProvider, zone: ZoneRef, recordId: string, input: Partial<DnsRecord>): Promise<DnsRecord | undefined> => {
+    const existing = (await getRecordsForZoneModel(zone.id)).find((r) => r.id === recordId);
     if (!existing) throw new Error('record not found');
-    const body = await buildCfInput({ ...input, zoneId }, existing);
-    await updateDnsRecord(creds, zoneId, recordId, body);
-    dnsLog.info({ action: 'record_updated', zoneId, recordId, type: body.type, name: body.name }, `updated record ${body.name}`);
-    return readBack(zoneId, recordId);
+    const body = await buildRecordInput(input, existing);
+    await provider.updateRecord(zone, recordId, body);
+    dnsLog.info({ action: 'record_updated', zoneId: zone.id, recordId, type: body.type, name: body.name }, `updated record ${body.name}`);
+    return readBack(zone.id, recordId);
 };
 
-export const deleteRecord = async (creds: CfCreds, zoneId: string, recordId: string): Promise<void> => {
-    await deleteDnsRecord(creds, zoneId, recordId);
-    await syncZoneRecords(zoneId);
-    dnsLog.info({ action: 'record_deleted', zoneId, recordId }, `deleted record ${recordId}`);
+export const deleteRecord = async (provider: DnsProvider, zone: ZoneRef, recordId: string): Promise<void> => {
+    await provider.deleteRecord(zone, recordId);
+    await syncZoneRecords(zone.id);
+    dnsLog.info({ action: 'record_deleted', zoneId: zone.id, recordId }, `deleted record ${recordId}`);
 };
 
 // Repush every DNS record bound to a port reservation so its port (SRV data.port) reflects the
@@ -200,22 +197,26 @@ export const syncPortBoundRecords = async (reservationId: string): Promise<void>
     if (!records.length) return;
     const reservation = await getPortReservationByIdModel(reservationId);
     const touchedZones = new Set<string>();
-    // Credentials are resolved per zone (via its registrar account); cache per zone to avoid repeats.
-    const credsByZone = new Map<string, CfCreds | null>();
+    // The provider + zone are resolved per zone (via the zone's registrar account); cache per zone.
+    const zoneHandles = new Map<string, { provider: DnsProvider; zone: ZoneRef } | null>();
     for (const rec of records) {
         try {
-            if (!credsByZone.has(rec.zoneId)) credsByZone.set(rec.zoneId, await getCredsForZone(rec.zoneId));
-            const creds = credsByZone.get(rec.zoneId);
-            if (!creds?.apiToken) {
+            if (!zoneHandles.has(rec.zoneId)) {
+                const resolved = await getProviderForZone(rec.zoneId);
+                const zone = await getDnsZoneModel(rec.zoneId);
+                zoneHandles.set(rec.zoneId, resolved && zone ? { provider: resolved.provider, zone: { id: zone.id, name: zone.name } } : null);
+            }
+            const handle = zoneHandles.get(rec.zoneId);
+            if (!handle || !handle.provider.hasRemoteConfig()) {
                 dnsLog.warn({ action: 'port_record_no_creds', recordId: rec.id, zoneId: rec.zoneId }, `no registrar credentials for zone ${rec.zoneId}; skipping port-bound record`);
                 continue;
             }
             if (reservation) {
                 const data = { ...(rec.data || {}), port: reservation.port };
-                await updateDnsRecord(creds, rec.zoneId, rec.id, { data, comment: setPortTag(rec.comment, reservationId) });
+                await handle.provider.updateRecord(handle.zone, rec.id, { type: rec.type, name: rec.name, data, comment: setPortTag(rec.comment, reservationId) });
                 dnsLog.info({ action: 'port_record_updated', recordId: rec.id, name: rec.name, type: rec.type, port: reservation.port }, `updated port-bound ${rec.type} ${rec.name} -> port ${reservation.port}`);
             } else {
-                await updateDnsRecord(creds, rec.zoneId, rec.id, { comment: removePortTag(rec.comment) || undefined });
+                await handle.provider.updateRecord(handle.zone, rec.id, { comment: removePortTag(rec.comment) || undefined });
                 dnsLog.warn({ action: 'port_record_unbound', recordId: rec.id, name: rec.name, reservationId }, `reservation ${reservationId} gone; stripped port binding from ${rec.name}`);
             }
             touchedZones.add(rec.zoneId);

@@ -964,10 +964,21 @@ export interface MeResponse {
 
 // === Registrars ===
 
-// The registrar providers NSM can integrate with. Only Cloudflare is implemented today; the field
-// specs below let the UI render provider-specific credential forms as more are added.
+// The registrar providers NSM can integrate with. The field specs below let the UI render
+// provider-specific credential forms, and the capability flags let it hide features a provider does
+// not support (e.g. Porkbun has no proxying, DNS analytics, or NSM-driven zone deletion/purchasing).
 export enum RegistrarProvider {
     CLOUDFLARE = 'cloudflare',
+    PORKBUN = 'porkbun',
+}
+
+// Which optional registrar features a provider supports, used to gate UI (and reject unsupported
+// server operations). DNS record management is supported by every provider and is not listed here.
+export interface RegistrarProviderCapabilities {
+    purchase: boolean; // domain search/buy/registration from within NSM
+    analytics: boolean; // per-zone DNS query analytics
+    proxy: boolean; // proxied (orange-cloud) records
+    deleteZone: boolean; // deleting a whole domain/zone from NSM
 }
 
 // A single credential/config field a registrar requires. `secret: true` fields are stored
@@ -982,6 +993,7 @@ export interface RegistrarFieldSpec {
 
 export interface RegistrarProviderSpec {
     label: string;
+    capabilities: RegistrarProviderCapabilities;
     fields: RegistrarFieldSpec[];
 }
 
@@ -989,6 +1001,7 @@ export interface RegistrarProviderSpec {
 export const REGISTRAR_PROVIDER_SPECS: Record<RegistrarProvider, RegistrarProviderSpec> = {
     [RegistrarProvider.CLOUDFLARE]: {
         label: 'Cloudflare',
+        capabilities: { purchase: true, analytics: true, proxy: true, deleteZone: true },
         fields: [
             {
                 key: 'apiToken',
@@ -1002,6 +1015,26 @@ export const REGISTRAR_PROVIDER_SPECS: Record<RegistrarProvider, RegistrarProvid
                 label: 'Account ID',
                 description: 'Cloudflare account ID. Any team configured with the same account ID shares the same set of domains.',
                 secret: false,
+                required: true,
+            },
+        ],
+    },
+    [RegistrarProvider.PORKBUN]: {
+        label: 'Porkbun',
+        capabilities: { purchase: false, analytics: false, proxy: false, deleteZone: false },
+        fields: [
+            {
+                key: 'apiKey',
+                label: 'API key',
+                description: 'Porkbun API key (pk1_...). Stored as a secret server-side and never shown again after saving.',
+                secret: true,
+                required: true,
+            },
+            {
+                key: 'secretApiKey',
+                label: 'Secret API key',
+                description: 'Porkbun secret API key (sk1_...). Enable API access per domain in Porkbun. Any team configured with the same Porkbun account shares the same set of domains.',
+                secret: true,
                 required: true,
             },
         ],

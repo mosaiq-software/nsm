@@ -5,11 +5,17 @@ import { canManageTeam, resolveTeamById } from '@/controllers/authz';
 import { getAllRegistrarAccountsModel, getRegistrarAccountModel } from '@/persistence/registrarAccountPersistence';
 import { getTeamRegistrarModel, getTeamsForRegistrarAccountModel } from '@/persistence/teamRegistrarPersistence';
 import { getAllDnsZonesModel, getDnsZoneModel } from '@/persistence/dnsZonePersistence';
-import { CfCreds } from '@/utils/cloudflare';
-import { cloudflareCredsForAccount, registrarAccountId } from '@/registrar/provider';
+import { DnsProvider, getDnsProvider, resolveAccountId } from '@/registrar/provider';
 import { areaLog } from '@/utils/log';
 
-const registrarLog = areaLog('cloudflare');
+const registrarLog = areaLog('registrar');
+
+// A registrar account paired with its resolved provider client, the handle the DNS/domain stack
+// threads instead of raw credentials.
+export interface ResolvedRegistrar {
+    account: RegistrarAccountRecord;
+    provider: DnsProvider;
+}
 
 // === Secret-free summary ===
 
@@ -38,14 +44,15 @@ export const getRegistrarAccountForTeam = async (ownerId: string): Promise<Regis
     return getRegistrarAccountModel(accountId);
 };
 
-export const getCredsForTeam = async (ownerId: string): Promise<CfCreds | null> => {
+export const getProviderForTeam = async (ownerId: string): Promise<ResolvedRegistrar | null> => {
     const account = await getRegistrarAccountForTeam(ownerId);
-    return account ? cloudflareCredsForAccount(account) : null;
+    if (!account) return null;
+    return { account, provider: getDnsProvider(account) };
 };
 
 export const teamHasRegistrar = async (ownerId: string): Promise<boolean> => {
-    const creds = await getCredsForTeam(ownerId);
-    return !!creds?.apiToken;
+    const resolved = await getProviderForTeam(ownerId);
+    return !!resolved?.provider.hasRemoteConfig();
 };
 
 export const getRegistrarAccountForZone = async (zoneId: string): Promise<RegistrarAccountRecord | null> => {
@@ -54,9 +61,10 @@ export const getRegistrarAccountForZone = async (zoneId: string): Promise<Regist
     return getRegistrarAccountModel(zone.registrarAccountId);
 };
 
-export const getCredsForZone = async (zoneId: string): Promise<CfCreds | null> => {
+export const getProviderForZone = async (zoneId: string): Promise<ResolvedRegistrar | null> => {
     const account = await getRegistrarAccountForZone(zoneId);
-    return account ? cloudflareCredsForAccount(account) : null;
+    if (!account) return null;
+    return { account, provider: getDnsProvider(account) };
 };
 
 // Resolve the registrar account whose zone owns the given FQDN (longest-suffix match: app.foo.com ->
@@ -72,20 +80,15 @@ export const getAccountForDomain = async (domain: string): Promise<RegistrarAcco
     return getRegistrarAccountModel(zone.registrarAccountId);
 };
 
-export const getCredsForDomain = async (domain: string): Promise<CfCreds | null> => {
-    const account = await getAccountForDomain(domain);
-    return account ? cloudflareCredsForAccount(account) : null;
-};
-
-// All configured accounts paired with their Cloudflare credentials, for cluster-wide reconcile
-// (sync, dynamic-IP). Only accounts with a usable token are returned.
-export const getAllAccountCreds = async (): Promise<{ account: RegistrarAccountRecord; creds: CfCreds }[]> => {
+// All configured accounts paired with their resolved provider, for cluster-wide reconcile (sync,
+// dynamic-IP). Only accounts whose credentials are usable are returned.
+export const getAllAccountProviders = async (): Promise<ResolvedRegistrar[]> => {
     const accounts = await getAllRegistrarAccountsModel();
-    const out: { account: RegistrarAccountRecord; creds: CfCreds }[] = [];
+    const out: ResolvedRegistrar[] = [];
     for (const account of accounts) {
         try {
-            const creds = cloudflareCredsForAccount(account);
-            if (creds.apiToken) out.push({ account, creds });
+            const provider = getDnsProvider(account);
+            if (provider.hasRemoteConfig()) out.push({ account, provider });
         } catch {
             // Unsupported provider in the store (shouldn't happen today); skip rather than crash the reconcile.
             registrarLog.warn({ action: 'registrar_account_skipped', accountId: account.id, provider: account.provider }, 'skipping unsupported registrar account');
@@ -95,7 +98,7 @@ export const getAllAccountCreds = async (): Promise<{ account: RegistrarAccountR
 };
 
 export const anyRegistrarConfigured = async (): Promise<boolean> => {
-    return (await getAllAccountCreds()).length > 0;
+    return (await getAllAccountProviders()).length > 0;
 };
 
 // === Team registrar settings (secret-masked) ===
@@ -114,19 +117,28 @@ export const saveTeamRegistrar = async (ownerId: string, provider: RegistrarProv
     const spec = REGISTRAR_PROVIDER_SPECS[provider];
     if (!spec) throw new Error(`Unsupported registrar provider: ${provider}`);
 
-    const id = registrarAccountId(provider, values);
-    const existing = await getRegistrarAccountModel(id);
-
-    const credentials: Record<string, string> = { ...(existing?.credentials ?? {}) };
+    // Seed from the team's currently-linked account (same provider) so a blank secret field on edit
+    // keeps the stored value. This matters for providers like Porkbun whose shared account id is
+    // derived from the (secret) credentials themselves and so cannot be resolved from blank input.
+    const currentId = await getTeamRegistrarModel(ownerId);
+    const current = currentId ? await getRegistrarAccountModel(currentId) : null;
+    const submittedCreds: Record<string, string> = current && current.provider === provider ? { ...current.credentials } : {};
     for (const field of spec.fields) {
         const submitted = (values[field.key] ?? '').trim();
-        if (submitted) {
-            credentials[field.key] = submitted;
-        } else if (field.required && !(field.secret && credentials[field.key])) {
-            // Required field is blank and we have no stored secret to fall back on.
+        if (submitted) submittedCreds[field.key] = submitted;
+    }
+
+    // Resolve the shared account id from the effective credentials (Cloudflare uses its non-secret
+    // account id; Porkbun pings, which also validates the keys), then let an already-stored shared
+    // account fill any secret the user did not retype (joining a shared account).
+    const id = await resolveAccountId(provider, submittedCreds);
+    const existing = await getRegistrarAccountModel(id);
+    const credentials: Record<string, string> = { ...(existing?.credentials ?? {}), ...submittedCreds };
+
+    for (const field of spec.fields) {
+        if (field.required && !(credentials[field.key] && credentials[field.key].trim())) {
             throw new Error(`Missing required field: ${field.label}`);
         }
-        // A blank secret with an existing stored value keeps the stored value (already copied above).
     }
 
     const account: RegistrarAccountRecord = {

@@ -1,20 +1,21 @@
 import * as crypto from 'crypto';
 import { OpType, RegistrarAccountRecord } from '@mosaiq/nsm-common/clusterOps';
-import { DomainBillingSummary, DomainCheckResult, DomainRequest, DomainRequestStatus, DomainSearchResult, Team, TeamType, User } from '@mosaiq/nsm-common/types';
+import { DomainBillingSummary, DomainCheckResult, DomainRequest, DomainRequestStatus, DomainSearchResult, REGISTRAR_PROVIDER_SPECS, Team, TeamType, User } from '@mosaiq/nsm-common/types';
 import { cluster } from '@/cluster/node';
-import { CfCreds, CfDomainSuggestion, checkDomains as cfCheckDomains, createZone, deleteZone, getRegistrationStatus, registerDomain, searchDomains as cfSearchDomains, setRegistrarAutoRenew } from '@/utils/cloudflare';
+import { CfCreds, CfDomainSuggestion, checkDomains as cfCheckDomains, createZone, getRegistrationStatus, registerDomain, searchDomains as cfSearchDomains } from '@/utils/cloudflare';
+import { DnsProvider, cloudflareCredsForAccount } from '@/registrar/provider';
 import { performAccountSync, recordZonePurchasePrice } from '@/reconcile/cloudflareSync';
 import { deleteDnsZoneModel, getDnsZoneByNameModel, getDnsZoneModel, getDnsZonesForAccountModel } from '@/persistence/dnsZonePersistence';
 import { deleteRecordsForZoneModel } from '@/persistence/dnsRecordPersistence';
 import { getDomainRequestModel, getDomainRequestsByOwnerModel } from '@/persistence/domainRequestPersistence';
 import { getProjectByIdModel } from '@/persistence/projectPersistence';
 import { listOrgOwnersForTeam, resolveTeamByLogin } from '@/controllers/authz';
-import { getCredsForTeam, getRegistrarAccountForTeam } from '@/controllers/registrarController';
+import { getProviderForTeam, getRegistrarAccountForTeam } from '@/controllers/registrarController';
 import { getUserByLoginModel } from '@/persistence/userPersistence';
 import { sendPushToGithubIds } from '@/controllers/pushController';
 import { areaLog, serializeError } from '@/utils/log';
 
-const domainsLog = areaLog('cloudflare');
+const domainsLog = areaLog('dns');
 
 const toSearchResult = (s: CfDomainSuggestion): DomainSearchResult => ({
     name: s.name,
@@ -128,7 +129,7 @@ const performPurchase = async (request: DomainRequest, account: RegistrarAccount
         }
 
         // Adopt the zone (registration usually auto-creates it); create it if not present after a sync.
-        await performAccountSync(account, creds);
+        await performAccountSync(account);
         let zone = await getDnsZoneByNameModel(request.domainName);
         if (!zone) {
             try {
@@ -136,7 +137,7 @@ const performPurchase = async (request: DomainRequest, account: RegistrarAccount
             } catch (e: any) {
                 domainsLog.warn({ action: 'zone_create_after_purchase_failed', domainName: request.domainName, err: serializeError(e) }, 'zone auto-create after purchase failed');
             }
-            await performAccountSync(account, creds);
+            await performAccountSync(account);
             zone = await getDnsZoneByNameModel(request.domainName);
         }
 
@@ -200,22 +201,16 @@ export const decideRequest = async (decider: User, ownerId: string, account: Reg
     return performPurchase(purchasing, account, creds);
 };
 
-// Delete the zone from Cloudflare (stops DNS) and best-effort disable registrar auto-renew (stops
-// billing). Requires the typed domain name to match. Shared accounts: this affects every team.
-export const deleteDomain = async (creds: CfCreds, zoneId: string, confirmName: string): Promise<void> => {
-    const zone = await getDnsZoneModel(zoneId);
-    if (!zone) throw new Error('domain not found');
+// Delete the zone at the registrar (stops DNS) and, for providers that support it, best-effort
+// disable registrar auto-renew (stops billing) — both handled inside the provider's deleteZone.
+// Requires the typed domain name to match. Shared accounts: this affects every team.
+export const deleteDomain = async (provider: DnsProvider, zone: { id: string; name: string }, confirmName: string): Promise<void> => {
     if (confirmName.trim().toLowerCase() !== zone.name.toLowerCase()) throw new Error('Confirmation does not match the domain name.');
 
-    await deleteZone(creds, zoneId);
-    try {
-        await setRegistrarAutoRenew(creds, zone.name, false);
-    } catch (e: any) {
-        domainsLog.warn({ action: 'auto_renew_disable_failed', domainName: zone.name, err: serializeError(e) }, `could not disable auto-renew for ${zone.name}; disable it in the Cloudflare dashboard to stop billing`);
-    }
+    await provider.deleteZone(zone);
 
-    await deleteRecordsForZoneModel(zoneId);
-    await deleteDnsZoneModel(zoneId);
+    await deleteRecordsForZoneModel(zone.id);
+    await deleteDnsZoneModel(zone.id);
     domainsLog.info({ action: 'domain_deleted', domainName: zone.name }, `deleted domain ${zone.name}`);
 };
 
@@ -245,19 +240,31 @@ export const listProjectDomains = async (projectId: string): Promise<string[]> =
     return zones.map((z) => z.name).sort((a, b) => a.localeCompare(b));
 };
 
-// Resolve a team's registrar account + credentials, throwing a user-facing error if unconfigured.
-export const requireTeamCreds = async (ownerId: string): Promise<{ account: RegistrarAccountRecord; creds: CfCreds }> => {
-    const account = await getRegistrarAccountForTeam(ownerId);
-    const creds = account ? await getCredsForTeam(ownerId) : null;
-    if (!account || !creds?.apiToken) throw new Error('This team has no registrar configured.');
-    return { account, creds };
+// Resolve a team's registrar account + provider, throwing a user-facing error if unconfigured.
+export const requireTeamProvider = async (ownerId: string): Promise<{ account: RegistrarAccountRecord; provider: DnsProvider }> => {
+    const resolved = await getProviderForTeam(ownerId);
+    if (!resolved || !resolved.provider.hasRemoteConfig()) throw new Error('This team has no registrar configured.');
+    return resolved;
 };
 
-// Like requireTeamCreds but also verifies the zone belongs to the team's registrar account, so a
-// team can only read/write DNS for its own domains.
-export const requireTeamZoneCreds = async (ownerId: string, zoneId: string): Promise<{ account: RegistrarAccountRecord; creds: CfCreds }> => {
-    const { account, creds } = await requireTeamCreds(ownerId);
+// Like requireTeamProvider but also verifies the zone belongs to the team's registrar account, so a
+// team can only read/write DNS for its own domains. Returns the zone ref provider ops need.
+export const requireTeamZoneProvider = async (ownerId: string, zoneId: string): Promise<{ account: RegistrarAccountRecord; provider: DnsProvider; zone: { id: string; name: string } }> => {
+    const { account, provider } = await requireTeamProvider(ownerId);
     const zone = await getDnsZoneModel(zoneId);
     if (!zone || zone.registrarAccountId !== account.id) throw new Error('Domain not found for this team.');
+    return { account, provider, zone: { id: zone.id, name: zone.name } };
+};
+
+// Resolve a team's account + Cloudflare credentials for purchasing, rejecting registrars that do not
+// support in-NSM domain purchasing (only Cloudflare does today).
+export const requirePurchaseCreds = async (ownerId: string): Promise<{ account: RegistrarAccountRecord; creds: CfCreds }> => {
+    const account = await getRegistrarAccountForTeam(ownerId);
+    if (!account) throw new Error('This team has no registrar configured.');
+    if (!REGISTRAR_PROVIDER_SPECS[account.provider]?.capabilities.purchase) {
+        throw new Error(`Domain purchasing is not supported for ${REGISTRAR_PROVIDER_SPECS[account.provider]?.label ?? account.provider}.`);
+    }
+    const creds = cloudflareCredsForAccount(account);
+    if (!creds.apiToken) throw new Error('This team has no registrar configured.');
     return { account, creds };
 };

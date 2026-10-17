@@ -27,7 +27,7 @@ import { Capability } from '@mosaiq/nsm-common/types';
 import { getEffectiveCapabilitiesForProject, getRequestUser, requireAdmin, requireCreateProjectForOwner, requireOwnerInstalledForProject, requireProjectCapability, requireSuperAdmin, requireTeamCapability, requireTeamManage, resolveTeamById } from '@/controllers/authz';
 import { createRecord, deleteRecord, getPublicIp, getZoneAnalytics, listRecords, listTeamDomains, refreshPublicIp, updateRecord } from '@/controllers/dnsController';
 import { syncAccountNow } from '@/reconcile/cloudflareSync';
-import { billingSummaryForAccount, buyDomain, checkDomains, createRequest, decideRequest, deleteDomain, listProjectDomains, listTeamRequests, requireTeamCreds, requireTeamZoneCreds, searchDomains } from '@/controllers/domainsController';
+import { billingSummaryForAccount, buyDomain, checkDomains, createRequest, decideRequest, deleteDomain, listProjectDomains, listTeamRequests, requirePurchaseCreds, requireTeamProvider, requireTeamZoneProvider, searchDomains } from '@/controllers/domainsController';
 import { getRegistrarAccountForTeam, getTeamRegistrarConfig, removeTeamRegistrar, saveTeamRegistrar } from '@/controllers/registrarController';
 import { applyLocalConfig, applyNodeConfig, readLocalConfig, readNodeConfig } from '@/controllers/nodeConfigController';
 import { createReservation, deleteReservation, listAllReservations, listNodeReservations, listProjectReservations, listTeamReservations } from '@/controllers/portReservationController';
@@ -1099,7 +1099,7 @@ privateRouter.post(API_ROUTES.POST_TEAM_DOMAIN_SEARCH, async (req, res) => {
     if (!(await requireTeamCapability(req, res, params.ownerId, Capability.VIEW))) return;
     try {
         const body = (req.body || {}) as API_BODY[API_ROUTES.POST_TEAM_DOMAIN_SEARCH];
-        const { creds } = await requireTeamCreds(params.ownerId);
+        const { creds } = await requirePurchaseCreds(params.ownerId);
         res.status(200).json(await searchDomains(creds, String(body.query || '')));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Search failed');
@@ -1113,7 +1113,7 @@ privateRouter.post(API_ROUTES.POST_TEAM_DOMAIN_CHECK, async (req, res) => {
     if (!(await requireTeamCapability(req, res, params.ownerId, Capability.VIEW))) return;
     try {
         const body = (req.body || {}) as API_BODY[API_ROUTES.POST_TEAM_DOMAIN_CHECK];
-        const { creds } = await requireTeamCreds(params.ownerId);
+        const { creds } = await requirePurchaseCreds(params.ownerId);
         res.status(200).json(await checkDomains(creds, Array.isArray(body.domains) ? body.domains : []));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Check failed');
@@ -1132,7 +1132,7 @@ privateRouter.post(API_ROUTES.POST_TEAM_DOMAIN_BUY, async (req, res) => {
         if (!body.domainName) return void res.status(400).send('domainName is required');
         const team = await resolveTeamById(params.ownerId);
         if (!team) return void res.status(404).send('Team not found');
-        const { account, creds } = await requireTeamCreds(params.ownerId);
+        const { account, creds } = await requirePurchaseCreds(params.ownerId);
         res.status(200).json(await buyDomain(user, team, account, creds, body.domainName, body));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Purchase failed');
@@ -1166,35 +1166,35 @@ privateRouter.post(API_ROUTES.POST_TEAM_DOMAIN_REQUEST_DECIDE, async (req, res) 
         const user = await getRequestUser(req);
         if (!user) return void res.status(401).send('Unauthorized');
         const body = (req.body || {}) as API_BODY[API_ROUTES.POST_TEAM_DOMAIN_REQUEST_DECIDE];
-        const { account, creds } = await requireTeamCreds(params.ownerId);
+        const { account, creds } = await requirePurchaseCreds(params.ownerId);
         res.status(200).json(await decideRequest(user, params.ownerId, account, creds, params.requestId, !!body.approve, body.reason));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Decision failed');
     }
 });
 
-// Re-run the Cloudflare mirror for the team's account now. Owner/admin.
+// Re-run the registrar mirror for the team's account now. Owner/admin.
 privateRouter.post(API_ROUTES.POST_TEAM_DOMAIN_SYNC, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.POST_TEAM_DOMAIN_SYNC];
     if (!requireLeader(req, res)) return;
     if (!(await requireTeamManage(req, res, params.ownerId))) return;
     try {
-        const { account, creds } = await requireTeamCreds(params.ownerId);
-        res.status(200).json(await syncAccountNow(account, creds));
+        const { account } = await requireTeamProvider(params.ownerId);
+        res.status(200).json(await syncAccountNow(account));
     } catch (e: any) {
-        res.status(400).send(e?.message || 'Cloudflare sync failed');
+        res.status(400).send(e?.message || 'Registrar sync failed');
     }
 });
 
-// Delete a domain from Cloudflare (typed-name confirmation). Affects every team sharing the account.
+// Delete a domain at the registrar (typed-name confirmation). Affects every team sharing the account.
 privateRouter.post(API_ROUTES.POST_TEAM_DOMAIN_DELETE, async (req, res) => {
     const params = req.params as API_PARAMS[API_ROUTES.POST_TEAM_DOMAIN_DELETE];
     if (!requireLeader(req, res)) return;
     if (!(await requireTeamManage(req, res, params.ownerId))) return;
     try {
         const body = (req.body || {}) as API_BODY[API_ROUTES.POST_TEAM_DOMAIN_DELETE];
-        const { creds } = await requireTeamZoneCreds(params.ownerId, params.zoneId);
-        await deleteDomain(creds, params.zoneId, String(body.confirmName || ''));
+        const { provider, zone } = await requireTeamZoneProvider(params.ownerId, params.zoneId);
+        await deleteDomain(provider, zone, String(body.confirmName || ''));
         res.status(200).json(undefined);
     } catch (e: any) {
         res.status(400).send(e?.message || 'Delete failed');
@@ -1207,7 +1207,7 @@ privateRouter.get(API_ROUTES.GET_TEAM_DNS_RECORDS, async (req, res) => {
     if (!requireLeader(req, res)) return;
     if (!(await requireTeamCapability(req, res, params.ownerId, Capability.VIEW))) return;
     try {
-        await requireTeamZoneCreds(params.ownerId, params.zoneId);
+        await requireTeamZoneProvider(params.ownerId, params.zoneId);
         res.status(200).json(await listRecords(params.zoneId));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Failed to list records');
@@ -1220,8 +1220,8 @@ privateRouter.get(API_ROUTES.GET_TEAM_DNS_ANALYTICS, async (req, res) => {
     if (!requireLeader(req, res)) return;
     if (!(await requireTeamCapability(req, res, params.ownerId, Capability.VIEW))) return;
     try {
-        const { creds } = await requireTeamZoneCreds(params.ownerId, params.zoneId);
-        res.status(200).json(await getZoneAnalytics(creds, params.zoneId));
+        const { provider, zone } = await requireTeamZoneProvider(params.ownerId, params.zoneId);
+        res.status(200).json(await getZoneAnalytics(provider, zone.id));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Failed to load analytics');
     }
@@ -1234,8 +1234,8 @@ privateRouter.post(API_ROUTES.POST_TEAM_DNS_RECORD_CREATE, async (req, res) => {
     if (!(await requireTeamManage(req, res, params.ownerId))) return;
     try {
         const body = (req.body || {}) as API_BODY[API_ROUTES.POST_TEAM_DNS_RECORD_CREATE];
-        const { creds } = await requireTeamZoneCreds(params.ownerId, params.zoneId);
-        res.status(200).json(await createRecord(creds, params.zoneId, body));
+        const { provider, zone } = await requireTeamZoneProvider(params.ownerId, params.zoneId);
+        res.status(200).json(await createRecord(provider, zone, body));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Create record failed');
     }
@@ -1248,8 +1248,8 @@ privateRouter.post(API_ROUTES.POST_TEAM_DNS_RECORD_UPDATE, async (req, res) => {
     if (!(await requireTeamManage(req, res, params.ownerId))) return;
     try {
         const body = (req.body || {}) as API_BODY[API_ROUTES.POST_TEAM_DNS_RECORD_UPDATE];
-        const { creds } = await requireTeamZoneCreds(params.ownerId, params.zoneId);
-        res.status(200).json(await updateRecord(creds, params.zoneId, params.recordId, body));
+        const { provider, zone } = await requireTeamZoneProvider(params.ownerId, params.zoneId);
+        res.status(200).json(await updateRecord(provider, zone, params.recordId, body));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Update record failed');
     }
@@ -1261,8 +1261,8 @@ privateRouter.post(API_ROUTES.POST_TEAM_DNS_RECORD_DELETE, async (req, res) => {
     if (!requireLeader(req, res)) return;
     if (!(await requireTeamManage(req, res, params.ownerId))) return;
     try {
-        const { creds } = await requireTeamZoneCreds(params.ownerId, params.zoneId);
-        await deleteRecord(creds, params.zoneId, params.recordId);
+        const { provider, zone } = await requireTeamZoneProvider(params.ownerId, params.zoneId);
+        await deleteRecord(provider, zone, params.recordId);
         res.status(200).json(undefined);
     } catch (e: any) {
         res.status(400).send(e?.message || 'Delete record failed');

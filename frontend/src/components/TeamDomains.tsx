@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ActionIcon, Alert, Badge, Button, Card, Group, Modal, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
-import { Capability, DomainRequest, DomainRequestStatus, DomainSearchResult } from '@mosaiq/nsm-common/types';
+import { Capability, DomainRequest, DomainRequestStatus, DomainSearchResult, REGISTRAR_PROVIDER_SPECS } from '@mosaiq/nsm-common/types';
 import { useMe } from '@/hooks/queries/useMe';
 import { useTeamDomains, useTeamDomainRequests, useTeamDomainBilling, useTeamRegistrar } from '@/hooks/queries/domainHooks';
 import { useTeamDomainSearch, useBuyTeamDomain, useRequestTeamDomain, useDecideTeamDomainRequest, useTeamCloudflareSync } from '@/hooks/mutations/domainMutations';
@@ -28,6 +28,10 @@ const TeamDomains = ({ ownerId }: { ownerId: string }) => {
 
     const registrar = useTeamRegistrar(ownerId).data ?? null;
     const configured = !!registrar?.account;
+    const spec = registrar?.account ? REGISTRAR_PROVIDER_SPECS[registrar.account.provider] : null;
+    const providerLabel = spec?.label ?? 'registrar';
+    // In-NSM domain search/purchase is provider-specific (only Cloudflare supports it today).
+    const canPurchase = !!spec?.capabilities.purchase;
 
     const domainsQuery = useTeamDomains(ownerId, configured);
     const requestsQuery = useTeamDomainRequests(ownerId, configured);
@@ -99,7 +103,7 @@ const TeamDomains = ({ ownerId }: { ownerId: string }) => {
     const runCloudflareSync = async () => {
         try {
             const res = await cloudflareSync.mutateAsync();
-            if (res.ok) notifications.show({ color: 'green', title: 'Synced', message: `Synced ${res.zoneCount ?? 0} zone(s) from Cloudflare.` });
+            if (res.ok) notifications.show({ color: 'green', title: 'Synced', message: `Synced ${res.zoneCount ?? 0} domain(s) from ${providerLabel}.` });
             else notifications.show({ color: 'red', title: 'Sync failed', message: res.error || 'Sync failed.', autoClose: false });
         } catch (e) {
             notifications.show({ color: 'red', message: e instanceof Error ? e.message : 'Sync failed.' });
@@ -126,9 +130,9 @@ const TeamDomains = ({ ownerId }: { ownerId: string }) => {
                 <Title order={5}>Domains</Title>
                 <Group gap="xs" align="center">
                     {canManage && (
-                        <Tooltip label="Re-sync zones, DNS records and domains from Cloudflare now">
+                        <Tooltip label={`Re-sync domains and DNS records from ${providerLabel} now`}>
                             <Button variant="light" leftSection={<MdOutlineCloudSync />} onClick={runCloudflareSync} loading={cloudflareSync.isPending}>
-                                Sync Cloudflare
+                                Sync {providerLabel}
                             </Button>
                         </Tooltip>
                     )}
@@ -141,6 +145,7 @@ const TeamDomains = ({ ownerId }: { ownerId: string }) => {
             </Group>
 
             {/* Find a domain */}
+            {canPurchase && (
             <Card withBorder>
                 <Stack>
                     <Title order={6}>Find a domain</Title>
@@ -195,9 +200,10 @@ const TeamDomains = ({ ownerId }: { ownerId: string }) => {
                     )}
                 </Stack>
             </Card>
+            )}
 
             {/* Requests queue */}
-            {requests.length > 0 && (
+            {canPurchase && requests.length > 0 && (
                 <Card withBorder>
                     <Stack>
                         <Title order={6}>Purchase requests</Title>
