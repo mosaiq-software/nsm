@@ -2,6 +2,9 @@ import '@mantine/core/styles.css';
 import '@mantine/dropzone/styles.css';
 import '@mantine/notifications/styles.css';
 import '@mantine/charts/styles.css';
+import '@mantine/code-highlight/styles.css';
+// highlight.js token colors (Mantine's code-highlight CSS only handles layout, not token theming).
+import 'highlight.js/styles/github.css';
 
 import { UserProvider } from '@/contexts/user-context';
 import { createTheme, MantineProvider } from '@mantine/core';

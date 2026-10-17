@@ -357,6 +357,60 @@ export interface FullDirectoryMap {
     [dynVarPath: string]: { fullPath: string };
 }
 
+// === Container file explorer (Monitoring > Files) ===
+// A browse/read is scoped to one of a project's roots, identified by a serialized id (never an
+// absolute path). The worker node resolves the id to an on-disk base itself, so the client can
+// never address anything outside the project's own directories.
+export type FileRootKind = 'volume' | 'web';
+export interface FileRootInfo {
+    id: string; // 'volume' | `web:${serverId}:${locationId}`
+    kind: FileRootKind;
+    label: string; // e.g. 'Volume' or 'Web: example.com /assets'
+}
+
+// 'symlink' entries are surfaced for visibility only; they are NEVER navigable or readable
+// (symlinks are disallowed outright because they can escape the project's directories).
+export type FileEntryType = 'file' | 'dir' | 'symlink' | 'other';
+export interface FileEntry {
+    name: string;
+    type: FileEntryType;
+    size: number; // bytes; 0 for dirs and symlinks
+    mtimeMs: number;
+}
+
+export interface DirectoryListing {
+    rootId: string;
+    path: string; // normalized relative path within root ('' = root top)
+    entries: FileEntry[];
+    truncated: boolean; // entries capped at MAX_DIR_ENTRIES
+}
+
+// Always returns the available roots; `listing` is null at the virtual top level (root picker).
+export interface FileBrowseResult {
+    projectId: string;
+    workerNodeId: string | null; // null when the project is not yet deployed anywhere
+    roots: FileRootInfo[];
+    listing: DirectoryListing | null;
+}
+
+export type FileClass = 'text' | 'image' | 'video' | 'audio' | 'pdf' | 'binary';
+export interface FileContent {
+    rootId: string;
+    path: string;
+    name: string;
+    size: number;
+    mtimeMs: number;
+    fileClass: FileClass;
+    mimeType: string;
+    // Text files only (<= TEXT_PREVIEW_MAX): inline UTF-8 content.
+    text?: string;
+    truncated?: boolean; // text clipped at the cap
+    language?: string; // derived from extension, for syntax highlighting
+    // True when the file can be shown (text inline, or media/pdf fetched via the raw endpoint).
+    // False for unreadable/oversize binaries, which the UI offers as a download only.
+    previewAvailable: boolean;
+}
+
 export enum UriStatus {
     UNKNOWN = 'unknown', // initial state, not yet checked
     REACHABLE = 'reachable', // last check was successful, 100-300

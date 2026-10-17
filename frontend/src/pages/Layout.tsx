@@ -230,6 +230,7 @@ const Layout = (props: { children: React.ReactNode }) => {
                                             <RouterLink to={`/p/${project.id}/monitoring`} label="Monitoring" showActive onNavigate={close}>
                                                 {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/logs`} label="Logs" showActive onNavigate={close} />}
                                                 {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/metrics`} label="Metrics" showActive onNavigate={close} />}
+                                                {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/monitoring/files`} label="Files" showActive onNavigate={close} />}
                                                 <RouterLink to={`/p/${project.id}/monitoring/status`} label="Status" showActive onNavigate={close} />
                                                 <RouterLink to={`/p/${project.id}/monitoring/incidents`} label="Incidents" showActive onNavigate={close} />
                                             </RouterLink>

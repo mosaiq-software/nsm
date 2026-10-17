@@ -1,6 +1,7 @@
 import express from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Readable } from 'stream';
 import { spawn } from 'child_process';
 import { API_BODY, API_PARAMS, API_RETURN, API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { NodeStatusReport } from '@mosaiq/nsm-common/types';
@@ -48,8 +49,47 @@ import { purgeProjectLocal, teardownProjectLocal } from '@/reconcile/teardown';
 import { cancelLocalDeployment } from '@/reconcile/deploy';
 import { registry } from '@/utils/metrics';
 import { areaLog, serializeError } from '@/utils/log';
+import { parseRootId } from '@mosaiq/nsm-common/fileExplorer';
+import { browseProjectFiles, NodeUnreachableError, NotDeployedError, readProjectFile, streamProjectFile } from '@/controllers/fileExplorerController';
+import { FileAccessError, listDirectoryLocal, openFileStreamLocal, RawFileStream, readFileLocal } from '@/reconcile/fileAccess';
 
 const routeLog = areaLog('routes');
+const fileLog = areaLog('fileExplorer');
+
+// Map a file-explorer error to an HTTP status. Must be called before any streaming begins (once
+// headers are sent the status is fixed).
+const mapFileError = (res: express.Response, e: unknown): void => {
+    if (e instanceof FileAccessError) {
+        const status = e.code === 'forbidden' ? 403 : e.code === 'not_found' ? 404 : e.code === 'too_large' ? 413 : 400;
+        return void res.status(status).send(e.message);
+    }
+    if (e instanceof NotDeployedError) return void res.status(409).send('Project is not deployed yet');
+    if (e instanceof NodeUnreachableError) return void res.status(502).send('Worker node is unreachable');
+    fileLog.error({ action: 'file_explorer_error', err: serializeError(e) }, 'file explorer request failed');
+    res.status(500).send();
+};
+
+// Filenames flow into a Content-Disposition header; strip characters that could break it.
+const safeFilename = (name: string): string => name.replace(/[\r\n"\\]/g, '_');
+
+// Write a local raw file stream to the response with Range/Content-* headers.
+const sendRawStream = (res: express.Response, data: RawFileStream): void => {
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Type', data.mimeType);
+    res.setHeader('Content-Length', String(data.end - data.start + 1));
+    res.setHeader('Content-Disposition', `inline; filename="${safeFilename(data.name)}"`);
+    if (data.partial) {
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${data.start}-${data.end}/${data.size}`);
+    } else {
+        res.status(200);
+    }
+    data.stream.on('error', (err) => {
+        fileLog.error({ action: 'raw_stream_error', err: serializeError(err) }, 'error streaming file bytes');
+        res.destroy(err);
+    });
+    data.stream.pipe(res);
+};
 
 const publicRouter = express.Router();
 const privateRouter = express.Router();
@@ -445,6 +485,75 @@ privateRouter.get(API_ROUTES.GET_PROJECT_HEALTH, async (req, res) => {
         res.status(200).json(await getProjectHealthSummary(params.projectId, window));
     } catch (e: any) {
         res.status(400).send(e?.message || 'Failed to load project health');
+    }
+});
+
+// === Container file explorer (Monitoring > Files) ===
+// Read-only browse/preview/download of a project's on-disk volume and web directories. Gated on
+// CONFIGURE (volumes can hold databases and secret-derived data). Leader-only; the leader resolves
+// the owning worker node and reads locally or over the cluster-secret RPC. See fileAccess.ts for the
+// symlink-free containment that confines every access to the project's own directories.
+privateRouter.get(API_ROUTES.GET_PROJECT_FILES, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_FILES];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    const project = await getProject(params.projectId);
+    if (!project) return void res.status(404).send('Project not found');
+    const { root, path: relPath } = req.query as Record<string, string>;
+    try {
+        res.status(200).json(await browseProjectFiles(project, root || undefined, relPath || ''));
+    } catch (e) {
+        mapFileError(res, e);
+    }
+});
+
+privateRouter.get(API_ROUTES.GET_PROJECT_FILE, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_FILE];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    const project = await getProject(params.projectId);
+    if (!project) return void res.status(404).send('Project not found');
+    const { root, path: relPath } = req.query as Record<string, string>;
+    if (!root) return void res.status(400).send('root is required');
+    try {
+        res.status(200).json(await readProjectFile(project, root, relPath || ''));
+    } catch (e) {
+        mapFileError(res, e);
+    }
+});
+
+// Raw bytes for media rendering and downloads. Streamed (never buffered), Range-aware, and proxied
+// from the owning node when the project runs elsewhere. Consumed by an authorized fetch -> Blob.
+privateRouter.get(API_ROUTES.GET_PROJECT_FILE_RAW, async (req, res) => {
+    const params = req.params as API_PARAMS[API_ROUTES.GET_PROJECT_FILE_RAW];
+    if (!requireLeader(req, res)) return;
+    if (!(await requireProjectCapability(req, res, params.projectId, Capability.CONFIGURE))) return;
+    const project = await getProject(params.projectId);
+    if (!project) return void res.status(404).send('Project not found');
+    const { root, path: relPath } = req.query as Record<string, string>;
+    if (!root) return void res.status(400).send('root is required');
+    const range = req.headers['range'] as string | undefined;
+    try {
+        const dispatch = await streamProjectFile(project, root, relPath || '', range);
+        if (dispatch.kind === 'local') return sendRawStream(res, dispatch.data);
+        // Proxy-stream from the owning node, forwarding Range and propagating its status/headers.
+        const upstream = await fetch(dispatch.url, {
+            headers: { [CLUSTER_SECRET_HEADER]: config.clusterSecret, ...(range ? { range } : {}) },
+            signal: AbortSignal.timeout(10 * 60 * 1000),
+        });
+        res.status(upstream.status);
+        for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'content-disposition']) {
+            const v = upstream.headers.get(h);
+            if (v) res.setHeader(h, v);
+        }
+        if (!upstream.body) return void res.end();
+        Readable.fromWeb(upstream.body as any).pipe(res);
+    } catch (e) {
+        if (!res.headersSent) mapFileError(res, e);
+        else {
+            fileLog.error({ action: 'raw_proxy_error', err: serializeError(e) }, 'error proxying raw file stream');
+            res.destroy(e as Error);
+        }
     }
 });
 
@@ -1514,6 +1623,52 @@ internalRouter.post('/node/disk-snapshot', requireClusterSecret, async (_req, re
     } catch (e: any) {
         routeLog.error({ action: 'disk_snapshot_error', err: serializeError(e) }, 'error collecting disk snapshot');
         res.status(500).send(e?.message);
+    }
+});
+
+// === File explorer node-side RPCs (cluster-secret gated) ===
+// Invoked only by the leader for a project whose worker node is this node. They accept a root id +
+// relative path (never an absolute path); fileAccess.ts enforces symlink-free containment. The JSON
+// ops answer 200 with a {ok,...} envelope so a FileAccessError code survives the leader's RPC client.
+internalRouter.post('/node/files-list', requireClusterSecret, async (req, res) => {
+    const { projectId, root, path: relPath } = req.body || {};
+    const parsed = parseRootId(String(root || ''));
+    if (!parsed) return void res.status(200).json({ ok: false, code: 'not_found' });
+    try {
+        const result = await listDirectoryLocal(String(projectId), parsed, String(relPath || ''));
+        res.status(200).json({ ok: true, result });
+    } catch (e) {
+        if (e instanceof FileAccessError) return void res.status(200).json({ ok: false, code: e.code });
+        fileLog.error({ action: 'node_files_list_error', err: serializeError(e) }, 'node files-list failed');
+        res.status(500).send();
+    }
+});
+
+internalRouter.post('/node/file-read', requireClusterSecret, async (req, res) => {
+    const { projectId, root, path: relPath } = req.body || {};
+    const parsed = parseRootId(String(root || ''));
+    if (!parsed) return void res.status(200).json({ ok: false, code: 'not_found' });
+    try {
+        const result = await readFileLocal(String(projectId), parsed, String(relPath || ''));
+        res.status(200).json({ ok: true, result });
+    } catch (e) {
+        if (e instanceof FileAccessError) return void res.status(200).json({ ok: false, code: e.code });
+        fileLog.error({ action: 'node_file_read_error', err: serializeError(e) }, 'node file-read failed');
+        res.status(500).send();
+    }
+});
+
+// Raw byte stream for the leader's proxy. Streams with Range support and real HTTP status codes
+// (403/404/413) which the leader forwards verbatim.
+internalRouter.get('/node/file-raw', requireClusterSecret, async (req, res) => {
+    const { projectId, root, path: relPath } = req.query as Record<string, string>;
+    const parsed = parseRootId(String(root || ''));
+    if (!parsed) return void res.status(404).send('unknown root');
+    try {
+        const data = await openFileStreamLocal(String(projectId), parsed, String(relPath || ''), req.headers['range'] as string | undefined);
+        sendRawStream(res, data);
+    } catch (e) {
+        mapFileError(res, e);
     }
 });
 

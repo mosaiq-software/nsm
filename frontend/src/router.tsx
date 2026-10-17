@@ -14,6 +14,7 @@ import MonitoringLogsPage from '@/pages/monitoring/MonitoringLogsPage';
 import MonitoringMetricsPage from '@/pages/monitoring/MonitoringMetricsPage';
 import MonitoringStatusPage from '@/pages/monitoring/MonitoringStatusPage';
 import MonitoringIncidentsPage from '@/pages/monitoring/MonitoringIncidentsPage';
+import MonitoringFilesPage from '@/pages/monitoring/MonitoringFilesPage';
 import NodesPage from '@/pages/NodesPage';
 import NodeDetailLayout from '@/pages/node/NodeDetailLayout';
 import NodeOverviewPage from '@/pages/node/NodeOverviewPage';
@@ -93,6 +94,7 @@ const Router = () => {
                 <Route path="/p/:projectId/monitoring/metrics" element={<MonitoringMetricsPage />} />
                 <Route path="/p/:projectId/monitoring/status" element={<MonitoringStatusPage />} />
                 <Route path="/p/:projectId/monitoring/incidents" element={<MonitoringIncidentsPage />} />
+                <Route path="/p/:projectId/monitoring/files" element={<MonitoringFilesPage />} />
                 {/* Redirects from the old flat routes to their new Monitoring homes. */}
                 <Route path="/p/:projectId/logs" element={<MonitoringRedirect sub="logs" />} />
                 <Route path="/p/:projectId/status" element={<MonitoringRedirect sub="status" />} />

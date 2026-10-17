@@ -1,4 +1,4 @@
-import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClientLogEntry, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, CreateProjectWebhookBody, DeploymentLogUpdate, DnsRecord, DnsZone, DnsZoneAnalytics, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, GithubOwner, IncidentWithUpdates, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, ProjectWebhook, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, UpdateProjectWebhookBody, User } from './types';
+import { AddIncidentUpdateBody, Admin, ApiKeyView, Capability, CdSetupRequest, ClientLogEntry, ClusterNode, ClusterStatus, CreateApiKeyBody, CreateApiKeyResult, CreateIncidentBody, CreateProjectWebhookBody, DeploymentLogUpdate, DnsRecord, DnsZone, DnsZoneAnalytics, DomainAllocationResult, DomainBillingSummary, DomainCheckResult, DomainRequest, DomainSearchResult, FileBrowseResult, FileContent, GithubOwner, IncidentWithUpdates, LogQueryRequest, LogQueryResult, LogFacetsRequest, LogFacetsResult, MeResponse, NodeStorageSpec, ObservabilityLogsResult, ObservabilityMetricsResult, Project, ProjectHealthSummary, ProjectInstance, ProjectResourceQuota, ProjectResourceUsage, ProjectWebhook, PushSubscriptionJSON, Secret, Team, TeamDetail, UpdateIncidentBody, UpdateProjectWebhookBody, User } from './types';
 import { NodeConfigUpdate, NodeConfigValues } from './envSchema';
 import { CreatePortReservationBody, PortReservation } from './types';
 
@@ -35,6 +35,9 @@ export enum API_ROUTES {
     GET_PROJECT_INCIDENTS = '/project/:projectId/incidents',
     GET_PROJECT_API_KEYS = '/project/:projectId/api-keys',
     GET_PROJECT_WEBHOOKS = '/project/:projectId/webhooks',
+    GET_PROJECT_FILES = '/project/:projectId/files',
+    GET_PROJECT_FILE = '/project/:projectId/file',
+    GET_PROJECT_FILE_RAW = '/project/:projectId/file/raw',
     GET_DOMAINS = '/domains',
     GET_DOMAIN_REQUESTS = '/domains/requests',
     GET_DOMAIN_BILLING = '/domains/billing',
@@ -134,6 +137,9 @@ export interface API_PARAMS {
     [API_ROUTES.GET_PROJECT_INCIDENTS]: { projectId: string };
     [API_ROUTES.GET_PROJECT_API_KEYS]: { projectId: string };
     [API_ROUTES.GET_PROJECT_WEBHOOKS]: { projectId: string };
+    [API_ROUTES.GET_PROJECT_FILES]: { projectId: string };
+    [API_ROUTES.GET_PROJECT_FILE]: { projectId: string };
+    [API_ROUTES.GET_PROJECT_FILE_RAW]: { projectId: string };
     [API_ROUTES.GET_DOMAINS]: {};
     [API_ROUTES.GET_DOMAIN_REQUESTS]: {};
     [API_ROUTES.GET_DOMAIN_BILLING]: {};
@@ -235,6 +241,9 @@ export interface API_BODY {
     [API_ROUTES.GET_PROJECT_INCIDENTS]: undefined;
     [API_ROUTES.GET_PROJECT_API_KEYS]: undefined;
     [API_ROUTES.GET_PROJECT_WEBHOOKS]: undefined;
+    [API_ROUTES.GET_PROJECT_FILES]: undefined;
+    [API_ROUTES.GET_PROJECT_FILE]: undefined;
+    [API_ROUTES.GET_PROJECT_FILE_RAW]: undefined;
     [API_ROUTES.GET_DOMAINS]: undefined;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: undefined;
     [API_ROUTES.GET_DOMAIN_BILLING]: undefined;
@@ -334,6 +343,10 @@ export interface API_RETURN {
     [API_ROUTES.GET_PROJECT_INCIDENTS]: IncidentWithUpdates[];
     [API_ROUTES.GET_PROJECT_API_KEYS]: ApiKeyView[];
     [API_ROUTES.GET_PROJECT_WEBHOOKS]: ProjectWebhook[];
+    [API_ROUTES.GET_PROJECT_FILES]: FileBrowseResult | undefined;
+    [API_ROUTES.GET_PROJECT_FILE]: FileContent | undefined;
+    // Raw bytes are streamed directly (not via the typed JSON client); typed here for completeness.
+    [API_ROUTES.GET_PROJECT_FILE_RAW]: undefined;
     [API_ROUTES.GET_DOMAINS]: DnsZone[];
     [API_ROUTES.GET_DOMAIN_REQUESTS]: DomainRequest[];
     [API_ROUTES.GET_DOMAIN_BILLING]: DomainBillingSummary | undefined;
@@ -435,6 +448,9 @@ export interface API_AUTH {
     [API_ROUTES.GET_PROJECT_INCIDENTS]: string;
     [API_ROUTES.GET_PROJECT_API_KEYS]: string;
     [API_ROUTES.GET_PROJECT_WEBHOOKS]: string;
+    [API_ROUTES.GET_PROJECT_FILES]: string;
+    [API_ROUTES.GET_PROJECT_FILE]: string;
+    [API_ROUTES.GET_PROJECT_FILE_RAW]: string;
     [API_ROUTES.GET_DOMAINS]: string;
     [API_ROUTES.GET_DOMAIN_REQUESTS]: string;
     [API_ROUTES.GET_DOMAIN_BILLING]: string;
