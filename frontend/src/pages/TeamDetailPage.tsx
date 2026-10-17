@@ -1,9 +1,7 @@
 import { useTeam } from '@/hooks/queries/teamHooks';
 import { useSetTeamDefaults, useSetTeamOverride, useDeleteTeamOverride } from '@/hooks/mutations/teamMutations';
 import { Capability, TeamType } from '@mosaiq/nsm-common/types';
-import { Alert, Avatar, Badge, Button, Center, Checkbox, Divider, Group, Loader, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
-import TeamRegistrarSettings from '@/components/TeamRegistrarSettings';
-import TeamDomains from '@/components/TeamDomains';
+import { Alert, Avatar, Badge, Button, Center, Checkbox, Group, Loader, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -171,10 +169,6 @@ const TeamDetailPage = () => {
                             </Table.Tbody>
                         </Table>
                     )}
-
-                    <Divider my="sm" />
-                    <TeamRegistrarSettings ownerId={ownerId} />
-                    <TeamDomains ownerId={ownerId} />
                 </>
             )}
         </Stack>

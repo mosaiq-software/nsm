@@ -1,5 +1,5 @@
 import Layout from '@/pages/Layout';
-import DashboardPage from '@/pages/DashboardPage';
+import TeamHomePage from '@/pages/TeamHomePage';
 import ProjectPage from '@/pages/ProjectPage';
 import ProjectDeployPage from '@/pages/ProjectDeployPage';
 import ProjectConfigLayout from '@/pages/config/ProjectConfigLayout';
@@ -26,6 +26,7 @@ import LandingPage from '@/pages/LandingPage';
 import UserManagementPage from '@/pages/UserManagementPage';
 import SettingsPage from '@/pages/SettingsPage';
 import TeamDetailPage from '@/pages/TeamDetailPage';
+import TeamDomainsPage from '@/pages/TeamDomainsPage';
 import NoAccessPage from '@/pages/NoAccessPage';
 import { Center, Loader } from '@mantine/core';
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
@@ -74,7 +75,7 @@ const Router = () => {
     return (
         <Layout>
             <Routes>
-                <Route path="/" element={<DashboardPage />} />
+                <Route path="/" element={<TeamHomePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/p/:projectId" element={<ProjectPage />} />
                 <Route path="/p/:projectId/deploy" element={<ProjectDeployPage />} />
@@ -108,6 +109,7 @@ const Router = () => {
                 {meCtx.isAdmin && <Route path="/logs" element={<NsmLogsPage />} />}
                 {meCtx.isAdmin && <Route path="/users" element={<UserManagementPage />} />}
                 <Route path="/teams/:ownerId" element={<TeamDetailPage />} />
+                <Route path="/teams/:ownerId/domains" element={<TeamDomainsPage />} />
                 <Route path="/teams/:ownerId/domains/:zoneId" element={<DomainDetailPage />} />
                 <Route path="/*" element={<p>404</p>} />
             </Routes>

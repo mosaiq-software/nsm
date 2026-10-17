@@ -7,6 +7,7 @@ import '@mantine/code-highlight/styles.css';
 import 'highlight.js/styles/github.css';
 
 import { UserProvider } from '@/contexts/user-context';
+import { SelectedTeamProvider } from '@/contexts/selected-team-context';
 import { createTheme, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { BrowserRouter } from 'react-router-dom';
@@ -24,7 +25,9 @@ const App = () => {
             <BrowserRouter>
                 <Notifications />
                 <UserProvider>
-                    <Router />
+                    <SelectedTeamProvider>
+                        <Router />
+                    </SelectedTeamProvider>
                 </UserProvider>
             </BrowserRouter>
         </MantineProvider>

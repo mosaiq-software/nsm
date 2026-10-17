@@ -1,16 +1,14 @@
 import React, { useState } from 'react';
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks';
-import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Divider, Group, Loader, Menu, Modal, Space, Stack, Text, TextInput, Title } from '@mantine/core';
-import RouterLink, { pathMatchesShape } from '@/components/RouterLink';
-import { ProjectStatusChip } from '@/components/ProjectStatusChip';
+import { AppShell, Autocomplete, Avatar, Burger, Button, Center, Group, Loader, Menu, Modal, Stack, Text, TextInput, Title } from '@mantine/core';
+import Sidebar from '@/components/Sidebar/Sidebar';
+import TeamSwitcher from '@/components/Sidebar/TeamSwitcher';
 import { useCreateProject } from '@/hooks/mutations/projectMutations';
 import { useMe } from '@/hooks/queries/useMe';
-import { useCluster } from '@/hooks/queries/useCluster';
 import { useGithubRepos, useGithubBranches } from '@/hooks/queries/githubHooks';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Capability, Project } from '@mosaiq/nsm-common/types';
+import { Link, useNavigate } from 'react-router-dom';
+import { Project } from '@mosaiq/nsm-common/types';
 import { useUser } from '@/contexts/user-context';
-import { MdOutlineWarningAmber } from 'react-icons/md';
 
 const emptyProject: Project = {
     id: '',
@@ -24,10 +22,8 @@ const Layout = (props: { children: React.ReactNode }) => {
     const [opened, { toggle, close }] = useDisclosure();
     const createProject = useCreateProject();
     const meCtx = useMe();
-    const clusterCtx = useCluster();
     const userCtx = useUser();
     const navigate = useNavigate();
-    const location = useLocation();
     const [modal, setModal] = useState<'create' | null>(null);
     const [creatingProject, setCreatingProject] = useState(false);
     const [newProject, setNewProject] = useState<Project>(emptyProject);
@@ -35,6 +31,11 @@ const Layout = (props: { children: React.ReactNode }) => {
     const closeCreateModal = () => {
         setModal(null);
         setNewProject(emptyProject);
+    };
+
+    const openCreateModal = (ownerLogin: string) => {
+        setNewProject({ ...emptyProject, repoOwner: ownerLogin });
+        setModal('create');
     };
 
     // Debounce the free-text owner/repo so typing doesn't fire a GitHub lookup on every keystroke.
@@ -134,13 +135,10 @@ const Layout = (props: { children: React.ReactNode }) => {
                     }}
                     px="1rem"
                 >
-                    <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-
-                    <Group h="100%" align="center">
+                    <Group h="100%" align="center" gap="sm" wrap="nowrap">
+                        <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
                         <Avatar src="/favicon.svg" />
-                        <Text>
-                            <span style={{ fontWeight: '900' }}>N</span>ode <span style={{ fontWeight: '900' }}>S</span>erver <span style={{ fontWeight: '900' }}>M</span>anager
-                        </Text>
+                        <TeamSwitcher onNavigate={close} />
                     </Group>
                     <Group align="center" gap="md">
                         <Menu>
@@ -178,75 +176,12 @@ const Layout = (props: { children: React.ReactNode }) => {
                     p="md"
                     style={{
                         height: `calc(100dvh - var(--app-shell-header-height) - 1px)`,
-                        overflowY: 'auto',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        overflow: 'hidden',
                     }}
                 >
-                    <RouterLink to="/" label="Dashboard" showActive onNavigate={close} />
-                    {meCtx.isAdmin && (
-                        <>
-                            <RouterLink to="/nodes" label="Nodes" showActive onNavigate={close}>
-                                {clusterCtx.nodes.length > 0 &&
-                                    clusterCtx.nodes.map((node) => <RouterLink to={`/nodes/${node.nodeId}`} label={node.nodeId} key={node.nodeId} showActive onNavigate={close} />)}
-                            </RouterLink>
-                            <RouterLink to="/logs" label="NSM Logs" showActive onNavigate={close} />
-                            <RouterLink to="/users" label="User Management" showActive onNavigate={close} />
-                        </>
-                    )}
-                    <Space h="md" />
-                    <Divider w="80%" mx="auto" my="sm" />
-                    {meCtx.teams.map((team) => (
-                        <RouterLink
-                            to={`/teams/${team.ownerId}`}
-                            activeWithin={team.projects.some((p) => pathMatchesShape(location.pathname, `/p/${p.id}/*`))}
-                            label={team.login}
-                            key={team.ownerId}
-                            showActive
-                            onNavigate={close}
-                            rightSection={!team.installed ? <MdOutlineWarningAmber color="var(--mantine-color-red-6)" /> : undefined}
-                        >
-                            {team.installed &&
-                                team.projects
-                                    .filter((p) => p.capabilities.includes(Capability.VIEW))
-                                    .map((project) => (
-                                        <RouterLink to={`/p/${project.id}`} label={project.id} key={project.id} showActive onNavigate={close} rightSection={<ProjectStatusChip projectId={project.id} />}>
-                                            {project.capabilities.includes(Capability.CONFIGURE) && (
-                                                <RouterLink to={`/p/${project.id}/config`} label="Config" showActive onNavigate={close}>
-                                                    <RouterLink to={`/p/${project.id}/config/project`} label="Project" showActive onNavigate={close} />
-                                                    <RouterLink to={`/p/${project.id}/config/routing`} label="Routing" showActive onNavigate={close} />
-                                                    <RouterLink to={`/p/${project.id}/config/system`} label="System" showActive onNavigate={close} />
-                                                    <RouterLink to={`/p/${project.id}/config/resources`} label="Resources" showActive onNavigate={close} />
-                                                    <RouterLink to={`/p/${project.id}/config/keys`} label="Keys" showActive onNavigate={close} />
-                                                    <RouterLink to={`/p/${project.id}/config/webhooks`} label="Webhooks" showActive onNavigate={close} />
-                                                    <RouterLink to={`/p/${project.id}/config/cd`} label="Continuous Deployment" showActive onNavigate={close} />
-                                                </RouterLink>
-                                            )}
-                                            {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/deploy`} label="Deploy" showActive onNavigate={close} />}
-                                            <RouterLink to={`/p/${project.id}/monitoring`} label="Monitoring" showActive onNavigate={close}>
-                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/logs`} label="Logs" showActive onNavigate={close} />}
-                                                {project.capabilities.includes(Capability.DEPLOY) && <RouterLink to={`/p/${project.id}/monitoring/metrics`} label="Metrics" showActive onNavigate={close} />}
-                                                {project.capabilities.includes(Capability.CONFIGURE) && <RouterLink to={`/p/${project.id}/monitoring/files`} label="Files" showActive onNavigate={close} />}
-                                                <RouterLink to={`/p/${project.id}/monitoring/status`} label="Status" showActive onNavigate={close} />
-                                                <RouterLink to={`/p/${project.id}/monitoring/incidents`} label="Incidents" showActive onNavigate={close} />
-                                            </RouterLink>
-                                        </RouterLink>
-                                    ))}
-                            {team.installed && team.capabilities.includes(Capability.CREATE_PROJECT) && (
-                                <Button
-                                    variant="subtle"
-                                    size="xs"
-                                    mt="xs"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setNewProject({ ...emptyProject, repoOwner: team.login });
-                                        setModal('create');
-                                    }}
-                                >
-                                    Create Project
-                                </Button>
-                            )}
-                        </RouterLink>
-                    ))}
-                    <Space h="md" />
+                    <Sidebar onCreateProject={openCreateModal} onNavigate={close} />
                 </AppShell.Navbar>
 
                 <AppShell.Main>{props.children}</AppShell.Main>
