@@ -3,6 +3,7 @@ import { useAPI } from '@/utils/api';
 import { queryKeys } from '@/query/keys';
 import { API_ROUTES } from '@mosaiq/nsm-common/routes';
 import { LogSelector } from '@mosaiq/nsm-common/types';
+import { TimeRange, resolveRange } from '@/components/LogViewer/TimeRangeControl';
 
 const RESOURCE_POLL_MS = 15000;
 const METRICS_POLL_MS = 15000;
@@ -81,20 +82,22 @@ export const useProjectResourceUsage = (projectId: string | undefined) => {
 };
 
 // Time-series metrics for a project/instance/service scope. The selector is serialized into the key
-// so switching scope/metric/range fetches (and caches) independently; polled every 15s.
-export const useObservabilityMetrics = (selector: LogSelector, metric: string, rangeMs: number, enabled = true) => {
+// so switching scope/metric/range fetches (and caches) independently. Preset ranges slide to now and
+// poll every 15s; a custom (absolute) window is fixed and does not poll.
+export const useObservabilityMetrics = (selector: LogSelector, metric: string, range: TimeRange, enabled = true) => {
     const api = useAPI();
     const selectorKey = JSON.stringify({ ...selector, metric });
+    const rangeKey = range.mode === 'preset' ? `p:${range.presetMs}` : `c:${range.startMs}-${range.endMs}`;
     return useQuery({
-        queryKey: queryKeys.observabilityMetrics(selectorKey, metric, String(rangeMs)),
+        queryKey: queryKeys.observabilityMetrics(selectorKey, metric, rangeKey),
         queryFn: async () => {
-            const now = Date.now();
-            const start = `${Math.floor((now - rangeMs) / 1000)}`;
-            const end = `${Math.floor(now / 1000)}`;
+            const { startMs, endMs } = resolveRange(range);
+            const start = `${Math.floor(startMs / 1000)}`;
+            const end = `${Math.floor(endMs / 1000)}`;
             return (await api.get(API_ROUTES.GET_OBSERVABILITY_METRICS, {}, { ...selector, metric, start, end, step: '30s' })) ?? { metric, series: [] };
         },
         enabled: !!api.token && enabled,
-        refetchInterval: METRICS_POLL_MS,
+        refetchInterval: range.mode === 'preset' ? METRICS_POLL_MS : false,
     });
 };
 

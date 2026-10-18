@@ -9,16 +9,10 @@ import { useProjectInstance, useObservabilityMetrics, useProjectResourceUsage } 
 import { ResourceUsageBars } from '@/components/ResourceAllocation';
 import { formatAxisTime, formatBytes, formatBytesPerSec, formatCores } from '@/utils/format';
 import { ProjectHeader } from '@/components/ProjectHeader';
+import { TimeRangeControl, TimeRange, resolveRange } from '@/components/LogViewer/TimeRangeControl';
 import { MdOutlineRefresh } from 'react-icons/md';
 
 type MetricKind = 'cpu' | 'mem' | 'net' | 'storage';
-
-const TIME_RANGES: { label: string; ms: number }[] = [
-    { label: '15m', ms: 15 * 60 * 1000 },
-    { label: '1h', ms: 60 * 60 * 1000 },
-    { label: '6h', ms: 6 * 60 * 60 * 1000 },
-    { label: '24h', ms: 24 * 60 * 60 * 1000 },
-];
 
 const PROJECT_SCOPE = '__project__';
 
@@ -69,7 +63,7 @@ const MonitoringMetricsPage = () => {
 
     const [project, setProject] = useState<Project | undefined | null>(undefined);
     const [scope, setScope] = useState<string>(PROJECT_SCOPE);
-    const [rangeMs, setRangeMs] = useState<number>(TIME_RANGES[1].ms);
+    const [range, setRange] = useState<TimeRange>({ mode: 'preset', presetMs: 60 * 60 * 1000 });
     const [metric, setMetric] = useState<MetricKind>('cpu');
 
     useEffect(() => {
@@ -89,12 +83,17 @@ const MonitoringMetricsPage = () => {
         return { projectInstanceId: scope };
     }, [scope, projectId, metric]);
 
-    const metricsQuery = useObservabilityMetrics(selector, metric, rangeMs, !!project);
+    const metricsQuery = useObservabilityMetrics(selector, metric, range, !!project);
     const metrics = metricsQuery.data ?? null;
     const loading = metricsQuery.isFetching;
     const refresh = () => void metricsQuery.refetch();
 
     const { data: resourceUsage } = useProjectResourceUsage(projectId);
+
+    const spanMs = useMemo(() => {
+        const { startMs, endMs } = resolveRange(range);
+        return endMs - startMs;
+    }, [range]);
 
     const chartData = useMemo(() => {
         const series = metrics?.series ?? [];
@@ -105,8 +104,8 @@ const MonitoringMetricsPage = () => {
         }
         return Array.from(byTime.entries())
             .sort((a, b) => a[0] - b[0])
-            .map(([t, value]) => ({ time: formatAxisTime(t, rangeMs), value }));
-    }, [metrics, rangeMs]);
+            .map(([t, value]) => ({ time: formatAxisTime(t, spanMs), value }));
+    }, [metrics, spanMs]);
 
     const chartSeries = useMemo(() => [{ name: 'value', label: metricSeriesLabel(metric), color: 'blue.6' }], [metric]);
 
@@ -140,10 +139,7 @@ const MonitoringMetricsPage = () => {
             <Group align="flex-end" justify="space-between">
                 <Group align="flex-end">
                     <Select label="Scope" data={scopeOptions} value={scope} onChange={(v) => setScope(v || PROJECT_SCOPE)} w={320} disabled={metric === 'storage'} />
-                    <Stack gap={2}>
-                        <Text fz="var(--input-label-size, var(--mantine-font-size-sm))">Metrics range</Text>
-                        <SegmentedControl value={String(rangeMs)} onChange={(v) => setRangeMs(Number(v))} data={TIME_RANGES.map((r) => ({ value: String(r.ms), label: r.label }))} />
-                    </Stack>
+                    <TimeRangeControl value={range} onChange={setRange} />
                 </Group>
                 <Tooltip label="Refresh metrics">
                     <ActionIcon variant="light" size="lg" onClick={refresh} loading={loading}>
