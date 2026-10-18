@@ -1,11 +1,15 @@
-import { Group, Menu, Text, UnstyledButton } from '@mantine/core';
-import { MdCheck, MdExpandMore, MdOutlineShield, MdOutlineWarningAmber } from 'react-icons/md';
+import { Avatar, Group, Menu, Text, UnstyledButton } from '@mantine/core';
+import { MdCheck, MdExpandMore, MdOutlineWarningAmber } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 import { NSM_TEAM_ID, SelectableTeam, useSelectedTeam } from '@/contexts/selected-team-context';
 
 interface TeamSwitcherProps {
     onNavigate?: () => void;
 }
+
+// MeTeam has no avatar field, so fall back to GitHub's avatar endpoint for real teams; the synthetic
+// NSM Admin team uses the app favicon.
+const teamAvatarSrc = (team: SelectableTeam) => (team.isNsmAdmin ? '/favicon.svg' : `https://github.com/${team.login}.png?size=80`);
 
 export default function TeamSwitcher({ onNavigate }: TeamSwitcherProps) {
     const navigate = useNavigate();
@@ -29,8 +33,8 @@ export default function TeamSwitcher({ onNavigate }: TeamSwitcherProps) {
         <Menu position="bottom-start" width={240} withinPortal>
             <Menu.Target>
                 <UnstyledButton>
-                    <Group gap={6} wrap="nowrap">
-                        {selectedTeam?.isNsmAdmin && <MdOutlineShield />}
+                    <Group gap={8} wrap="nowrap">
+                        <Avatar src={selectedTeam ? teamAvatarSrc(selectedTeam) : undefined} size="sm" radius="sm" />
                         {selectedTeam?.team && !selectedTeam.team.installed && <MdOutlineWarningAmber color="var(--mantine-color-red-6)" />}
                         <Text fw={700} size="sm" truncate maw={160}>
                             {selectedTeam?.login ?? 'Select team'}
@@ -49,11 +53,16 @@ export default function TeamSwitcher({ onNavigate }: TeamSwitcherProps) {
                         <div key={team.ownerId}>
                             {isNsmSeparator && <Menu.Divider />}
                             <Menu.Item
-                                leftSection={team.isNsmAdmin ? <MdOutlineShield /> : uninstalled ? <MdOutlineWarningAmber color="var(--mantine-color-red-6)" /> : undefined}
+                                leftSection={<Avatar src={teamAvatarSrc(team)} size="sm" radius="sm" />}
                                 rightSection={isSelected ? <MdCheck /> : undefined}
                                 onClick={() => select(team)}
                             >
-                                {team.login}
+                                <Group gap={6} wrap="nowrap">
+                                    <Text size="sm" truncate>
+                                        {team.login}
+                                    </Text>
+                                    {uninstalled && <MdOutlineWarningAmber color="var(--mantine-color-red-6)" />}
+                                </Group>
                             </Menu.Item>
                         </div>
                     );

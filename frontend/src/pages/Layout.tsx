@@ -137,7 +137,6 @@ const Layout = (props: { children: React.ReactNode }) => {
                 >
                     <Group h="100%" align="center" gap="sm" wrap="nowrap">
                         <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-                        <Avatar src="/favicon.svg" />
                         <TeamSwitcher onNavigate={close} />
                     </Group>
                     <Group align="center" gap="md">

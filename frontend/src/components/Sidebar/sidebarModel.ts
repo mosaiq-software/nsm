@@ -25,6 +25,8 @@ export interface SidebarLevel {
     items: SidebarItem[];
     // Team-root only: show the "Create Project" action for this owner login.
     createProjectOwnerLogin?: string;
+    // Team-root only: route for the "Team Settings" action (present when the user can manage the team).
+    teamSettingsTo?: string;
 }
 
 interface DeriveInput {
@@ -61,16 +63,15 @@ const teamRootLevel = (selectedTeam: SelectableTeam, isAdmin: boolean): SidebarL
 
     // Team management is available to NSM admins and GitHub team owners (mirrors canManageTeam on the
     // backend and the TeamDomains/TeamDetail checks on the frontend).
-    if (isAdmin || team.isOwner) {
-        items.push({ key: 'team-settings', label: 'Team Settings', to: `/teams/${team.ownerId}`, drill: true, activeShape: `/teams/${team.ownerId}/*` });
-    }
+    const canManage = isAdmin || team.isOwner;
 
     return {
         key: `team-root-${team.ownerId}`,
         depth: 0,
-        title: team.login,
+        title: 'Projects',
         items,
         createProjectOwnerLogin: team.installed && team.capabilities.includes(Capability.CREATE_PROJECT) ? team.login : undefined,
+        teamSettingsTo: canManage ? `/teams/${team.ownerId}` : undefined,
     };
 };
 

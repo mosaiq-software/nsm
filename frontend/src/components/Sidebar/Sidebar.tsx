@@ -61,8 +61,9 @@ export default function Sidebar({ onCreateProject, onNavigate }: SidebarProps) {
     const renderLevel = (level: SidebarLevel) => {
         const team = selectedTeam?.team;
         const showInstallWarning = level.depth === 0 && team && !team.installed;
+        const showFooter = !!(level.createProjectOwnerLogin || level.teamSettingsTo);
         return (
-            <Stack gap={4} h="100%" style={{ overflowY: 'auto' }}>
+            <Box style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                 <Group gap={6} wrap="nowrap" mb={4} align="center">
                     {level.backTo && (
                         <ActionIcon variant="subtle" color="gray" aria-label="Back" onClick={() => go(level.backTo!)}>
@@ -74,37 +75,48 @@ export default function Sidebar({ onCreateProject, onNavigate }: SidebarProps) {
                     </Text>
                 </Group>
 
-                {showInstallWarning && (
-                    <Alert color="red" variant="light" icon={<MdOutlineWarningAmber />} p="xs">
-                        <Text size="xs">The NSM GitHub App is not installed on this team. Reinstall it to deploy projects.</Text>
-                    </Alert>
-                )}
+                <Stack gap={4} style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+                    {showInstallWarning && (
+                        <Alert color="red" variant="light" icon={<MdOutlineWarningAmber />} p="xs">
+                            <Text size="xs">The NSM GitHub App is not installed on this team. Reinstall it to deploy projects.</Text>
+                        </Alert>
+                    )}
 
-                {level.items.map((item) => {
-                    const active = pathMatchesShape(location.pathname, item.activeShape ?? item.to);
-                    return (
-                        <MantineNavLink
-                            key={item.key}
-                            label={item.label}
-                            active={active}
-                            onClick={() => go(item.to)}
-                            rightSection={item.statusProjectId ? <ProjectStatusChip projectId={item.statusProjectId} /> : undefined}
-                        />
-                    );
-                })}
+                    {level.items.map((item) => {
+                        const active = pathMatchesShape(location.pathname, item.activeShape ?? item.to);
+                        return (
+                            <MantineNavLink
+                                key={item.key}
+                                label={item.label}
+                                active={active}
+                                onClick={() => go(item.to)}
+                                rightSection={item.statusProjectId ? <ProjectStatusChip projectId={item.statusProjectId} /> : undefined}
+                            />
+                        );
+                    })}
 
-                {level.items.length === 0 && !showInstallWarning && (
-                    <Text size="xs" c="dimmed" px="xs" py={4}>
-                        No projects yet.
-                    </Text>
-                )}
+                    {level.items.length === 0 && !showInstallWarning && (
+                        <Text size="xs" c="dimmed" px="xs" py={4}>
+                            No projects yet.
+                        </Text>
+                    )}
+                </Stack>
 
-                {level.createProjectOwnerLogin && (
-                    <Button variant="subtle" size="xs" mt="xs" onClick={() => onCreateProject(level.createProjectOwnerLogin!)}>
-                        Create Project
-                    </Button>
+                {showFooter && (
+                    <Group grow gap="xs" mt="xs">
+                        {level.createProjectOwnerLogin && (
+                            <Button variant="light" size="xs" onClick={() => onCreateProject(level.createProjectOwnerLogin!)}>
+                                Create Project
+                            </Button>
+                        )}
+                        {level.teamSettingsTo && (
+                            <Button variant="light" size="xs" onClick={() => go(level.teamSettingsTo!)}>
+                                Team Settings
+                            </Button>
+                        )}
+                    </Group>
                 )}
-            </Stack>
+            </Box>
         );
     };
 
