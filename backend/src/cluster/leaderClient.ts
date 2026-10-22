@@ -68,6 +68,12 @@ export const forwardToLeader = async (req: Request, res: Response): Promise<void
         const url = `${base}${req.originalUrl}`;
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (req.headers['authorization']) headers['Authorization'] = String(req.headers['authorization']);
+        // Preserve GitHub webhook headers (event type, delivery id, HMAC signature): the webhook
+        // handler keys off X-GitHub-Event, and without it a forwarded delivery no-ops on the leader.
+        for (const [name, value] of Object.entries(req.headers)) {
+            if (value === undefined || Array.isArray(value)) continue;
+            if (name.startsWith('x-github-') || name.startsWith('x-hub-signature')) headers[name] = value;
+        }
         headers[CLUSTER_SECRET_HEADER] = config.clusterSecret;
         const method = req.method.toUpperCase();
         const hasBody = method !== 'GET' && method !== 'HEAD';

@@ -98,4 +98,28 @@ describe('forwardToLeader', () => {
         await forwardToLeader(req(), res);
         expect(res.statusCode).toBe(502);
     });
+
+    it('preserves GitHub webhook headers so the forwarded delivery is not a no-op on the leader', async () => {
+        leaderAddress.mockReturnValue('http://leader:1');
+        fetchMock.mockResolvedValue(fakeResponse({ status: 200, body: 'ok' }));
+        const webhookReq: any = {
+            originalUrl: '/github/webhook/p1/tok',
+            method: 'POST',
+            body: { ref: 'refs/heads/main' },
+            headers: {
+                authorization: 'Bearer t',
+                'x-github-event': 'push',
+                'x-github-delivery': 'abc-123',
+                'x-hub-signature-256': 'sha256=deadbeef',
+                host: 'nsm.mosaiq.dev',
+            },
+        };
+        await forwardToLeader(webhookReq, fakeRes());
+        const [, init] = fetchMock.mock.calls[0];
+        expect(init.headers['x-github-event']).toBe('push');
+        expect(init.headers['x-github-delivery']).toBe('abc-123');
+        expect(init.headers['x-hub-signature-256']).toBe('sha256=deadbeef');
+        // Hop-by-hop / non-GitHub headers are not blindly copied.
+        expect(init.headers['host']).toBeUndefined();
+    });
 });
