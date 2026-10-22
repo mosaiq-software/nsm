@@ -5,9 +5,43 @@ import { sudo } from '@/host/privilege';
 import { getAllDesiredDeploymentsModel } from '@/persistence/desiredDeploymentPersistence';
 import { getAllCertsModel } from '@/persistence/certPersistence';
 import { dashboardDomain, buildDashboardConf, DASHBOARD_CONF_NAME } from './dashboardIngress';
-import { areaLog } from '@/utils/log';
+import { getDefaultServerConf } from '@/utils/nginxUtils';
+import { areaLog, serializeError } from '@/utils/log';
 
 const nginxLog = areaLog('nginx');
+
+// Reserved conf name for the :443 catch-all default server (see getDefaultServerConf). Sorts before
+// project confs so it is unambiguous on load; the explicit default_server makes order irrelevant.
+const DEFAULT_CONF_NAME = '_nsm_default.conf';
+
+// A throwaway self-signed cert lives here purely so the catch-all :443 server can terminate TLS
+// before closing the connection. It is nsm-owned (written by this unprivileged daemon) and read by
+// the root nginx master; it is never presented for a real domain.
+const defaultTlsDir = `${config.persistentPath}/default-tls`;
+const defaultCertPath = `${defaultTlsDir}/fullchain.pem`;
+const defaultKeyPath = `${defaultTlsDir}/privkey.pem`;
+
+// Generate the catch-all's self-signed cert once (idempotent). No sudo: nsm owns defaultTlsDir and
+// openssl is a plain binary. nginx -t needs the cert to exist before the default conf is reloaded,
+// so this runs before the conf is written.
+const ensureDefaultTlsCert = async (): Promise<void> => {
+    try {
+        await fs.access(defaultCertPath);
+        await fs.access(defaultKeyPath);
+        return;
+    } catch {
+        /* needs generation */
+    }
+    try {
+        await fs.mkdir(defaultTlsDir, { recursive: true });
+        const cmd = `openssl req -x509 -newkey rsa:2048 -nodes -keyout ${defaultKeyPath} -out ${defaultCertPath} -days 3650 -subj "/CN=nsm-default" -batch`;
+        const { out, code } = await execSafe(cmd, 15000);
+        if (code !== 0) nginxLog.error({ action: 'default_tls_gen_failed', out }, 'failed to generate default catch-all TLS cert');
+        else nginxLog.info({ action: 'default_tls_generated' }, 'generated self-signed default catch-all TLS cert');
+    } catch (e) {
+        nginxLog.error({ action: 'default_tls_gen_failed', err: serializeError(e) }, 'failed to generate default catch-all TLS cert');
+    }
+};
 
 // The leader is the single TLS ingress, so only the leader renders nginx. It renders one conf per
 // project (from its authoritative desired-deployment set); each conf's proxy_pass targets a
@@ -35,6 +69,8 @@ const buildHttpChallengeConf = (domains: string[]): string => {
 
 export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
     await fs.mkdir(config.nginxConfDir, { recursive: true });
+    // Ensure the catch-all's self-signed cert exists before its conf is written so `nginx -t` passes.
+    if (config.production) await ensureDefaultTlsCert();
     const deployments = await getAllDesiredDeploymentsModel();
 
     // Domains with an issued cert. A vhost's SSL block references live/<domain>/fullchain.pem, so
@@ -80,6 +116,10 @@ export const renderAllNginx = async (): Promise<{ changed: boolean }> => {
     if (dashDomain && certDomains.has(dashDomain)) {
         desiredFiles.set(DASHBOARD_CONF_NAME, buildDashboardConf(dashDomain));
     }
+
+    // Always render the :443 catch-all so a domain without its own vhost gets a closed connection
+    // rather than falling through to a random project's site.
+    desiredFiles.set(DEFAULT_CONF_NAME, getDefaultServerConf(defaultCertPath, defaultKeyPath));
 
     let changed = false;
 

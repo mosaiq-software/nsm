@@ -20,11 +20,23 @@ const cert = (domain: string) => ({ domain, notAfter: Date.now() + 1e10 });
 
 beforeEach(async () => {
     config.production = true;
-    mockExec.mockClear();
     mockDeps.mockReset();
     mockCerts.mockReset();
     mockCerts.mockResolvedValue([]);
     await fsp.rm(config.nginxConfDir, { recursive: true, force: true });
+    await fsp.rm(`${config.persistentPath}/default-tls`, { recursive: true, force: true });
+    // Default exec mock: succeed, and when the catch-all's openssl cert command runs, actually write
+    // the cert/key files so ensureDefaultTlsCert is idempotent across renders (as it is in prod).
+    mockExec.mockReset();
+    mockExec.mockImplementation(async (cmd: string) => {
+        const m = /-keyout (\S+) -out (\S+)/.exec(cmd);
+        if (m) {
+            await fsp.mkdir(m[1].slice(0, m[1].lastIndexOf('/')), { recursive: true });
+            await fsp.writeFile(m[1], 'key');
+            await fsp.writeFile(m[2], 'cert');
+        }
+        return { out: '', code: 0 };
+    });
 });
 afterEach(() => {
     config.production = false;
@@ -114,6 +126,22 @@ describe('renderAllNginx', () => {
         expect(challenge).toContain('server_name x.com;');
         // The real vhost is still deferred until the cert exists.
         await expect(fsp.readFile(`${config.nginxConfDir}/c1.conf`, 'utf-8')).rejects.toBeTruthy();
+    });
+
+    it('always writes the :443 catch-all default server, even with zero deployments', async () => {
+        mockDeps.mockResolvedValue([]);
+        await renderAllNginx();
+        const defaultConf = await fsp.readFile(`${config.nginxConfDir}/_nsm_default.conf`, 'utf-8');
+        expect(defaultConf).toContain('listen 443 ssl default_server;');
+        expect(defaultConf).toContain('server_name _;');
+        expect(defaultConf).toContain('return 444;');
+    });
+
+    it('never sweeps the catch-all as a stale conf', async () => {
+        mockDeps.mockResolvedValue([dep('p1', 'server p1')]);
+        await renderAllNginx();
+        await renderAllNginx();
+        await expect(fsp.readFile(`${config.nginxConfDir}/_nsm_default.conf`, 'utf-8')).resolves.toContain('default_server');
     });
 
     it('strips legacy certbot-installer file references from frozen confs', async () => {

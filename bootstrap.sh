@@ -53,7 +53,7 @@ install_deps() {
     log "Installing system dependencies..."
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y
-    apt-get install -y curl git nginx certbot python3-certbot-nginx netcat-openbsd jq rsync
+    apt-get install -y curl git nginx certbot python3-certbot-nginx python3-certbot-dns-cloudflare netcat-openbsd jq rsync
     # Force NodeSource Node 22 when node is missing or older than 22. This also replaces any
     # distro-packaged npm (which conflicts with a newer node and breaks with "Cannot find module 'semver'").
     local node_major=0
@@ -207,6 +207,9 @@ install_services() {
         if ! grep -q "include /etc/nsm/nginx" /etc/nginx/nginx.conf; then
             sed -i "/http {/a \    include /etc/nsm/nginx/*.conf;" /etc/nginx/nginx.conf
         fi
+        # Drop the distro default site so it can't win the :80 default_server or serve the stock
+        # welcome page; the daemon renders its own catch-all for unmatched hostnames.
+        rm -f /etc/nginx/sites-enabled/default
         nginx -t && systemctl reload nginx || true
     fi
 }
